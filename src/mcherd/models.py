@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 
+# meshcore_py contact type values (CONTACT_TYPENAMES = ["NONE","CLI","REP","ROOM","SENS"])
+CONTACT_TYPE_CLI       = 1
+CONTACT_TYPE_REPEATER  = 2
+CONTACT_TYPE_ROOM      = 3
+
 
 class NodeState(Enum):
     UNKNOWN     = "unknown"      # never contacted
@@ -38,6 +43,7 @@ class Node:
     last_connected: datetime | None = None
     auth_required: bool = False
     auth_cached: bool = False  # True once we have authenticated this session
+    next_sync_at: datetime | None = None  # wall-clock time for next scheduled sync
 
 
 @dataclass

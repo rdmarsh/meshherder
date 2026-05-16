@@ -21,7 +21,7 @@ class GatewayConfig:
 @dataclass
 class SchedulerConfig:
     inter_node_delay_seconds: int = 30
-    sync_interval_minutes: int = 60
+    sync_interval_days: float = 1.0
 
 
 @dataclass
