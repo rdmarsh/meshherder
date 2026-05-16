@@ -1,0 +1,357 @@
+"""SQLite persistence layer via aiosqlite."""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from pathlib import Path
+
+import aiosqlite
+
+from mcherd.models import (
+    Node,
+    NodeFact,
+    NodeState,
+    OperationRecord,
+    OperationStatus,
+    SettingPolicy,
+    SettingRecord,
+)
+
+log = logging.getLogger(__name__)
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS nodes (
+    pubkey          TEXT PRIMARY KEY,
+    name            TEXT NOT NULL DEFAULT '',
+    node_group      TEXT,
+    state           TEXT NOT NULL DEFAULT 'unknown',
+    last_seen       TEXT,
+    last_connected  TEXT,
+    auth_required   INTEGER NOT NULL DEFAULT 0,
+    auth_cached     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_pubkey     TEXT NOT NULL,
+    key             TEXT NOT NULL,
+    desired         TEXT,
+    policy          TEXT NOT NULL DEFAULT 'enforce',
+    poll_hours      INTEGER NOT NULL DEFAULT 24,
+    observed        TEXT,
+    last_checked    TEXT,
+    last_set        TEXT,
+    drift           INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(node_pubkey, key),
+    FOREIGN KEY (node_pubkey) REFERENCES nodes(pubkey)
+);
+
+CREATE TABLE IF NOT EXISTS node_facts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_pubkey     TEXT NOT NULL,
+    key             TEXT NOT NULL,
+    value           TEXT,
+    collected_at    TEXT NOT NULL,
+    UNIQUE(node_pubkey, key),
+    FOREIGN KEY (node_pubkey) REFERENCES nodes(pubkey)
+);
+
+CREATE TABLE IF NOT EXISTS operations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_pubkey     TEXT NOT NULL,
+    command         TEXT NOT NULL,
+    every_hours     INTEGER NOT NULL DEFAULT 24,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    queued_at       TEXT NOT NULL,
+    run_at          TEXT,
+    response        TEXT,
+    FOREIGN KEY (node_pubkey) REFERENCES nodes(pubkey)
+);
+
+CREATE TABLE IF NOT EXISTS logs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_pubkey     TEXT,
+    timestamp       TEXT NOT NULL,
+    level           TEXT NOT NULL,
+    message         TEXT NOT NULL
+);
+"""
+
+
+class Database:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._db: aiosqlite.Connection | None = None
+
+    async def open(self) -> None:
+        self._db = await aiosqlite.connect(self._path)
+        self._db.row_factory = aiosqlite.Row
+        await self._db.executescript(_SCHEMA)
+        await self._db.commit()
+        log.debug("database opened: %s", self._path)
+
+    async def close(self) -> None:
+        if self._db:
+            await self._db.close()
+            self._db = None
+            log.debug("database closed")
+
+    def _db_required(self) -> aiosqlite.Connection:
+        if self._db is None:
+            raise RuntimeError("database not open — call open() first")
+        return self._db
+
+    # ------------------------------------------------------------------
+    # nodes
+    # ------------------------------------------------------------------
+
+    async def upsert_node(self, node: Node) -> None:
+        db = self._db_required()
+        await db.execute(
+            """
+            INSERT INTO nodes (pubkey, name, node_group, state, last_seen, last_connected,
+                               auth_required, auth_cached)
+            VALUES (:pubkey, :name, :group, :state, :last_seen, :last_connected,
+                    :auth_required, :auth_cached)
+            ON CONFLICT(pubkey) DO UPDATE SET
+                name           = excluded.name,
+                node_group     = excluded.node_group,
+                state          = excluded.state,
+                last_seen      = excluded.last_seen,
+                last_connected = excluded.last_connected,
+                auth_required  = excluded.auth_required,
+                auth_cached    = excluded.auth_cached
+            """,
+            {
+                "pubkey":         node.pubkey,
+                "name":           node.name,
+                "group":          node.group,
+                "state":          node.state.value,
+                "last_seen":      _dt(node.last_seen),
+                "last_connected": _dt(node.last_connected),
+                "auth_required":  int(node.auth_required),
+                "auth_cached":    int(node.auth_cached),
+            },
+        )
+        await db.commit()
+
+    async def get_node(self, pubkey: str) -> Node | None:
+        db = self._db_required()
+        async with db.execute("SELECT * FROM nodes WHERE pubkey = ?", (pubkey,)) as cur:
+            row = await cur.fetchone()
+        return _row_to_node(row) if row else None
+
+    async def get_all_nodes(self) -> list[Node]:
+        db = self._db_required()
+        async with db.execute("SELECT * FROM nodes ORDER BY name") as cur:
+            rows = await cur.fetchall()
+        return [_row_to_node(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # settings
+    # ------------------------------------------------------------------
+
+    async def upsert_setting(self, setting: SettingRecord) -> None:
+        db = self._db_required()
+        await db.execute(
+            """
+            INSERT INTO settings (node_pubkey, key, desired, policy, poll_hours,
+                                  observed, last_checked, last_set, drift)
+            VALUES (:node_pubkey, :key, :desired, :policy, :poll_hours,
+                    :observed, :last_checked, :last_set, :drift)
+            ON CONFLICT(node_pubkey, key) DO UPDATE SET
+                desired     = excluded.desired,
+                policy      = excluded.policy,
+                poll_hours  = excluded.poll_hours,
+                observed    = excluded.observed,
+                last_checked= excluded.last_checked,
+                last_set    = excluded.last_set,
+                drift       = excluded.drift
+            """,
+            {
+                "node_pubkey":  setting.node_pubkey,
+                "key":          setting.key,
+                "desired":      setting.desired,
+                "policy":       setting.policy.value,
+                "poll_hours":   setting.poll_hours,
+                "observed":     setting.observed,
+                "last_checked": _dt(setting.last_checked),
+                "last_set":     _dt(setting.last_set),
+                "drift":        int(setting.drift),
+            },
+        )
+        await db.commit()
+
+    async def get_settings(self, node_pubkey: str) -> list[SettingRecord]:
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM settings WHERE node_pubkey = ? ORDER BY key",
+            (node_pubkey,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_setting(r) for r in rows]
+
+    async def get_drifted_settings(self) -> list[SettingRecord]:
+        """Return all settings where observed != desired (drift=1)."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM settings WHERE drift = 1 ORDER BY node_pubkey, key"
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_setting(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # facts (read-only CMDB inventory)
+    # ------------------------------------------------------------------
+
+    async def upsert_fact(self, fact: NodeFact) -> None:
+        db = self._db_required()
+        await db.execute(
+            """
+            INSERT INTO node_facts (node_pubkey, key, value, collected_at)
+            VALUES (:node_pubkey, :key, :value, :collected_at)
+            ON CONFLICT(node_pubkey, key) DO UPDATE SET
+                value        = excluded.value,
+                collected_at = excluded.collected_at
+            """,
+            {
+                "node_pubkey":   fact.node_pubkey,
+                "key":           fact.key,
+                "value":         fact.value,
+                "collected_at":  _dt(fact.collected_at),
+            },
+        )
+        await db.commit()
+
+    async def get_facts(self, node_pubkey: str) -> dict[str, str | None]:
+        """Return all facts for a node as a plain dict."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT key, value FROM node_facts WHERE node_pubkey = ?",
+            (node_pubkey,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return {r["key"]: r["value"] for r in rows}
+
+    # ------------------------------------------------------------------
+    # operations
+    # ------------------------------------------------------------------
+
+    async def upsert_operation(self, op: OperationRecord) -> None:
+        db = self._db_required()
+        await db.execute(
+            """
+            INSERT INTO operations (node_pubkey, command, every_hours, status, queued_at, run_at, response)
+            VALUES (:node_pubkey, :command, :every_hours, :status, :queued_at, :run_at, :response)
+            ON CONFLICT DO NOTHING
+            """,
+            {
+                "node_pubkey": op.node_pubkey,
+                "command":     op.command,
+                "every_hours": op.every_hours,
+                "status":      op.status.value,
+                "queued_at":   _dt(op.queued_at),
+                "run_at":      _dt(op.run_at),
+                "response":    op.response,
+            },
+        )
+        await db.commit()
+
+    async def get_pending_operations(self, node_pubkey: str) -> list[OperationRecord]:
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM operations WHERE node_pubkey = ? AND status = 'pending' ORDER BY queued_at",
+            (node_pubkey,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_operation(r) for r in rows]
+
+    async def update_operation(self, op: OperationRecord) -> None:
+        db = self._db_required()
+        await db.execute(
+            "UPDATE operations SET status=?, run_at=?, response=? WHERE id=?",
+            (op.status.value, _dt(op.run_at), op.response, getattr(op, "id", None)),
+        )
+        await db.commit()
+
+    # ------------------------------------------------------------------
+    # logs
+    # ------------------------------------------------------------------
+
+    async def write_log(self, node_pubkey: str | None, level: str, message: str) -> None:
+        db = self._db_required()
+        await db.execute(
+            "INSERT INTO logs (node_pubkey, timestamp, level, message) VALUES (?, ?, ?, ?)",
+            (node_pubkey, _dt(datetime.now(UTC)), level, message),
+        )
+        await db.commit()
+
+    async def get_logs(
+        self, node_pubkey: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        db = self._db_required()
+        if node_pubkey:
+            async with db.execute(
+                "SELECT * FROM logs WHERE node_pubkey = ? ORDER BY timestamp DESC LIMIT ?",
+                (node_pubkey, limit),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT * FROM logs ORDER BY timestamp DESC LIMIT ?", (limit,)
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+# ------------------------------------------------------------------
+# helpers
+# ------------------------------------------------------------------
+
+def _dt(d: datetime | None) -> str | None:
+    return d.isoformat() if d else None
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    return datetime.fromisoformat(s) if s else None
+
+
+def _row_to_node(row: aiosqlite.Row) -> Node:
+    return Node(
+        pubkey=row["pubkey"],
+        name=row["name"],
+        group=row["node_group"],
+        state=NodeState(row["state"]),
+        last_seen=_parse_dt(row["last_seen"]),
+        last_connected=_parse_dt(row["last_connected"]),
+        auth_required=bool(row["auth_required"]),
+        auth_cached=bool(row["auth_cached"]),
+    )
+
+
+def _row_to_setting(row: aiosqlite.Row) -> SettingRecord:
+    return SettingRecord(
+        node_pubkey=row["node_pubkey"],
+        key=row["key"],
+        desired=row["desired"],
+        policy=SettingPolicy(row["policy"]),
+        poll_hours=row["poll_hours"],
+        observed=row["observed"],
+        last_checked=_parse_dt(row["last_checked"]),
+        last_set=_parse_dt(row["last_set"]),
+        drift=bool(row["drift"]),
+    )
+
+
+def _row_to_operation(row: aiosqlite.Row) -> OperationRecord:
+    op = OperationRecord(
+        node_pubkey=row["node_pubkey"],
+        command=row["command"],
+        every_hours=row["every_hours"],
+        status=OperationStatus(row["status"]),
+        queued_at=_parse_dt(row["queued_at"]) or datetime.now(UTC),
+        run_at=_parse_dt(row["run_at"]),
+        response=row["response"],
+    )
+    return op
