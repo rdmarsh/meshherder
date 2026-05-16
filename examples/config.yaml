@@ -1,0 +1,78 @@
+# mcherd configuration example
+# Copy to config.yaml and edit for your setup.
+
+gateway:
+  device: /dev/meshcore0   # USB serial port of the gateway node
+  baud: 115200
+  # name: mcherd-gw        # optional: set/enforce this name on the gateway node
+
+scheduler:
+  sync_interval_minutes: 60     # how often to run a full cycle
+  inter_node_delay_seconds: 30  # pause between nodes to avoid hammering the mesh
+
+db_path: /var/lib/mcherd/mcherd.db
+socket_path: /run/mcherd/mcherd.sock
+secrets_file: /etc/mcherd/secrets.yaml
+
+# Facts collected from every node each cycle (read-only CMDB data).
+# 'ver' and 'board' are special — they use the bare command, not 'get <key>'.
+facts:
+  - ver
+  - board
+  - role
+  - repeat
+  - owner.name
+
+# Groups: shared settings and policies for sets of nodes.
+groups:
+  - name: alice-nodes
+    default_policy: audit       # read-only by default for Alice's nodes
+    settings:
+      owner.info: "Alice — Managed by mcherd"
+      powersaving: "on"
+
+  - name: bob-nodes
+    default_policy: enforce     # fully managed for Bob's nodes
+    settings:
+      owner.info: "Bob — Managed by mcherd"
+      powersaving: "on"
+    setting_overrides:
+      # Bob asked us not to touch path.hash.mode
+      path.hash.mode:
+        policy: skip
+
+# Nodes: individual node configuration.
+# pubkey_prefix: at least 8 hex characters of the node's public key.
+# Run 'mch nodes' after a cycle to see full pubkeys.
+nodes:
+  - pubkey_prefix: aabbccdd
+    name: Alice-Node-1
+    group: alice-nodes
+
+  - pubkey_prefix: eeff0011
+    name: Alice-Node-2
+    group: alice-nodes
+    # Per-node override: enforce tx on this node even though alice-nodes audits by default
+    settings:
+      tx:
+        desired: "high"
+        policy: enforce
+
+  - pubkey_prefix: 11223344
+    name: Bob-Node-1
+    group: bob-nodes
+
+  - pubkey_prefix: 55667788
+    name: Bob-Node-2
+    group: bob-nodes
+
+  - pubkey_prefix: 99aabbcc
+    name: Bob-Node-3
+    group: bob-nodes
+    # Per-node override: skip powersaving on this node (it's solar powered)
+    settings:
+      powersaving:
+        policy: skip
+    operations:
+      - command: clock sync
+        every_hours: 6

@@ -1,0 +1,278 @@
+"""
+mch — control CLI for the mcherd daemon.
+
+Talks to the daemon over its Unix socket.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import click
+
+
+DEFAULT_SOCKET = "/run/mcherd.sock"
+
+
+async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
+    try:
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+    except (FileNotFoundError, ConnectionRefusedError):
+        click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
+        click.echo("  is mcherd running?  try: mcherd --help", err=True)
+        raise SystemExit(1)
+
+    writer.write((json.dumps(cmd) + "\n").encode())
+    await writer.drain()
+    raw = await asyncio.wait_for(reader.readline(), timeout=30)
+    writer.close()
+    return json.loads(raw)
+
+
+def _rpc(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
+    return asyncio.run(_request(socket_path, cmd))
+
+
+def _check(resp: dict[str, Any]) -> Any:
+    if not resp.get("ok"):
+        click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
+        raise SystemExit(1)
+    return resp.get("data")
+
+
+# ---------------------------------------------------------------------------
+# group
+# ---------------------------------------------------------------------------
+
+@click.group()
+@click.option(
+    "--socket", "-s",
+    default=DEFAULT_SOCKET,
+    envvar="MCHERD_SOCKET",
+    help="Path to daemon Unix socket",
+    show_default=True,
+)
+@click.pass_context
+def cli(ctx: click.Context, socket: str) -> None:
+    """mch — MeshCore node management CLI"""
+    ctx.ensure_object(dict)
+    ctx.obj["socket"] = socket
+
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.pass_context
+def status(ctx: click.Context) -> None:
+    """Show daemon and fleet status."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "status"})
+    data = _check(resp)
+
+    nodes = data.get("nodes", [])
+    drifted = data.get("drifted_settings", 0)
+
+    click.echo(f"nodes: {len(nodes)}  drifted settings: {drifted}")
+    click.echo("")
+
+    if not nodes:
+        click.echo("  (no nodes in database yet)")
+        return
+
+    fmt = "  {:<16}  {:<22}  {}"
+    click.echo(fmt.format("STATE", "NAME", "PUBKEY"))
+    click.echo(fmt.format("-----", "----", "------"))
+    for n in nodes:
+        click.echo(fmt.format(n["state"], n["name"][:22], n["pubkey"][:16] + "…"))
+
+
+# ---------------------------------------------------------------------------
+# nodes
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.pass_context
+def nodes(ctx: click.Context) -> None:
+    """List all known nodes."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "nodes"})
+    data = _check(resp)
+
+    if not data:
+        click.echo("no nodes in database")
+        return
+
+    fmt = "  {:<12}  {:<22}  {:<10}  {:<16}  {}"
+    click.echo(fmt.format("STATE", "NAME", "GROUP", "LAST SEEN", "PUBKEY"))
+    click.echo(fmt.format("-----", "----", "-----", "---------", "------"))
+    for n in data:
+        last = (n.get("last_seen") or "never")[:16]
+        group = (n.get("group") or "—")[:10]
+        click.echo(fmt.format(n["state"], n["name"][:22], group, last, n["pubkey"][:16] + "…"))
+
+
+# ---------------------------------------------------------------------------
+# node
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("pubkey")
+@click.pass_context
+def node(ctx: click.Context, pubkey: str) -> None:
+    """Show details for a single node (partial pubkey match ok)."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
+    data = _check(resp)
+
+    click.echo(f"name:       {data['name']}")
+    click.echo(f"pubkey:     {data['pubkey']}")
+    click.echo(f"group:      {data.get('group') or '—'}")
+    click.echo(f"state:      {data['state']}")
+    click.echo(f"last seen:  {data.get('last_seen') or 'never'}")
+    click.echo(f"last conn:  {data.get('last_connected') or 'never'}")
+    click.echo(f"auth cached:{data.get('auth_cached', False)}")
+    click.echo("")
+
+    facts = data.get("facts", {})
+    if facts:
+        click.echo("facts:")
+        for k, v in sorted(facts.items()):
+            click.echo(f"  {k}: {v}")
+        click.echo("")
+
+    settings = data.get("settings", [])
+    if settings:
+        click.echo("settings:")
+        sfmt = "  {:<2}  {:<22}  {:<14}  {:<14}  {}"
+        click.echo(sfmt.format("!", "KEY", "DESIRED", "OBSERVED", "POLICY"))
+        for s in settings:
+            drift_flag = "*" if s["drift"] else " "
+            click.echo(sfmt.format(
+                drift_flag,
+                s["key"][:22],
+                (s.get("desired") or "—")[:14],
+                (s.get("observed") or "—")[:14],
+                s["policy"],
+            ))
+        click.echo("")
+
+    logs = data.get("logs", [])
+    if logs:
+        click.echo("recent logs:")
+        for entry in logs[:10]:
+            ts = (entry.get("timestamp") or "")[:19]
+            click.echo(f"  [{entry['level']:<7}] {ts}  {entry['message']}")
+
+
+# ---------------------------------------------------------------------------
+# sync
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.pass_context
+def sync(ctx: click.Context) -> None:
+    """Trigger an immediate sync cycle."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "sync"})
+    data = _check(resp)
+    click.echo(data)
+
+
+# ---------------------------------------------------------------------------
+# drift
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.pass_context
+def drift(ctx: click.Context) -> None:
+    """Show all settings currently drifted from desired."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "drift"})
+    data = _check(resp)
+
+    if not data:
+        click.echo("no drift detected")
+        return
+
+    fmt = "  {:<16}  {:<22}  {:<14}  {:<14}  {}"
+    click.echo(fmt.format("NODE", "KEY", "DESIRED", "OBSERVED", "POLICY"))
+    click.echo(fmt.format("----", "---", "-------", "--------", "------"))
+    for s in data:
+        click.echo(fmt.format(
+            s["node_pubkey"][:16],
+            s["key"][:22],
+            (s.get("desired") or "—")[:14],
+            (s.get("observed") or "—")[:14],
+            s["policy"],
+        ))
+
+
+# ---------------------------------------------------------------------------
+# logs
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("pubkey", required=False)
+@click.option("--limit", "-n", default=50, show_default=True, help="Max log lines")
+@click.pass_context
+def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
+    """Show daemon logs (optionally filtered to a node pubkey)."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "logs", "pubkey": pubkey, "limit": limit})
+    data = _check(resp)
+
+    if not data:
+        click.echo("no logs")
+        return
+
+    for entry in data:
+        ts = (entry.get("timestamp") or "")[:19]
+        node_label = f" [{entry['node_pubkey'][:12]}]" if entry.get("node_pubkey") else ""
+        click.echo(f"{ts}  {entry['level']:<7}{node_label}  {entry['message']}")
+
+
+# ---------------------------------------------------------------------------
+# start / stop (via systemd)
+# ---------------------------------------------------------------------------
+
+@cli.command()
+def start() -> None:
+    """Start the mcherd daemon via systemd."""
+    result = subprocess.run(["systemctl", "start", "mcherd"], capture_output=True, text=True)
+    if result.returncode != 0:
+        click.echo(result.stderr.strip() or "systemctl start failed", err=True)
+        raise SystemExit(result.returncode)
+    click.echo("mcherd started")
+
+
+@cli.command()
+def stop() -> None:
+    """Stop the mcherd daemon via systemd."""
+    result = subprocess.run(["systemctl", "stop", "mcherd"], capture_output=True, text=True)
+    if result.returncode != 0:
+        click.echo(result.stderr.strip() or "systemctl stop failed", err=True)
+        raise SystemExit(result.returncode)
+    click.echo("mcherd stopped")
+
+
+@cli.command()
+def restart() -> None:
+    """Restart the mcherd daemon via systemd."""
+    result = subprocess.run(["systemctl", "restart", "mcherd"], capture_output=True, text=True)
+    if result.returncode != 0:
+        click.echo(result.stderr.strip() or "systemctl restart failed", err=True)
+        raise SystemExit(result.returncode)
+    click.echo("mcherd restarted")
+
+
+# ---------------------------------------------------------------------------
+# entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    cli()
+
+
+if __name__ == "__main__":
+    main()

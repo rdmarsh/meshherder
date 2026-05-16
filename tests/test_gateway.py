@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -34,12 +35,17 @@ async def test_connect_sets_info():
         EventType.SELF_INFO,
         {"name": "TestGW", "radio_freq": 915.0, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5},
     ))
+    # receive loop must not spin on an unmocked dispatcher — exit cleanly via CancelledError
+    fake_mc.dispatcher.wait_for_event = AsyncMock(side_effect=asyncio.CancelledError)
 
     with patch("mcherd.gateway.MeshCore.create_serial", AsyncMock(return_value=fake_mc)):
         await gw.connect()
 
-    assert gw.info["name"] == "TestGW"
-    assert gw.connected
+    try:
+        assert gw.info["name"] == "TestGW"
+        assert gw.connected
+    finally:
+        await gw.disconnect()
 
 
 @pytest.mark.asyncio
@@ -63,11 +69,15 @@ async def test_connect_sets_name_when_configured():
         {"name": "OldName", "radio_freq": 915.0, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5},
     ))
     fake_mc.commands.set_name = AsyncMock(return_value=make_event(EventType.OK, {}))
+    fake_mc.dispatcher.wait_for_event = AsyncMock(side_effect=asyncio.CancelledError)
 
     with patch("mcherd.gateway.MeshCore.create_serial", AsyncMock(return_value=fake_mc)):
         await gw.connect()
 
-    fake_mc.commands.set_name.assert_awaited_once_with("MyGateway")
+    try:
+        fake_mc.commands.set_name.assert_awaited_once_with("MyGateway")
+    finally:
+        await gw.disconnect()
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +90,11 @@ def make_connected_gateway(fake_mc: MagicMock) -> Gateway:
     gw._mc = fake_mc
     gw.info = {"name": "TestGW"}
     return gw
+
+
+def start_receive_loop(gw: Gateway) -> None:
+    """Start the background receive loop for tests that exercise send_command."""
+    gw._receive_task = asyncio.create_task(gw._receive_loop(), name="gateway-receive")
 
 
 def make_contact(prefix: str = "aabbcc112233") -> dict:
@@ -95,19 +110,25 @@ async def test_send_command_returns_response_text():
     fake_mc.commands.send_cmd = AsyncMock(return_value=make_event(
         EventType.MSG_SENT, {"suggested_timeout": 2000}
     ))
-    fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=make_event(
-        EventType.MESSAGES_WAITING, {}
-    ))
+    # deliver MESSAGES_WAITING once, then exit the loop cleanly
+    fake_mc.dispatcher.wait_for_event = AsyncMock(side_effect=[
+        make_event(EventType.MESSAGES_WAITING, {}),
+        asyncio.CancelledError,
+    ])
     fake_mc.commands.get_msg = AsyncMock(side_effect=[
         make_event(EventType.CONTACT_MSG_RECV,
                    {"pubkey_prefix": "aabbcc112233", "text": "> v1.14.1"},
                    pubkey_prefix="aabbcc112233"),
+        make_event(EventType.NO_MORE_MSGS, {}),
     ])
 
-    result = await gw.send_command(contact, "ver")
-
-    assert result.success is True
-    assert result.text == "v1.14.1"   # "> " prefix stripped
+    start_receive_loop(gw)
+    try:
+        result = await gw.send_command(contact, "ver")
+        assert result.success is True
+        assert result.text == "v1.14.1"   # "> " prefix stripped
+    finally:
+        await gw.disconnect()
 
 
 @pytest.mark.asyncio
@@ -120,9 +141,10 @@ async def test_send_command_skips_other_nodes_messages():
     fake_mc.commands.send_cmd = AsyncMock(return_value=make_event(
         EventType.MSG_SENT, {"suggested_timeout": 2000}
     ))
-    fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=make_event(
-        EventType.MESSAGES_WAITING, {}
-    ))
+    fake_mc.dispatcher.wait_for_event = AsyncMock(side_effect=[
+        make_event(EventType.MESSAGES_WAITING, {}),
+        asyncio.CancelledError,
+    ])
     fake_mc.commands.get_msg = AsyncMock(side_effect=[
         # first msg from a different node
         make_event(EventType.CONTACT_MSG_RECV,
@@ -132,12 +154,16 @@ async def test_send_command_skips_other_nodes_messages():
         make_event(EventType.CONTACT_MSG_RECV,
                    {"pubkey_prefix": "aabbcc112233", "text": "> repeater"},
                    pubkey_prefix="aabbcc112233"),
+        make_event(EventType.NO_MORE_MSGS, {}),
     ])
 
-    result = await gw.send_command(contact, "get role")
-
-    assert result.success is True
-    assert result.text == "repeater"
+    start_receive_loop(gw)
+    try:
+        result = await gw.send_command(contact, "get role")
+        assert result.success is True
+        assert result.text == "repeater"
+    finally:
+        await gw.disconnect()
 
 
 @pytest.mark.asyncio
@@ -149,13 +175,21 @@ async def test_send_command_timeout():
     fake_mc.commands.send_cmd = AsyncMock(return_value=make_event(
         EventType.MSG_SENT, {"suggested_timeout": 2000}
     ))
-    # MESSAGES_WAITING never arrives
-    fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
+    # MESSAGES_WAITING never arrives. Must use a real sleep so the receive loop
+    # actually yields to the event loop — AsyncMock(return_value=None) resolves
+    # synchronously and starves asyncio.wait_for's timeout callback.
+    async def _no_messages(*_a, **_kw):
+        await asyncio.sleep(0.05)
+        return None
+    fake_mc.dispatcher.wait_for_event = _no_messages
 
-    result = await gw.send_command(contact, "ver", timeout=1.0)
-
-    assert result.success is False
-    assert "timeout" in result.error
+    start_receive_loop(gw)
+    try:
+        result = await gw.send_command(contact, "ver", timeout=0.3)
+        assert result.success is False
+        assert "timeout" in result.error
+    finally:
+        await gw.disconnect()
 
 
 @pytest.mark.asyncio

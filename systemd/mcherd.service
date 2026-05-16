@@ -1,0 +1,38 @@
+[Unit]
+Description=mcherd — MeshCore node management daemon
+After=network.target
+# Adjust if your gateway USB device has a udev rule that takes a moment
+After=dev-meshcore0.device
+Wants=dev-meshcore0.device
+
+[Service]
+Type=simple
+User=mcherd
+Group=mcherd
+# Add user to 'dialout' group for serial port access
+SupplementaryGroups=dialout
+
+WorkingDirectory=/etc/mcherd
+ExecStart=/usr/local/bin/mcherd --config /etc/mcherd/config.yaml
+Restart=on-failure
+RestartSec=10
+
+# Limit what the process can do
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mcherd /run/mcherd.sock
+# Allow access to the serial port
+DeviceAllow=/dev/meshcore0 rw
+DeviceAllow=char-tty rw
+
+# Socket file location must match config.yaml socket_path
+RuntimeDirectory=mcherd
+RuntimeDirectoryMode=0755
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcherd
+
+[Install]
+WantedBy=multi-user.target
