@@ -7,7 +7,7 @@ gateway:
   # name: mcherd-gw        # optional: set/enforce this name on the gateway node
 
 scheduler:
-  sync_interval_minutes: 60     # how often to run a full cycle
+  sync_interval_days: 1         # how often each node is synced (spread randomly across this window)
   inter_node_delay_seconds: 30  # pause between nodes to avoid hammering the mesh
 
 db_path: /var/lib/mcherd/mcherd.db
