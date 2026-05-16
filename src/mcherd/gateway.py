@@ -3,6 +3,18 @@ Gateway — manages the single meshcore_py connection to the locally-attached US
 
 The gateway is the management entry point onto the mesh. All communication with
 managed nodes goes through here. One instance per daemon process.
+
+Message flow
+------------
+The firmware queues replies; MESSAGES_WAITING is the push signal that the queue
+is non-empty. A background _receive_loop drains the queue whenever that fires,
+routing each message to:
+  • a pending command Future  (keyed by pubkey_prefix)
+  • the dm_callback           (anything else — incoming DMs, unsolicited messages)
+
+send_command() registers a Future before sending, then awaits it — it never
+calls get_msg() directly. This means DMs received while a command is in flight
+are still delivered to dm_callback rather than silently discarded.
 """
 
 from __future__ import annotations
@@ -10,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from meshcore import MeshCore
 from meshcore.events import EventType
@@ -33,22 +45,20 @@ class GatewayError(Exception):
 
 class Gateway:
     """
-    Wraps the meshcore_py connection.  All send_cmd calls go through
-    send_command(), which implements the correct flow:
+    Wraps the meshcore_py connection.
 
-        send_cmd()
-            → wait for MESSAGES_WAITING
-            → get_msg() loop until NO_MORE_MSGS
-            → return matching CONTACT_MSG_RECV text
-
-    Only one command is in flight at a time (_cmd_lock) because get_msg()
-    drains the queue positionally — pipelining would mix up responses.
+    send_command() uses a background receive loop rather than a per-call
+    get_msg() drain. Only one send_cmd is in flight at a time (_send_lock)
+    but the receive loop always runs, so DMs are never lost to a command drain.
     """
 
     def __init__(self, config: GatewayConfig) -> None:
         self._config = config
         self._mc: MeshCore | None = None
-        self._cmd_lock = asyncio.Lock()
+        self._send_lock = asyncio.Lock()   # one send_cmd in flight at a time
+        self._pending: dict[str, asyncio.Future[str]] = {}  # pubkey_prefix → response future
+        self._dm_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+        self._receive_task: asyncio.Task | None = None
         self.info: dict[str, Any] = {}  # populated by connect(); gateway's own SELF_INFO
 
     # ------------------------------------------------------------------
@@ -56,7 +66,7 @@ class Gateway:
     # ------------------------------------------------------------------
 
     async def connect(self) -> None:
-        """Open serial connection and read gateway self-info."""
+        """Open serial connection, read gateway self-info, start receive loop."""
         log.info("connecting to gateway on %s", self._config.device)
         self._mc = await MeshCore.create_serial(self._config.device, self._config.baud)
         if self._mc is None:
@@ -79,13 +89,23 @@ class Gateway:
             self.info.get("radio_cr"),
         )
 
-        # optionally rename gateway if config specifies a name
         if self._config.name and self._config.name != self.info.get("name"):
             log.info("setting gateway name to %r", self._config.name)
             await self._mc.commands.set_name(self._config.name)
 
+        self._receive_task = asyncio.create_task(
+            self._receive_loop(), name="gateway-receive"
+        )
+
     async def disconnect(self) -> None:
-        # meshcore_py has no close() method; just drop the reference
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+        # meshcore_py has no close() — drop the reference
         self._mc = None
         log.info("gateway disconnected")
 
@@ -98,26 +118,108 @@ class Gateway:
             raise GatewayError("not connected — call connect() first")
         return self._mc
 
+    def set_dm_callback(
+        self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
+    ) -> None:
+        """Register an async callback for incoming DMs (not command responses)."""
+        self._dm_callback = callback
+
+    # ------------------------------------------------------------------
+    # background receive loop
+    # ------------------------------------------------------------------
+
+    async def _receive_loop(self) -> None:
+        """
+        Run forever: wait for MESSAGES_WAITING, then drain the queue.
+
+        Routing:
+          pubkey_prefix in self._pending → resolve the registered Future
+          anything else                  → call dm_callback if set
+        """
+        mc = self._require_connected()
+        log.debug("receive loop started")
+        while True:
+            try:
+                notif = await mc.dispatcher.wait_for_event(
+                    EventType.MESSAGES_WAITING, timeout=120
+                )
+                if notif is None:
+                    # timeout — nothing queued, loop again
+                    continue
+                await self._drain_inbox(mc)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                log.warning("receive loop error: %s", exc)
+                # prevent busy-spin if an unexpected error repeats
+                await asyncio.sleep(5)
+
+    async def _drain_inbox(self, mc: MeshCore) -> None:
+        """Drain the firmware message queue, routing each message appropriately."""
+        while True:
+            msg = await mc.commands.get_msg()
+            if msg.type in (EventType.NO_MORE_MSGS, EventType.ERROR):
+                break
+            if msg.type != EventType.CONTACT_MSG_RECV:
+                continue
+
+            prefix = msg.payload.get("pubkey_prefix", "")
+            text = msg.payload.get("text", "")
+            # CLI command responses have a "> " prompt prefix
+            text = text.removeprefix("> ")
+
+            if prefix in self._pending:
+                fut = self._pending.pop(prefix)
+                if not fut.done():
+                    fut.set_result(text)
+                log.debug("command response from %s: %r", prefix, text)
+            else:
+                log.debug("incoming message from %s: %r", prefix, text)
+                if self._dm_callback:
+                    asyncio.create_task(
+                        self._dm_callback(msg.payload),
+                        name=f"dm-{prefix}",
+                    )
+
     # ------------------------------------------------------------------
     # contacts
     # ------------------------------------------------------------------
 
-    async def get_contacts(self, managed_only: bool = True) -> list[dict[str, Any]]:
+    async def get_contacts(
+        self,
+        managed_only: bool = True,
+        include_pending: bool = True,
+    ) -> list[dict[str, Any]]:
         """
         Return contacts from the gateway.
 
-        managed_only=True  →  only contacts with flags & 1 (favourited/managed nodes).
-        managed_only=False →  all 350 stored contacts.
+        managed_only=True   →  only contacts with flags & 1 (favourited/managed nodes).
+        managed_only=False  →  all 350 stored contacts.
+        include_pending     →  also include mc.pending_contacts (nodes heard via NEW_CONTACT
+                                events that have not yet been confirmed as stored contacts).
+                                Pending contacts are always included regardless of managed_only
+                                since they have no flags set yet.
         """
         mc = self._require_connected()
         result = await mc.commands.get_contacts()
         if result.type == EventType.ERROR:
             raise GatewayError(f"get_contacts failed: {result.payload}")
-        contacts = list((result.payload or {}).values())
+        stored = result.payload or {}
+        contacts = list(stored.values())
         if managed_only:
             contacts = [c for c in contacts if c.get("flags", 0) & 1]
-        log.debug("get_contacts: %d total, managed_only=%s → %d returned",
-                  len(result.payload or {}), managed_only, len(contacts))
+
+        if include_pending:
+            # pending contacts are nodes that have advertised but aren't in the stored list
+            pending = mc.pending_contacts
+            for pubkey, c in pending.items():
+                if pubkey not in stored:
+                    contacts.append(c)
+            if pending:
+                log.debug("get_contacts: %d pending contacts included", len(pending))
+
+        log.debug("get_contacts: %d stored, managed_only=%s, include_pending=%s → %d returned",
+                  len(stored), managed_only, include_pending, len(contacts))
         return contacts
 
     # ------------------------------------------------------------------
@@ -159,50 +261,70 @@ class Gateway:
         """
         Send a CLI command to a managed node and return the text response.
 
-        Correct flow (confirmed via live testing):
-          1. send_cmd()           → MSG_SENT
-          2. wait MESSAGES_WAITING → node has queued a reply
-          3. get_msg() loop       → drain until we get our CONTACT_MSG_RECV
-          4. return text
+        Registers a Future keyed by pubkey_prefix before sending; the background
+        receive loop resolves it when the matching CONTACT_MSG_RECV arrives.
 
-        The _cmd_lock ensures only one command is in flight at a time,
-        preventing get_msg() from picking up the wrong response.
+        Only one send_cmd is in flight at a time (_send_lock) to avoid the
+        gateway's suggested_timeout calculation going wrong when two commands
+        are queued simultaneously.
         """
         mc = self._require_connected()
         pubkey_prefix = contact["public_key"][:12]
 
-        async with self._cmd_lock:
-            log.debug("send_command to %r: %r", contact.get("adv_name"), command)
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str] = loop.create_future()
+        self._pending[pubkey_prefix] = fut
 
+        async with self._send_lock:
+            log.debug("send_command to %r: %r", contact.get("adv_name"), command)
             result = await mc.commands.send_cmd(contact, command)
             if result.type == EventType.ERROR:
+                self._pending.pop(pubkey_prefix, None)
                 return CommandResult(success=False, error=f"send failed: {result.payload}")
 
-            # wait for node to signal its reply is queued
-            notif = await mc.dispatcher.wait_for_event(
-                EventType.MESSAGES_WAITING, timeout=timeout
-            )
-            if notif is None:
-                log.warning("timeout waiting for response to %r from %r", command, contact.get("adv_name"))
-                return CommandResult(success=False, error="timeout — no response from node")
+        # _send_lock released — receive loop will now resolve the future
+        try:
+            text = await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._pending.pop(pubkey_prefix, None)
+            log.warning("timeout waiting for response to %r from %r", command, contact.get("adv_name"))
+            return CommandResult(success=False, error="timeout — no response from node")
 
-            # drain the message queue to find our response
-            while True:
-                msg = await mc.commands.get_msg()
-                if msg.type == EventType.NO_MORE_MSGS:
-                    return CommandResult(success=False, error="messages drained but no matching response")
-                if msg.type == EventType.ERROR:
-                    return CommandResult(success=False, error=f"get_msg error: {msg.payload}")
-                if msg.type == EventType.CONTACT_MSG_RECV:
-                    if msg.payload.get("pubkey_prefix") == pubkey_prefix:
-                        text = msg.payload.get("text", "")
-                        # CLI responses have a "> " prefix — strip it
-                        text = text.removeprefix("> ")
-                        log.debug("response from %r: %r", contact.get("adv_name"), text)
-                        return CommandResult(success=True, text=text)
-                    # message from a different node — discard and keep draining
-                    log.debug("discarding message from %r (expected %s)",
-                              msg.payload.get("pubkey_prefix"), pubkey_prefix)
+        log.debug("response from %r: %r", contact.get("adv_name"), text)
+        return CommandResult(success=True, text=text)
+
+    # ------------------------------------------------------------------
+    # messaging (DM and channel)
+    # ------------------------------------------------------------------
+
+    async def send_dm(
+        self,
+        contact: dict[str, Any],
+        text: str,
+    ) -> bool:
+        """
+        Send a direct message to a contact.  Uses send_msg_with_retry for
+        reliability (ACK-confirmed, up to 3 attempts with path reset fallback).
+        Returns True if the message was ACK'd, False otherwise.
+        """
+        mc = self._require_connected()
+        log.debug("send_dm to %r: %r", contact.get("adv_name"), text)
+        result = await mc.commands.send_msg_with_retry(
+            contact, text, timeout=30, min_timeout=30
+        )
+        if result is None:
+            log.warning("send_dm to %r failed (no ACK)", contact.get("adv_name"))
+            return False
+        return True
+
+    async def send_channel_msg(self, channel: int, text: str) -> bool:
+        """Send a message to a numbered channel slot. Returns True on OK."""
+        mc = self._require_connected()
+        result = await mc.commands.send_chan_msg(channel, text)
+        if result.type == EventType.ERROR:
+            log.warning("send_channel_msg(%d) failed: %s", channel, result.payload)
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # radio

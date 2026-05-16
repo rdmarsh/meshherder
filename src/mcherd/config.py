@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from mcherd.models import SettingPolicy
+
 
 @dataclass
 class GatewayConfig:
@@ -23,10 +25,47 @@ class SchedulerConfig:
 
 
 @dataclass
+class SettingConfig:
+    """Policy + desired value for one setting key."""
+    desired: str | None = None
+    policy: SettingPolicy | None = None  # None means "inherit from node/group default"
+    poll_hours: int = 24
+
+
+@dataclass
+class OperationConfig:
+    """A one-shot or recurring command to run on a node."""
+    command: str = ""
+    every_hours: int = 24
+
+
+@dataclass
 class NodeConfig:
     pubkey_prefix: str
     name: str = ""
-    desired: list[str] = field(default_factory=list)  # raw CLI commands to apply
+    group: str | None = None
+    default_policy: SettingPolicy | None = None
+    settings: dict[str, SettingConfig] = field(default_factory=dict)
+    operations: list[OperationConfig] = field(default_factory=list)
+
+
+@dataclass
+class GroupConfig:
+    name: str
+    default_policy: SettingPolicy | None = None
+    # settings: desired values applied to all nodes in this group
+    settings: dict[str, SettingConfig] = field(default_factory=dict)
+    # setting_overrides: policy-only overrides (no desired value required)
+    setting_overrides: dict[str, SettingConfig] = field(default_factory=dict)
+
+
+@dataclass
+class MessengerConfig:
+    """Config for mesh DM control and channel announcements."""
+    # pubkey prefixes allowed to issue DM commands (e.g. operator's handheld)
+    allowed_prefixes: list[str] = field(default_factory=list)
+    # channel slot number to post cycle summaries to (e.g. 1 for #mcherd)
+    announce_channel: int | None = None
 
 
 @dataclass
@@ -34,6 +73,9 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     nodes: list[NodeConfig] = field(default_factory=list)
+    groups: list[GroupConfig] = field(default_factory=list)
+    messenger: MessengerConfig = field(default_factory=MessengerConfig)
+    facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
     db_path: str = "mcherd.db"
     socket_path: str = "/run/mcherd.sock"
     secrets: dict[str, str] = field(default_factory=dict)  # pubkey_prefix -> password
@@ -45,12 +87,19 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     gw_raw = raw.get("gateway", {})
     sched_raw = raw.get("scheduler", {})
 
+    msg_raw = raw.get("messenger", {})
     cfg = Config(
         gateway=GatewayConfig(**gw_raw),
         scheduler=SchedulerConfig(**sched_raw),
         db_path=raw.get("db_path", "mcherd.db"),
         socket_path=raw.get("socket_path", "/run/mcherd.sock"),
-        nodes=[NodeConfig(**n) for n in raw.get("nodes", [])],
+        facts=raw.get("facts", ["ver", "board", "role"]),
+        nodes=[_parse_node(n) for n in raw.get("nodes", [])],
+        groups=[_parse_group(g) for g in raw.get("groups", [])],
+        messenger=MessengerConfig(
+            allowed_prefixes=msg_raw.get("allowed_prefixes", []),
+            announce_channel=msg_raw.get("announce_channel"),
+        ),
     )
 
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
@@ -63,6 +112,53 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
         cfg.secrets = secrets_raw.get("nodes", {})
 
     return cfg
+
+
+def _parse_setting(raw: dict) -> SettingConfig:
+    policy = raw.get("policy")
+    return SettingConfig(
+        desired=raw.get("desired"),
+        policy=SettingPolicy(policy) if policy else None,
+        poll_hours=raw.get("poll_hours", 24),
+    )
+
+
+def _parse_node(raw: dict) -> NodeConfig:
+    policy = raw.get("default_policy")
+    settings = {
+        k: _parse_setting(v if isinstance(v, dict) else {"desired": v})
+        for k, v in raw.get("settings", {}).items()
+    }
+    operations = [
+        OperationConfig(**op) if isinstance(op, dict) else OperationConfig(command=op)
+        for op in raw.get("operations", [])
+    ]
+    return NodeConfig(
+        pubkey_prefix=raw["pubkey_prefix"],
+        name=raw.get("name", ""),
+        group=raw.get("group"),
+        default_policy=SettingPolicy(policy) if policy else None,
+        settings=settings,
+        operations=operations,
+    )
+
+
+def _parse_group(raw: dict) -> GroupConfig:
+    policy = raw.get("default_policy")
+    settings = {
+        k: _parse_setting(v if isinstance(v, dict) else {"desired": v})
+        for k, v in raw.get("settings", {}).items()
+    }
+    overrides = {
+        k: _parse_setting(v if isinstance(v, dict) else {"policy": v})
+        for k, v in raw.get("setting_overrides", {}).items()
+    }
+    return GroupConfig(
+        name=raw["name"],
+        default_policy=SettingPolicy(policy) if policy else None,
+        settings=settings,
+        setting_overrides=overrides,
+    )
 
 
 def _check_permissions(path: Path) -> None:
