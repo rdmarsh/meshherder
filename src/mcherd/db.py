@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     last_seen       TEXT,
     last_connected  TEXT,
     auth_required   INTEGER NOT NULL DEFAULT 0,
-    auth_cached     INTEGER NOT NULL DEFAULT 0
+    auth_cached     INTEGER NOT NULL DEFAULT 0,
+    next_sync_at    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -111,9 +112,9 @@ class Database:
         await db.execute(
             """
             INSERT INTO nodes (pubkey, name, node_group, state, last_seen, last_connected,
-                               auth_required, auth_cached)
+                               auth_required, auth_cached, next_sync_at)
             VALUES (:pubkey, :name, :group, :state, :last_seen, :last_connected,
-                    :auth_required, :auth_cached)
+                    :auth_required, :auth_cached, :next_sync_at)
             ON CONFLICT(pubkey) DO UPDATE SET
                 name           = excluded.name,
                 node_group     = excluded.node_group,
@@ -121,7 +122,8 @@ class Database:
                 last_seen      = excluded.last_seen,
                 last_connected = excluded.last_connected,
                 auth_required  = excluded.auth_required,
-                auth_cached    = excluded.auth_cached
+                auth_cached    = excluded.auth_cached,
+                next_sync_at   = excluded.next_sync_at
             """,
             {
                 "pubkey":         node.pubkey,
@@ -132,9 +134,35 @@ class Database:
                 "last_connected": _dt(node.last_connected),
                 "auth_required":  int(node.auth_required),
                 "auth_cached":    int(node.auth_cached),
+                "next_sync_at":   _dt(node.next_sync_at),
             },
         )
         await db.commit()
+
+    async def set_next_sync(self, pubkey: str, when: datetime) -> None:
+        """Update only the next_sync_at timestamp for a node."""
+        db = self._db_required()
+        await db.execute(
+            "UPDATE nodes SET next_sync_at = ? WHERE pubkey = ?",
+            (_dt(when), pubkey),
+        )
+        await db.commit()
+
+    async def get_due_node(self) -> Node | None:
+        """Return the node with the earliest next_sync_at that is now due (or NULL = immediately due)."""
+        db = self._db_required()
+        now = _dt(datetime.now(UTC))
+        async with db.execute(
+            """
+            SELECT * FROM nodes
+            WHERE next_sync_at IS NULL OR next_sync_at <= ?
+            ORDER BY next_sync_at ASC NULLS FIRST
+            LIMIT 1
+            """,
+            (now,),
+        ) as cur:
+            row = await cur.fetchone()
+        return _row_to_node(row) if row else None
 
     async def get_node(self, pubkey: str) -> Node | None:
         db = self._db_required()
@@ -327,6 +355,7 @@ def _row_to_node(row: aiosqlite.Row) -> Node:
         last_connected=_parse_dt(row["last_connected"]),
         auth_required=bool(row["auth_required"]),
         auth_cached=bool(row["auth_cached"]),
+        next_sync_at=_parse_dt(row["next_sync_at"]),
     )
 
 

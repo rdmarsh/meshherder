@@ -143,9 +143,23 @@ async def _dispatch(
         }
 
     if cmd == "sync":
-        # trigger an immediate cycle in the background
+        prefix = req.get("prefix")
+        if prefix:
+            # single-node forced sync — run inline so caller gets an error if prefix is bad
+            try:
+                result = await wq.run_node(prefix)
+                return {"ok": True, "data": f"synced {result.name!r} ({result.pubkey[:8]})"}
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+        # no prefix — full cycle in background
         asyncio.create_task(wq.run_cycle())
         return {"ok": True, "data": "sync started"}
+
+    if cmd == "contacts":
+        from mcherd.queue import get_unfiled_contacts
+        gateway = wq._gateway
+        unfiled = await get_unfiled_contacts(config, gateway)
+        return {"ok": True, "data": unfiled}
 
     if cmd == "logs":
         pubkey = req.get("pubkey")

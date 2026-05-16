@@ -28,6 +28,7 @@ from mcherd.models import (
 from mcherd.queue import (
     WorkQueue,
     all_setting_keys,
+    get_unfiled_contacts,
     resolve_desired,
     resolve_policy,
 )
@@ -122,7 +123,7 @@ def test_all_setting_keys_no_group():
 def _make_config(node_cfgs=None, group_cfgs=None) -> Config:
     return Config(
         gateway=GatewayConfig(device="/dev/null"),
-        scheduler=SchedulerConfig(inter_node_delay_seconds=0, sync_interval_minutes=1),
+        scheduler=SchedulerConfig(inter_node_delay_seconds=0, sync_interval_days=1),
         nodes=node_cfgs or [],
         groups=group_cfgs or [],
         facts=["ver", "board"],
@@ -150,8 +151,9 @@ async def db(tmp_path):
     await d.close()
 
 
-def _contact(pubkey="aabbccdd1122", name="TestNode"):
-    return {"public_key": pubkey, "adv_name": name}
+def _contact(pubkey="aabbccdd1122", name="TestNode", type_=2, flags=0):
+    # type_ 2=REP, 1=CLI
+    return {"public_key": pubkey, "adv_name": name, "type": type_, "flags": flags}
 
 
 # ------------------------------------------------------------------
@@ -271,3 +273,182 @@ async def test_cycle_runs_pending_operations(db):
     results = await wq.run_cycle()
     assert results[0].operations_run == 1
     assert results[0].operations_failed == 0
+
+
+# ------------------------------------------------------------------
+# repeater-only filtering
+# ------------------------------------------------------------------
+
+async def test_cycle_skips_non_repeater_contacts(db):
+    """CLI contacts (type=1) are not processed even if pubkey matches config."""
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122", type_=1)])  # CLI, not REP
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    assert results[0].reachable is False
+    assert "not a repeater" in (results[0].error or "")
+
+
+# ------------------------------------------------------------------
+# favourite flag sync
+# ------------------------------------------------------------------
+
+async def test_cycle_sets_favourite_flag_on_unfavourited_contact(db):
+    """A managed contact that is not yet favourited (flags=0) gets flagged."""
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122", flags=0)
+    gw = _make_gateway(contacts=[contact])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    gw.set_contact_favourite.assert_awaited_once()
+
+
+async def test_cycle_skips_favourite_if_already_set(db):
+    """set_contact_favourite is not called when contact already has flags=1."""
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122", flags=1)  # already favourited
+    gw = _make_gateway(contacts=[contact])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    gw.set_contact_favourite.assert_not_awaited()
+
+
+# ------------------------------------------------------------------
+# run_node — forced single-node sync
+# ------------------------------------------------------------------
+
+async def test_run_node_forces_immediate_sync(db):
+    """run_node processes a node regardless of its next_sync_at."""
+    from datetime import timedelta
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    # node is scheduled far in the future — run_node should bypass that
+    node = Node(pubkey="aabbccdd1122", name="TestNode",
+                next_sync_at=datetime(2099, 1, 1, tzinfo=UTC))
+    await db.upsert_node(node)
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    result = await wq.run_node("aabbcc")
+    assert result is not None
+    assert result.reachable is True
+
+
+async def test_run_node_odd_prefix_rejected(db):
+    """Prefix with an odd number of hex chars is rejected (convention: must be even)."""
+    cfg = _make_config()
+    gw = _make_gateway()
+    wq = WorkQueue(cfg, gw, db)
+    with pytest.raises(ValueError, match="even"):
+        await wq.run_node("abc")  # 3 chars — odd
+
+
+async def test_run_node_ambiguous_prefix_raises(db):
+    """A prefix matching multiple contacts raises ValueError."""
+    node_cfg1 = _node(pubkey="aa11", name="Node1")
+    node_cfg2 = _node(pubkey="aa22", name="Node2")
+    cfg = _make_config(node_cfgs=[node_cfg1, node_cfg2])
+    contacts = [
+        _contact("aa11bbcc1122", name="Node1"),
+        _contact("aa22bbcc1122", name="Node2"),
+    ]
+    gw = _make_gateway(contacts=contacts)
+    wq = WorkQueue(cfg, gw, db)
+    with pytest.raises(ValueError, match="ambiguous"):
+        await wq.run_node("aa")  # 2 chars — matches both
+
+
+async def test_run_node_unknown_prefix_raises(db):
+    """A prefix matching no contacts raises ValueError."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc")])
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    wq = WorkQueue(cfg, gw, db)
+    with pytest.raises(ValueError, match="no node"):
+        await wq.run_node("ff00")  # not in contacts
+
+
+# ------------------------------------------------------------------
+# overdue rescheduling on startup
+# ------------------------------------------------------------------
+
+async def test_reschedule_overdue_spreads_nodes(db):
+    """Nodes with past next_sync_at are spread randomly across the sync interval."""
+    from datetime import timedelta
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+    await db.upsert_node(Node(pubkey="aa", name="A", next_sync_at=past))
+    await db.upsert_node(Node(pubkey="bb", name="B", next_sync_at=past))
+
+    cfg = _make_config()
+    gw = _make_gateway()
+    wq = WorkQueue(cfg, gw, db)
+
+    before = datetime.now(UTC)
+    await wq._reschedule_overdue()
+    interval = timedelta(days=cfg.scheduler.sync_interval_days)
+
+    a = await db.get_node("aa")
+    b = await db.get_node("bb")
+    assert a.next_sync_at >= before
+    assert a.next_sync_at <= before + interval
+    assert b.next_sync_at >= before
+    assert b.next_sync_at <= before + interval
+
+
+async def test_reschedule_overdue_leaves_future_nodes_alone(db):
+    """Nodes already scheduled in the future are not rescheduled."""
+    future = datetime(2099, 1, 1, tzinfo=UTC)
+    await db.upsert_node(Node(pubkey="aa", name="A", next_sync_at=future))
+
+    cfg = _make_config()
+    gw = _make_gateway()
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq._reschedule_overdue()
+    a = await db.get_node("aa")
+    assert a.next_sync_at == future
+
+
+# ------------------------------------------------------------------
+# unfiled contacts (mch contacts)
+# ------------------------------------------------------------------
+
+async def test_unfiled_contacts_excludes_managed_nodes(db):
+    """get_unfiled_contacts omits contacts whose pubkey is already in config."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc")])
+    gw = _make_gateway(contacts=[
+        _contact("aabbccdd1122", name="Managed"),
+        _contact("ff001122aabb", name="NewREP"),
+    ])
+    result = await get_unfiled_contacts(cfg, gw)
+    names = [c["adv_name"] for c in result]
+    assert "Managed" not in names
+    assert "NewREP" in names
+
+
+async def test_unfiled_contacts_excludes_non_repeaters(db):
+    """get_unfiled_contacts only returns REP contacts, not CLI."""
+    cfg = _make_config()
+    gw = _make_gateway(contacts=[
+        _contact("ff001122aabb", name="NewREP", type_=2),
+        _contact("ee991122aabb", name="Companion", type_=1),
+    ])
+    result = await get_unfiled_contacts(cfg, gw)
+    names = [c["adv_name"] for c in result]
+    assert "NewREP" in names
+    assert "Companion" not in names

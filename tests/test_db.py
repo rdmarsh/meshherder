@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from datetime import UTC, datetime
 
 from mcherd.db import Database
 from mcherd.models import (
@@ -141,6 +142,54 @@ async def test_upsert_and_get_pending_operations(db):
     assert len(pending) == 1
     assert pending[0].command == "clock sync"
     assert pending[0].status == OperationStatus.PENDING
+
+
+# ------------------------------------------------------------------
+# logs
+# ------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# next_sync_at scheduling
+# ------------------------------------------------------------------
+
+async def test_next_sync_at_persisted(db):
+    t = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    node = Node(pubkey="aa", name="N", next_sync_at=t)
+    await db.upsert_node(node)
+    fetched = await db.get_node("aa")
+    assert fetched.next_sync_at == t
+
+
+async def test_set_next_sync(db):
+    await db.upsert_node(Node(pubkey="aa", name="N"))
+    t = datetime(2026, 6, 1, 0, 0, 0, tzinfo=UTC)
+    await db.set_next_sync("aa", t)
+    fetched = await db.get_node("aa")
+    assert fetched.next_sync_at == t
+
+
+async def test_get_due_node_returns_overdue(db):
+    past   = datetime(2020, 1, 1, tzinfo=UTC)
+    future = datetime(2099, 1, 1, tzinfo=UTC)
+    await db.upsert_node(Node(pubkey="aa", name="A", next_sync_at=future))
+    await db.upsert_node(Node(pubkey="bb", name="B", next_sync_at=past))
+    node = await db.get_due_node()
+    assert node is not None
+    assert node.pubkey == "bb"
+
+
+async def test_get_due_node_returns_none_when_all_future(db):
+    future = datetime(2099, 1, 1, tzinfo=UTC)
+    await db.upsert_node(Node(pubkey="aa", name="A", next_sync_at=future))
+    assert await db.get_due_node() is None
+
+
+async def test_get_due_node_treats_null_as_overdue(db):
+    # next_sync_at=None means never scheduled — treat as immediately due
+    await db.upsert_node(Node(pubkey="aa", name="A"))
+    node = await db.get_due_node()
+    assert node is not None
+    assert node.pubkey == "aa"
 
 
 # ------------------------------------------------------------------

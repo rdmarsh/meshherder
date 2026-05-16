@@ -173,10 +173,17 @@ def node(ctx: click.Context, pubkey: str) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command()
+@click.argument("node", required=False)
 @click.pass_context
-def sync(ctx: click.Context) -> None:
-    """Trigger an immediate sync cycle."""
-    resp = _rpc(ctx.obj["socket"], {"cmd": "sync"})
+def sync(ctx: click.Context, node: str | None) -> None:
+    """Trigger an immediate sync cycle, or sync a single node by pubkey prefix.
+
+    NODE: even-length pubkey prefix (2, 4, 6, 8 … chars). Omit to sync all nodes.
+    """
+    payload: dict = {"cmd": "sync"}
+    if node:
+        payload["prefix"] = node
+    resp = _rpc(ctx.obj["socket"], payload)
     data = _check(resp)
     click.echo(data)
 
@@ -230,6 +237,37 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
         ts = (entry.get("timestamp") or "")[:19]
         node_label = f" [{entry['node_pubkey'][:12]}]" if entry.get("node_pubkey") else ""
         click.echo(f"{ts}  {entry['level']:<7}{node_label}  {entry['message']}")
+
+
+# ---------------------------------------------------------------------------
+# contacts — gateway REP nodes not yet in config.yaml
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.pass_context
+def contacts(ctx: click.Context) -> None:
+    """Show gateway repeater contacts not yet in your config.yaml.
+
+    Prints ready-to-paste YAML snippets. Review and append to the nodes:
+    section of your config.yaml for any nodes you want mcherd to manage.
+    """
+    resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
+    data = _check(resp)
+
+    if not data:
+        click.echo("no unfiled repeater contacts found")
+        return
+
+    click.echo("# Gateway repeater contacts not in your config.yaml.")
+    click.echo("# Append any of these to the 'nodes:' section to manage them.\n")
+    for c in data:
+        prefix = c.get("public_key", "")[:8]
+        name = c.get("adv_name", "")
+        click.echo(f"- pubkey_prefix: {prefix}")
+        if name:
+            click.echo(f'  name: "{name}"')
+        click.echo("  # desired: []")
+        click.echo("")
 
 
 # ---------------------------------------------------------------------------

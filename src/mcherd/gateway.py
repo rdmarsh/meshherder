@@ -326,6 +326,19 @@ class Gateway:
             return False
         return True
 
+    async def set_contact_favourite(self, contact: dict[str, Any]) -> bool:
+        """Set the favourite flag (bit 0) on a gateway contact. Returns True on success."""
+        mc = self._require_connected()
+        new_flags = contact.get("flags", 0) | 1
+        result = await mc.commands.change_contact_flags(contact, new_flags)
+        if result.type == EventType.ERROR:
+            log.warning("set_contact_favourite failed for %s: %s",
+                        contact.get("public_key", "?")[:12], result.payload)
+            return False
+        contact["flags"] = new_flags
+        log.debug("favourited contact %s", contact.get("public_key", "?")[:12])
+        return True
+
     # ------------------------------------------------------------------
     # radio
     # ------------------------------------------------------------------

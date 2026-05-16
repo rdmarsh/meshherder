@@ -1,23 +1,26 @@
 """
 Work queue — drives the fleet management cycle.
 
-Each cycle:
-  1. Load nodes from DB
-  2. Match against live gateway contacts
-  3. For each matched node (sequentially, rate-limited):
-     a. Login if needed
-     b. Collect declared facts (ver, board, role, …)
-     c. Poll/enforce settings (get → compare → set if enforce+drift)
-     d. Run pending operations (clock sync, etc.)
-  4. Sleep until next cycle
+Scheduling model:
+  Each managed node has a next_sync_at timestamp in the DB. The run() loop
+  finds the next due node, sleeps until it's time, processes it, then
+  reschedules it (now + sync_interval + jitter). This spreads 40 nodes
+  evenly across the sync interval rather than hammering all at once.
+
+  On startup, any node with a past or missing next_sync_at is rescheduled
+  to a random time within the interval so a daemon restart never triggers
+  a sync storm.
+
+  run_node(prefix) bypasses the schedule for operator-triggered syncs.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from mcherd.config import Config, NodeConfig, GroupConfig, SettingConfig
@@ -27,6 +30,7 @@ from mcherd.gateway import CommandResult, Gateway, GatewayError
 if TYPE_CHECKING:
     from mcherd.messenger import Messenger
 from mcherd.models import (
+    CONTACT_TYPE_REPEATER,
     Node,
     NodeFact,
     NodeState,
@@ -147,37 +151,146 @@ class WorkQueue:
         self._current_task: asyncio.Task | None = None
 
     async def run(self) -> None:
-        """Main loop — run cycles on schedule until cancelled."""
+        """
+        Main scheduling loop — processes nodes one at a time on their individual schedules.
+
+        On startup, spreads any overdue nodes across the sync interval so a restart
+        never triggers a sync storm. Then repeatedly finds the next due node, sleeps
+        until it's time, processes it, and reschedules it.
+        """
         self._running = True
-        log.info("work queue started (interval=%dm)", self._config.scheduler.sync_interval_minutes)
+        log.info("work queue started (interval=%.1fd)", self._config.scheduler.sync_interval_days)
+
+        contacts = await self._gateway.get_contacts(managed_only=False)
+        await self._reschedule_overdue()
+
         while self._running:
             try:
-                await self.run_cycle()
+                await self._run_next_due(contacts)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log.exception("cycle failed: %s", exc)
-            if not self._running:
-                break
-            interval = self._config.scheduler.sync_interval_minutes * 60
-            log.info("next cycle in %ds", interval)
-            await asyncio.sleep(interval)
+                log.exception("scheduler error: %s", exc)
+                await asyncio.sleep(60)
 
     async def stop(self) -> None:
         self._running = False
         if self._current_task:
             self._current_task.cancel()
 
+    async def _run_next_due(self, contacts: list[dict]) -> None:
+        """Find the next due node, sleep until it's time, and process it."""
+        node = await self._db.get_due_node()
+        if node is None:
+            # all nodes scheduled in future — sleep 60s and re-check
+            await asyncio.sleep(60)
+            return
+
+        now = datetime.now(UTC)
+        if node.next_sync_at and node.next_sync_at > now:
+            wait = (node.next_sync_at - now).total_seconds()
+            log.debug("next sync: %r in %.0fs", node.name, wait)
+            # sleep interruptibly so stop() can cancel us
+            try:
+                await asyncio.wait_for(asyncio.shield(asyncio.sleep(wait)), timeout=wait + 1)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                if not self._running:
+                    return
+
+        # find matching contact for this node
+        contact = next(
+            (c for c in contacts if c["public_key"] == node.pubkey or
+             c["public_key"].startswith(node.pubkey)),
+            None,
+        )
+
+        # find config entry
+        node_cfg = next(
+            (nc for nc in self._config.nodes if node.pubkey.startswith(nc.pubkey_prefix)),
+            None,
+        )
+        group_cfg = (
+            {g.name: g for g in self._config.groups}.get(node_cfg.group)
+            if node_cfg and node_cfg.group else None
+        )
+
+        if contact and node_cfg:
+            await self._process_node(node_cfg, group_cfg, contact)
+        else:
+            log.warning("node %r not in current contacts or config — skipping", node.pubkey[:12])
+
+        interval_s = self._config.scheduler.sync_interval_days * 86400
+        jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
+        await self._db.set_next_sync(node.pubkey, datetime.now(UTC) + timedelta(seconds=interval_s + jitter))
+
+    async def _reschedule_overdue(self) -> None:
+        """
+        Spread any nodes with past or missing next_sync_at randomly across the sync
+        interval. Called on startup so a daemon restart never causes a sync storm.
+        Nodes already scheduled in the future are left alone.
+        """
+        interval_s = self._config.scheduler.sync_interval_days * 86400
+        now = datetime.now(UTC)
+        nodes = await self._db.get_all_nodes()
+        for node in nodes:
+            if node.next_sync_at is None or node.next_sync_at < now:
+                delay = random.uniform(0, interval_s)
+                await self._db.set_next_sync(node.pubkey, now + timedelta(seconds=delay))
+                log.debug("rescheduled %r in %.0fs", node.pubkey[:12], delay)
+
+    async def run_node(self, prefix: str) -> NodeResult:
+        """
+        Force an immediate sync of a single node identified by pubkey prefix.
+
+        prefix must have an even number of hex chars (2, 4, 6, 8 …).
+        Raises ValueError if the prefix is odd-length, matches no contacts,
+        or matches more than one contact.
+        """
+        if len(prefix) % 2 != 0:
+            raise ValueError(f"prefix must have an even number of hex chars (got {len(prefix)!r} — {prefix!r})")
+
+        contacts = await self._gateway.get_contacts(managed_only=False)
+        repeaters = [c for c in contacts if c.get("type") == CONTACT_TYPE_REPEATER]
+        matches = [c for c in repeaters if c["public_key"].startswith(prefix)]
+
+        if len(matches) == 0:
+            raise ValueError(f"no node found matching prefix {prefix!r}")
+        if len(matches) > 1:
+            names = ", ".join(c.get("adv_name", c["public_key"][:12]) for c in matches)
+            raise ValueError(f"ambiguous prefix {prefix!r} matches {len(matches)} nodes: {names}")
+
+        contact = matches[0]
+        pubkey = contact["public_key"]
+
+        node_cfg = next(
+            (nc for nc in self._config.nodes if pubkey.startswith(nc.pubkey_prefix)),
+            None,
+        )
+        group_cfg = (
+            {g.name: g for g in self._config.groups}.get(node_cfg.group)
+            if node_cfg and node_cfg.group else None
+        )
+
+        if node_cfg is None:
+            # not in config — create a minimal NodeConfig so we can at least process it
+            from mcherd.config import NodeConfig as _NC
+            node_cfg = _NC(pubkey_prefix=pubkey[:8])
+
+        result = await self._process_node(node_cfg, group_cfg, contact)
+
+        interval_s = self._config.scheduler.sync_interval_days * 86400
+        jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
+        await self._db.set_next_sync(pubkey, datetime.now(UTC) + timedelta(seconds=interval_s + jitter))
+
+        return result
+
     async def run_cycle(self) -> list[NodeResult]:
-        """One full pass through all managed nodes. Returns per-node results."""
+        """
+        One full pass through all managed nodes in config order.
+        Used for testing and for mch sync (no-arg full sweep).
+        """
         log.info("--- cycle start ---")
         contacts = await self._gateway.get_contacts(managed_only=False)
-        contact_by_prefix = {
-            c["public_key"][:len(prefix)]: c
-            for c in contacts
-            for prefix in [c["public_key"][:12]]  # index by 12-char prefix
-        }
-        # also index by full pubkey for exact matches
         contact_by_pubkey = {c["public_key"]: c for c in contacts}
 
         # register all visible contacts with the messenger so it can reply to DMs
@@ -185,14 +298,11 @@ class WorkQueue:
             for c in contacts:
                 self._messenger.register_contact(c["public_key"][:12], c)
 
-        node_configs = {nc.pubkey_prefix: nc for nc in self._config.nodes}
         group_configs = {g.name: g for g in self._config.groups}
-
         results: list[NodeResult] = []
 
         for node_cfg in self._config.nodes:
-            # find matching contact
-            contact = self._find_contact(node_cfg.pubkey_prefix, contact_by_prefix, contact_by_pubkey)
+            contact = self._find_contact(node_cfg.pubkey_prefix, contact_by_pubkey)
             if contact is None:
                 log.warning("node %r (%s) not in gateway contacts — skipping",
                             node_cfg.name, node_cfg.pubkey_prefix)
@@ -204,8 +314,18 @@ class WorkQueue:
                 ))
                 continue
 
-            group_cfg = group_configs.get(node_cfg.group) if node_cfg.group else None
+            if contact.get("type") != CONTACT_TYPE_REPEATER:
+                log.warning("node %r (%s) is not a repeater (type=%s) — skipping",
+                            node_cfg.name, node_cfg.pubkey_prefix, contact.get("type"))
+                results.append(NodeResult(
+                    pubkey=node_cfg.pubkey_prefix,
+                    name=node_cfg.name,
+                    reachable=False,
+                    error="not a repeater",
+                ))
+                continue
 
+            group_cfg = group_configs.get(node_cfg.group) if node_cfg.group else None
             result = await self._process_node(node_cfg, group_cfg, contact)
             results.append(result)
 
@@ -225,13 +345,10 @@ class WorkQueue:
     def _find_contact(
         self,
         pubkey_prefix: str,
-        by_prefix: dict[str, Any],
         by_pubkey: dict[str, Any],
     ) -> dict[str, Any] | None:
-        # exact full-key match first
         if pubkey_prefix in by_pubkey:
             return by_pubkey[pubkey_prefix]
-        # prefix match (config stores short prefixes for readability)
         for pubkey, contact in by_pubkey.items():
             if pubkey.startswith(pubkey_prefix):
                 return contact
@@ -273,6 +390,11 @@ class WorkQueue:
         now = datetime.now(UTC)
         node.last_seen = now
         node.last_connected = now
+
+        # ensure this contact is favourited on the gateway so it's protected from
+        # auto-eviction when the 350-contact store fills up
+        if not contact.get("flags", 0) & 1:
+            await self._gateway.set_contact_favourite(contact)
 
         # collect facts
         result.facts_collected = await self._collect_facts(pubkey, contact)
@@ -423,3 +545,27 @@ class WorkQueue:
             await self._db.upsert_operation(op)
 
         return run, failed
+
+
+# ---------------------------------------------------------------------------
+# unfiled contacts — for mch contacts
+# ---------------------------------------------------------------------------
+
+async def get_unfiled_contacts(config: Config, gateway: Gateway) -> list[dict[str, Any]]:
+    """
+    Return gateway contacts that are REP nodes but not yet in config.
+
+    Used by 'mch contacts' to show operators what they can add to config.yaml.
+    """
+    contacts = await gateway.get_contacts(managed_only=False)
+    managed_prefixes = [nc.pubkey_prefix for nc in config.nodes]
+
+    unfiled = []
+    for c in contacts:
+        if c.get("type") != CONTACT_TYPE_REPEATER:
+            continue
+        pubkey = c["public_key"]
+        already_managed = any(pubkey.startswith(p) for p in managed_prefixes)
+        if not already_managed:
+            unfiled.append(c)
+    return unfiled
