@@ -235,7 +235,7 @@ async def test_cycle_audit_does_not_set(db):
 
 
 # ------------------------------------------------------------------
-# login failure
+# login / auth flow
 # ------------------------------------------------------------------
 
 async def test_cycle_login_failure_skips_node(db):
@@ -250,6 +250,98 @@ async def test_cycle_login_failure_skips_node(db):
     results = await wq.run_cycle()
     assert results[0].reachable is False
     assert results[0].error == "login failed"
+
+
+async def test_auth_cached_skips_login(db):
+    """If auth_cached=True in DB, login is not called even if a password is configured."""
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"aabbcc": "hunter2"}
+
+    # pre-seed node with auth_cached=True
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode", auth_cached=True))
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    gw.login.assert_not_awaited()
+
+
+async def test_no_password_skips_login(db):
+    """If there is no secrets entry for a node, login is not called."""
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    # no secrets entry
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    gw.login.assert_not_awaited()
+
+
+async def test_permission_error_triggers_relogin_and_retry(db):
+    """A permission-denied response on a command clears auth_cached, re-logins, and retries."""
+    node_cfg = _node(
+        pubkey="aabbcc", name="TestNode",
+        settings={"name": SettingConfig(desired="TestNode", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"aabbcc": "hunter2"}
+
+    # pre-seed with auth_cached=True so initial login is skipped
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode", auth_cached=True))
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.login = AsyncMock(return_value=True)
+    # first get name → permission error; after re-login, get name → ok; set name → ok
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="no permission"),  # get name — permission denied
+        CommandResult(success=True, text="TestNode"),       # get name — retry after re-login
+        CommandResult(success=True, text="ok"),             # set name (if needed)
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    # re-login must have been called
+    gw.login.assert_awaited_once()
+    # node should be reachable and processed
+    assert results[0].reachable is True
+
+
+async def test_permission_error_relogin_fails_marks_node_offline(db):
+    """If re-login after a permission error also fails, the node is marked offline."""
+    node_cfg = _node(
+        pubkey="aabbcc", name="TestNode",
+        settings={"name": SettingConfig(desired="TestNode", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"aabbcc": "hunter2"}
+
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode", auth_cached=True))
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.login = AsyncMock(return_value=False)  # re-login fails
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    gw.login.assert_awaited_once()
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.OFFLINE
+    assert node.auth_cached is False  # cleared so next cycle will try again
 
 
 # ------------------------------------------------------------------
