@@ -1,6 +1,16 @@
-# mch configuration - full reference
-# Copy to /usr/local/etc/mch/config.yaml and trim to what you need.
-# See examples/secrets.yaml for the companion secrets file.
+# mch - Mesh Config Herder
+# Configuration reference — copy to /usr/local/etc/mch/config.yaml and trim to what you need.
+#
+# mch is a daemon (mchd) that manages fleets of MeshCore repeater nodes.
+# It connects via a locally attached gateway node (USB serial), sends remote CLI
+# commands across the mesh, and keeps each managed node in its declared desired state.
+# Think Ansible for your nodes — without needing SSH or IP connectivity to any of them.
+#
+# Project: https://github.com/rdmarsh/mch
+# Docs:    https://github.com/rdmarsh/mch#readme
+#
+# Node passwords go in a separate secrets file (mode 0600).
+# See examples/secrets.yaml for format.
 
 gateway:
   # USB serial device for the gateway node.

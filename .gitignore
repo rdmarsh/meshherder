@@ -8,4 +8,5 @@ build/
 .ruff_cache/
 mcherd.db
 secrets.yaml
+!examples/secrets.yaml
 *.sock
