@@ -132,6 +132,28 @@ class NodeResult:
 
 
 # ---------------------------------------------------------------------------
+# permission error detection
+# ---------------------------------------------------------------------------
+
+# MeshCore nodes reply with this text when a command is rejected due to
+# insufficient permissions (node ACL not yet authorised for this gateway).
+_PERMISSION_ERROR_MARKERS = ("no permission",)
+
+
+def _is_permission_error(text: str) -> bool:
+    """Return True if the node response indicates insufficient permissions."""
+    lower = text.strip().lower()
+    # strip the "> " CLI prefix if present
+    if lower.startswith("> "):
+        lower = lower[2:]
+    return any(marker in lower for marker in _PERMISSION_ERROR_MARKERS)
+
+
+class _ReloginFailed(Exception):
+    """Raised by _send_authed when re-login after a permission error fails."""
+
+
+# ---------------------------------------------------------------------------
 # work queue
 # ---------------------------------------------------------------------------
 
@@ -396,21 +418,31 @@ class WorkQueue:
         if not contact.get("flags", 0) & 1:
             await self._gateway.set_contact_favourite(contact)
 
-        # collect facts
-        result.facts_collected = await self._collect_facts(pubkey, contact)
+        try:
+            # collect facts
+            result.facts_collected = await self._collect_facts(pubkey, contact, node, node_cfg)
 
-        # enforce / audit settings
-        s_checked, s_enforced, s_drifted = await self._process_settings(
-            pubkey, contact, node_cfg, group_cfg
-        )
-        result.settings_checked = s_checked
-        result.settings_enforced = s_enforced
-        result.settings_drifted = s_drifted
+            # enforce / audit settings
+            s_checked, s_enforced, s_drifted = await self._process_settings(
+                pubkey, contact, node_cfg, group_cfg, node
+            )
+            result.settings_checked = s_checked
+            result.settings_enforced = s_enforced
+            result.settings_drifted = s_drifted
 
-        # run pending operations
-        op_run, op_failed = await self._run_operations(pubkey, contact, node_cfg)
-        result.operations_run = op_run
-        result.operations_failed = op_failed
+            # run pending operations
+            op_run, op_failed = await self._run_operations(pubkey, contact, node_cfg, node)
+            result.operations_run = op_run
+            result.operations_failed = op_failed
+
+        except _ReloginFailed as exc:
+            log.warning("re-login failed for %r — marking offline: %s", name, exc)
+            node.state = NodeState.OFFLINE
+            node.auth_cached = False
+            await self._db.upsert_node(node)
+            await self._db.write_log(pubkey, "ERROR", f"re-login failed: {exc}")
+            result.error = str(exc)
+            return result
 
         # mark node state
         if s_drifted > 0 or op_failed > 0:
@@ -427,12 +459,54 @@ class WorkQueue:
         )
         return result
 
-    async def _collect_facts(self, pubkey: str, contact: dict) -> int:
+    async def _send_authed(
+        self,
+        contact: dict,
+        command: str,
+        node: Node,
+        node_cfg: NodeConfig,
+    ) -> CommandResult:
+        """
+        Send a command; detect permission errors and re-authenticate + retry once.
+
+        If the node replies with a permission-denied response (detected by
+        _is_permission_error), this method:
+          1. Clears auth_cached in the DB.
+          2. Attempts login with the configured password.
+          3. If login succeeds, sets auth_cached=True and retries the command.
+          4. If login fails or no password is configured, returns a failure result.
+        """
+        result = await self._gateway.send_command(contact, command)
+
+        if result.success and _is_permission_error(result.text or ""):
+            log.warning(
+                "permission error on %r for %r — clearing auth cache and re-logging in",
+                command, node.name,
+            )
+            node.auth_cached = False
+            await self._db.upsert_node(node)
+
+            password = self._config.secrets.get(node_cfg.pubkey_prefix)
+            if not password:
+                raise _ReloginFailed("permission denied — no password configured")
+
+            ok = await self._gateway.login(contact, password)
+            if not ok:
+                raise _ReloginFailed("permission denied — re-login failed")
+
+            node.auth_cached = True
+            await self._db.upsert_node(node)
+            # retry the command now that we're authenticated
+            result = await self._gateway.send_command(contact, command)
+
+        return result
+
+    async def _collect_facts(self, pubkey: str, contact: dict, node: Node, node_cfg: NodeConfig) -> int:
         """Run all declared fact commands and store results."""
         collected = 0
         for key in self._config.facts:
             cmd = f"get {key}" if key not in ("ver", "board") else key
-            res = await self._gateway.send_command(contact, cmd)
+            res = await self._send_authed(contact, cmd, node, node_cfg)
             if res.success and res.text:
                 await self._db.upsert_fact(NodeFact(
                     node_pubkey=pubkey,
@@ -450,6 +524,7 @@ class WorkQueue:
         contact: dict,
         node_cfg: NodeConfig,
         group_cfg: GroupConfig | None,
+        node: Node,
     ) -> tuple[int, int, int]:
         """Check and optionally enforce all settings. Returns (checked, enforced, drifted)."""
         checked = enforced = drifted = 0
@@ -463,7 +538,7 @@ class WorkQueue:
                 continue
 
             # get current value
-            res = await self._gateway.send_command(contact, f"get {key}")
+            res = await self._send_authed(contact, f"get {key}", node, node_cfg)
             if not res.success:
                 log.warning("get %s failed for %s: %s", key, pubkey[:12], res.error)
                 continue
@@ -486,9 +561,7 @@ class WorkQueue:
                 drifted += 1
                 if policy == SettingPolicy.ENFORCE:
                     log.info("  enforcing %s: observed=%r desired=%r", key, observed, desired)
-                    set_res = await self._gateway.send_command(
-                        contact, f"set {key} {desired}"
-                    )
+                    set_res = await self._send_authed(contact, f"set {key} {desired}", node, node_cfg)
                     if set_res.success:
                         enforced += 1
                         drifted -= 1  # enforcement fixed it — don't count as residual drift
@@ -522,6 +595,7 @@ class WorkQueue:
         pubkey: str,
         contact: dict,
         node_cfg: NodeConfig,
+        node: Node,
     ) -> tuple[int, int]:
         """Run pending one-shot operations. Returns (run, failed)."""
         run = failed = 0
@@ -529,7 +603,7 @@ class WorkQueue:
 
         for op in pending:
             log.info("  operation: %r", op.command)
-            res = await self._gateway.send_command(contact, op.command)
+            res = await self._send_authed(contact, op.command, node, node_cfg)
             op.run_at = datetime.now(UTC)
             op.response = res.text or res.error
 
