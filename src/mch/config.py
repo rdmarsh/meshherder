@@ -45,7 +45,7 @@ class OperationConfig:
 class RadioConfig:
     """Radio parameters for a node on a non-default frequency."""
     freq: float
-    bw: int
+    bw: float
     sf: int
     cr: int
 

@@ -81,7 +81,7 @@ class Gateway:
 
         self.info = result.payload
         log.info(
-            "gateway connected: name=%r  freq=%.3f  bw=%.0f  sf=%d  cr=%d",
+            "gateway connected: name=%r  freq=%.3f  bw=%g  sf=%d  cr=%d",
             self.info.get("name"),
             self.info.get("radio_freq"),
             self.info.get("radio_bw"),
@@ -242,7 +242,7 @@ class Gateway:
     # ------------------------------------------------------------------
 
     async def hop_radio(
-        self, freq: float, bw: int, sf: int, cr: int
+        self, freq: float, bw: float, sf: int, cr: int
     ) -> tuple[float, float, int, int]:
         """
         Temporarily change the gateway radio config to reach a node on a different frequency.
@@ -258,7 +258,7 @@ class Gateway:
             self.info.get("radio_cr"),
         )
         log.info(
-            "hopping radio: %.3f/%.0f/SF%d → %.3f/%d/SF%d",
+            "hopping radio: %.3f/%g/SF%d → %.3f/%g/SF%d",
             saved[0], saved[1], saved[2], freq, bw, sf,
         )
         await mc.commands.set_radio(freq, bw, sf, cr)
