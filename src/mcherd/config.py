@@ -16,6 +16,7 @@ class GatewayConfig:
     device: str = "/dev/meshcore0"
     baud: int = 115200
     name: str | None = None  # if set, mcherd applies this name to the gateway on startup
+    radio: "RadioConfig | None" = None  # if set, gateway is forced to this freq on startup and restored to it after every hop
 
 
 @dataclass
@@ -95,11 +96,13 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     raw = yaml.safe_load(config_path.read_text())
 
     gw_raw = raw.get("gateway", {})
+    gw_radio_raw = gw_raw.pop("radio", None)
+    gw_radio = RadioConfig(**gw_radio_raw) if gw_radio_raw else None
     sched_raw = raw.get("scheduler", {})
 
     msg_raw = raw.get("messenger", {})
     cfg = Config(
-        gateway=GatewayConfig(**gw_raw),
+        gateway=GatewayConfig(**gw_raw, radio=gw_radio),
         scheduler=SchedulerConfig(**sched_raw),
         db_path=raw.get("db_path", "mcherd.db"),
         socket_path=raw.get("socket_path", "/run/mcherd.sock"),

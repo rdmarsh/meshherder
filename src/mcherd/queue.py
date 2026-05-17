@@ -236,6 +236,13 @@ class WorkQueue:
             if node_cfg and node_cfg.group else None
         )
 
+        log.debug(
+            "gateway radio: %.3f/%.0f/SF%d",
+            self._gateway.info.get("radio_freq", 0),
+            self._gateway.info.get("radio_bw", 0),
+            self._gateway.info.get("radio_sf", 0),
+        )
+
         if contact and node_cfg:
             await self._process_node(node_cfg, group_cfg, contact)
         else:
