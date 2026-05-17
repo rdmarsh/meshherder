@@ -10,7 +10,7 @@
 # Docs:    https://github.com/rdmarsh/mch#readme
 #
 # Node passwords go in a separate secrets file (mode 0600).
-# See examples/secrets.yaml for format.
+# See examples/secrets.example.yaml for format.
 
 gateway:
   # USB serial device for the gateway node.

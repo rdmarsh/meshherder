@@ -84,8 +84,8 @@ sudo usermod -aG dialout mch
 sudo install -d -o root -g mch -m 750 /usr/local/etc/mch
 
 # Config and secrets
-sudo install -o root -g mch -m 640 examples/config.yaml /usr/local/etc/mch/config.yaml
-sudo install -o root -g mch -m 600 examples/secrets.yaml /usr/local/etc/mch/secrets.yaml
+sudo install -o root -g mch -m 640 examples/config.example.yaml /usr/local/etc/mch/config.yaml
+sudo install -o root -g mch -m 600 examples/secrets.example.yaml /usr/local/etc/mch/secrets.yaml
 
 # Database directory
 sudo install -d -o mch -g mch -m 755 /var/lib/mch
@@ -187,7 +187,7 @@ Set the `device` path in `/usr/local/etc/mch/config.yaml` to `/dev/meshcore0`.
 
 ## Configuration
 
-Copy `examples/config.yaml` to `/usr/local/etc/mch/config.yaml` and edit it. The example file
+Copy `examples/config.example.yaml` to `/usr/local/etc/mch/config.yaml` and edit it. The example file
 documents every available option with comments.
 
 A minimal working config:
