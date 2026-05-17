@@ -428,6 +428,7 @@ async def test_run_node_forces_immediate_sync(db):
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [_contact("aabbccdd1122")]  # prime cache as run() would at startup
 
     result = await wq.run_node("aabbcc")
     assert result is not None
@@ -454,6 +455,7 @@ async def test_run_node_ambiguous_prefix_raises(db):
     ]
     gw = _make_gateway(contacts=contacts)
     wq = WorkQueue(cfg, gw, db)
+    wq._contacts = contacts  # prime cache as run() would at startup
     with pytest.raises(ValueError, match="ambiguous"):
         await wq.run_node("aa")  # 2 chars — matches both
 
