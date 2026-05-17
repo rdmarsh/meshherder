@@ -286,6 +286,17 @@ class Database:
         )
         await db.commit()
 
+    async def get_last_operation(self, node_pubkey: str, command: str) -> "OperationRecord | None":
+        """Return the most recent record for (node, command), or None if never run."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM operations WHERE node_pubkey = ? AND command = ?"
+            " ORDER BY COALESCE(run_at, queued_at) DESC LIMIT 1",
+            (node_pubkey, command),
+        ) as cur:
+            row = await cur.fetchone()
+        return _row_to_operation(row) if row else None
+
     async def get_pending_operations(self, node_pubkey: str) -> list[OperationRecord]:
         db = self._db_required()
         async with db.execute(
