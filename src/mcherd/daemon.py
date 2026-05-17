@@ -247,6 +247,7 @@ class Daemon:
         self._server = await asyncio.start_unix_server(
             client_connected, path=sock_path
         )
+        os.chmod(sock_path, 0o660)  # group-writable so mcherd group members can connect
         log.info("control socket listening at %s", sock_path)
 
         loop = asyncio.get_running_loop()

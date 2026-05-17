@@ -35,7 +35,7 @@ DeviceAllow=char-tty rw
 # Creates /run/mcherd/ with 0755 and cleans it on stop.
 # socket_path in config.yaml must be /run/mcherd/mcherd.sock
 RuntimeDirectory=mcherd
-RuntimeDirectoryMode=0755
+RuntimeDirectoryMode=0750
 
 StandardOutput=journal
 StandardError=journal
