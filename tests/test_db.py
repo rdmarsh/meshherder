@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from datetime import UTC, datetime
 
-from mcherd.db import Database
-from mcherd.models import (
+from mch.db import Database
+from mch.models import (
     Node,
     NodeFact,
     NodeState,

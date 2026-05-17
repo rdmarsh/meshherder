@@ -23,13 +23,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from mcherd.config import Config, NodeConfig, GroupConfig, SettingConfig
-from mcherd.db import Database
-from mcherd.gateway import CommandResult, Gateway, GatewayError
+from mch.config import Config, NodeConfig, GroupConfig, SettingConfig
+from mch.db import Database
+from mch.gateway import CommandResult, Gateway, GatewayError
 
 if TYPE_CHECKING:
-    from mcherd.messenger import Messenger
-from mcherd.models import (
+    from mch.messenger import Messenger
+from mch.models import (
     CONTACT_TYPE_REPEATER,
     Node,
     NodeFact,
@@ -302,7 +302,7 @@ class WorkQueue:
 
         if node_cfg is None:
             # not in config — create a minimal NodeConfig so we can at least process it
-            from mcherd.config import NodeConfig as _NC
+            from mch.config import NodeConfig as _NC
             node_cfg = _NC(pubkey_prefix=pubkey[:8])
 
         result = await self._process_node(node_cfg, group_cfg, contact)

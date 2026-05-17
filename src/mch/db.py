@@ -8,7 +8,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from mcherd.models import (
+from mch.models import (
     Node,
     NodeFact,
     NodeState,

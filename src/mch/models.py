@@ -48,7 +48,7 @@ class Node:
 
 @dataclass
 class NodeFact:
-    """Read-only inventory data collected from a node. Never set by mcherd."""
+    """Read-only inventory data collected from a node. Never set by mchd."""
     node_pubkey: str
     key: str              # e.g. "ver", "board", "role", "repeat"
     value: str | None

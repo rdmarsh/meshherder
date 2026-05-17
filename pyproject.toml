@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mcherd"
+name = "mch"
 version = "0.1.0"
-description = "MeshCore fleet management daemon"
+description = "Fleet configuration management for MeshCore nodes"
 requires-python = ">=3.11"
 dependencies = [
     "meshcore>=0.1",
@@ -15,8 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-mcherd = "mcherd.daemon:main"
-mch    = "mcherd.cli:main"
+mchd = "mch.daemon:main"
+mch  = "mch.cli:main"
 
 [project.optional-dependencies]
 dev = [

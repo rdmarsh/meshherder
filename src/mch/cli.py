@@ -1,5 +1,5 @@
 """
-mch — control CLI for the mcherd daemon.
+mch — control CLI for the mchd daemon.
 
 Talks to the daemon over its Unix socket.
 """
@@ -16,7 +16,7 @@ from typing import Any
 import click
 
 
-DEFAULT_SOCKET = "/run/mcherd/mcherd.sock"
+DEFAULT_SOCKET = "/run/mch/mchd.sock"
 
 
 async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
@@ -24,7 +24,7 @@ async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
         reader, writer = await asyncio.open_unix_connection(socket_path)
     except (FileNotFoundError, ConnectionRefusedError):
         click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
-        click.echo("  is mcherd running?  try: mcherd --help", err=True)
+        click.echo("  is mchd running?  try: mchd --help", err=True)
         raise SystemExit(1)
 
     writer.write((json.dumps(cmd) + "\n").encode())
@@ -249,7 +249,7 @@ def contacts(ctx: click.Context) -> None:
     """Show gateway repeater contacts not yet in your config.yaml.
 
     Prints ready-to-paste YAML snippets. Review and append to the nodes:
-    section of your config.yaml for any nodes you want mcherd to manage.
+    section of your config.yaml for any nodes you want mch to manage.
     """
     resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
     data = _check(resp)
@@ -276,32 +276,32 @@ def contacts(ctx: click.Context) -> None:
 
 @cli.command()
 def start() -> None:
-    """Start the mcherd daemon via systemd."""
-    result = subprocess.run(["systemctl", "start", "mcherd"], capture_output=True, text=True)
+    """Start the mchd daemon via systemd."""
+    result = subprocess.run(["systemctl", "start", "mch"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl start failed", err=True)
         raise SystemExit(result.returncode)
-    click.echo("mcherd started")
+    click.echo("mchd started")
 
 
 @cli.command()
 def stop() -> None:
-    """Stop the mcherd daemon via systemd."""
-    result = subprocess.run(["systemctl", "stop", "mcherd"], capture_output=True, text=True)
+    """Stop the mchd daemon via systemd."""
+    result = subprocess.run(["systemctl", "stop", "mch"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl stop failed", err=True)
         raise SystemExit(result.returncode)
-    click.echo("mcherd stopped")
+    click.echo("mchd stopped")
 
 
 @cli.command()
 def restart() -> None:
-    """Restart the mcherd daemon via systemd."""
-    result = subprocess.run(["systemctl", "restart", "mcherd"], capture_output=True, text=True)
+    """Restart the mchd daemon via systemd."""
+    result = subprocess.run(["systemctl", "restart", "mch"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl restart failed", err=True)
         raise SystemExit(result.returncode)
-    click.echo("mcherd restarted")
+    click.echo("mchd restarted")
 
 
 # ---------------------------------------------------------------------------
