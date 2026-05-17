@@ -120,6 +120,8 @@ class Messenger:
 
         if cmd in ("help", "?"):
             return _help_text()
+        if cmd == "cmd":
+            return "status nodes node drift logs help"
         if cmd == "status":
             return await self._cmd_status()
         if cmd == "nodes":

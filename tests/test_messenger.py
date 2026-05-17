@@ -188,6 +188,15 @@ async def test_unknown_command(db):
     assert "unknown" in reply.lower()
 
 
+async def test_cmd_command_lists_commands(db):
+    """'cmd' returns a short command list fitting in a single DM (~150 chars)."""
+    m, gw = _make_messenger(db)
+    reply = await m._handle_command("cmd")
+    assert "status" in reply
+    assert "nodes" in reply
+    assert len(reply.encode("utf-8")) <= 150
+
+
 # ---------------------------------------------------------------------------
 # channel announcements
 # ---------------------------------------------------------------------------

@@ -209,8 +209,8 @@ async def test_cycle_enforces_drifted_setting(db):
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
-    assert results[0].settings_drifted == 1
     assert results[0].settings_enforced == 1
+    assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
 
 
 async def test_cycle_audit_does_not_set(db):
@@ -439,6 +439,48 @@ async def test_unfiled_contacts_excludes_managed_nodes(db):
     names = [c["adv_name"] for c in result]
     assert "Managed" not in names
     assert "NewREP" in names
+
+
+async def test_cycle_state_configured_after_successful_enforcement(db):
+    """State is CONFIGURED after drift is detected and successfully enforced."""
+    node_cfg = _node(
+        pubkey="aabbcc", name="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="off"),   # get powersaving — drift
+        CommandResult(success=True, text="ok"),    # set powersaving on — success
+    ])
+    wq = WorkQueue(cfg, gw, db)
+    await wq.run_cycle()
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.CONFIGURED
+
+
+async def test_cycle_observed_updated_after_set(db):
+    """After a successful set, the observed value in the DB reflects the new value."""
+    node_cfg = _node(
+        pubkey="aabbcc", name="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="off"),   # get powersaving — drift
+        CommandResult(success=True, text="ok"),    # set powersaving on — success
+    ])
+    wq = WorkQueue(cfg, gw, db)
+    await wq.run_cycle()
+    settings = await db.get_settings("aabbccdd1122")
+    ps = next(s for s in settings if s.key == "powersaving")
+    assert ps.observed == "on"
+    assert ps.drift is False
 
 
 async def test_unfiled_contacts_excludes_non_repeaters(db):

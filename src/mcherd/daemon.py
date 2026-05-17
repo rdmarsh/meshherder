@@ -110,6 +110,10 @@ async def _dispatch(
         pubkey = req.get("pubkey", "")
         node = await db.get_node(pubkey)
         if not node:
+            # fall back to prefix match
+            all_nodes = await db.get_all_nodes()
+            node = next((n for n in all_nodes if n.pubkey.startswith(pubkey)), None)
+        if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
         facts = await db.get_facts(pubkey)
         settings = await db.get_settings(pubkey)
