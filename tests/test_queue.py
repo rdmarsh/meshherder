@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -339,6 +339,66 @@ async def test_permission_error_relogin_fails_marks_node_offline(db):
 # ------------------------------------------------------------------
 # operations
 # ------------------------------------------------------------------
+
+async def test_config_operations_seeded_on_first_run(db):
+    """Operations in config are queued as pending when they have never run."""
+    from mch.config import OperationConfig
+    op_cfg = OperationConfig(command="clock sync", every_hours=24)
+    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    assert results[0].operations_run == 1
+
+
+async def test_config_operations_not_reseeded_if_recent(db):
+    """Operations that ran within every_hours are not re-queued."""
+    from mch.config import OperationConfig
+    op_cfg = OperationConfig(command="clock sync", every_hours=24)
+    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    # insert a successful run 1 hour ago — well within the 24h window
+    op = OperationRecord(
+        node_pubkey="aabbccdd1122", command="clock sync", every_hours=24,
+        status=OperationStatus.SUCCESS, run_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+    await db.upsert_operation(op)
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    assert results[0].operations_run == 0  # not due yet
+
+
+async def test_config_operations_reseeded_when_due(db):
+    """Operations that ran longer than every_hours ago are re-queued."""
+    from mch.config import OperationConfig
+    op_cfg = OperationConfig(command="clock sync", every_hours=24)
+    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    # insert a successful run 25 hours ago — past the 24h window
+    op = OperationRecord(
+        node_pubkey="aabbccdd1122", command="clock sync", every_hours=24,
+        status=OperationStatus.SUCCESS, run_at=datetime.now(UTC) - timedelta(hours=25),
+    )
+    await db.upsert_operation(op)
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    assert results[0].operations_run == 1
+
 
 async def test_cycle_runs_pending_operations(db):
     node_cfg = _node(pubkey="aabbcc", name="TestNode")

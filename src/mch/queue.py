@@ -440,7 +440,8 @@ class WorkQueue:
             result.settings_enforced = s_enforced
             result.settings_drifted = s_drifted
 
-            # run pending operations
+            # seed operations from config into DB, then run what's pending
+            await self._seed_operations(pubkey, node_cfg)
             op_run, op_failed = await self._run_operations(pubkey, contact, node_cfg, node)
             result.operations_run = op_run
             result.operations_failed = op_failed
@@ -603,6 +604,30 @@ class WorkQueue:
             await self._db.upsert_setting(setting)
 
         return checked, enforced, drifted
+
+    async def _seed_operations(self, pubkey: str, node_cfg: NodeConfig) -> None:
+        """Queue any config operations that are due (never run, or past every_hours)."""
+        for op_cfg in node_cfg.operations:
+            last = await self._db.get_last_operation(pubkey, op_cfg.command)
+            if last is None:
+                # never seen before — queue it
+                pass
+            elif last.status == OperationStatus.SUCCESS and last.run_at is not None:
+                due_after = last.run_at + timedelta(hours=op_cfg.every_hours)
+                if datetime.now(UTC) < due_after:
+                    continue  # ran recently, not due yet
+                # past the window — fall through to queue a new run
+            else:
+                continue  # pending or failed — already in queue, don't add again
+
+            await self._db.upsert_operation(OperationRecord(
+                node_pubkey=pubkey,
+                command=op_cfg.command,
+                every_hours=op_cfg.every_hours,
+                status=OperationStatus.PENDING,
+                queued_at=datetime.now(UTC),
+            ))
+            log.debug("queued operation %r for %s", op_cfg.command, pubkey[:12])
 
     async def _run_operations(
         self,
