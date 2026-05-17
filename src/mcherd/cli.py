@@ -16,7 +16,7 @@ from typing import Any
 import click
 
 
-DEFAULT_SOCKET = "/run/mcherd.sock"
+DEFAULT_SOCKET = "/run/mcherd/mcherd.sock"
 
 
 async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:

@@ -88,7 +88,7 @@ class Config:
     messenger: MessengerConfig = field(default_factory=MessengerConfig)
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
     db_path: str = "mcherd.db"
-    socket_path: str = "/run/mcherd.sock"
+    socket_path: str = "/run/mcherd/mcherd.sock"
     secrets: dict[str, str] = field(default_factory=dict)  # pubkey_prefix -> password
 
 
