@@ -93,6 +93,21 @@ class Gateway:
             log.info("setting gateway name to %r", self._config.name)
             await self._mc.commands.set_name(self._config.name)
 
+        if self._config.radio:
+            r = self._config.radio
+            if (r.freq != self.info.get("radio_freq")
+                    or r.bw != self.info.get("radio_bw")
+                    or r.sf != self.info.get("radio_sf")):
+                log.info(
+                    "forcing gateway to home freq: %.3f/%d/SF%d",
+                    r.freq, r.bw, r.sf,
+                )
+                await self._mc.commands.set_radio(r.freq, r.bw, r.sf, r.cr)
+                self.info["radio_freq"] = r.freq
+                self.info["radio_bw"] = r.bw
+                self.info["radio_sf"] = r.sf
+                self.info["radio_cr"] = r.cr
+
         self._receive_task = asyncio.create_task(
             self._receive_loop(), name="gateway-receive"
         )
