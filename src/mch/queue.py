@@ -327,7 +327,7 @@ class WorkQueue:
 
         # register all visible contacts with the messenger so it can reply to DMs
         if self._messenger:
-            for c in contacts:
+            for c in self._contacts:
                 self._messenger.register_contact(c["public_key"][:12], c)
 
         group_configs = {g.name: g for g in self._config.groups}
