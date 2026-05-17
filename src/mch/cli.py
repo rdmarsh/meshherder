@@ -258,16 +258,25 @@ def contacts(ctx: click.Context) -> None:
         click.echo("no unfiled repeater contacts found")
         return
 
-    click.echo("# Gateway repeater contacts not in your config.yaml.")
-    click.echo("# Append any of these to the 'nodes:' section to manage them.\n")
+    click.echo("# Repeater contacts visible to the gateway but not in your config.yaml.")
+    click.echo("# Review each one, then paste the snippets into your config files.\n")
+
     for c in data:
-        prefix = c.get("public_key", "")[:8]
-        name = c.get("adv_name", "")
-        click.echo(f"- pubkey_prefix: {prefix}")
-        if name:
-            click.echo(f'  name: "{name}"')
-        click.echo("  # desired: []")
-        click.echo("")
+        pubkey = c.get("public_key", "")
+        prefix = pubkey[:8]
+        name = c.get("adv_name", "") or "unknown"
+        sep = "─" * max(0, 60 - len(name))
+
+        click.echo(f"# ── {name} {sep}")
+        click.echo(f"# full pubkey: {pubkey}\n")
+
+        click.echo("# config.yaml — append to the 'nodes:' section:")
+        click.echo(f"  - pubkey_prefix: {prefix}")
+        click.echo(f'    name: "{name}"')
+        click.echo(f"    group:           # assign to a group, or remove this line\n")
+
+        click.echo("# secrets.yaml — append to the 'nodes:' section:")
+        click.echo(f"  {prefix}: \"\"     # add password if required, or leave blank\n")
 
 
 # ---------------------------------------------------------------------------
