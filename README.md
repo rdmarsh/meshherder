@@ -1,0 +1,267 @@
+# mch — Mesh Config Herder
+
+Herding config across MeshCore nodes.
+
+mch manages fleets of [MeshCore](https://meshcore.io) repeater nodes from a single host. You declare
+the desired state for each node in a YAML config file; mchd (the daemon) connects to a
+locally-attached gateway node over USB serial, walks the mesh, and brings each managed node into
+compliance — one node at a time, without hammering the mesh.
+
+Think Ansible for your nodes, running continuously in the background.
+
+## Features
+
+- **Desired-state config** — declare `owner.info`, `powersaving`, TX power, and any other
+  `get`/`set` CLI setting. mchd enforces, audits, or ignores each key according to a configurable
+  policy.
+- **Read-only facts** — a configurable list of read-only data (firmware version, hardware name,
+  role, and more) collected each sync cycle and stored in a local SQLite database.
+- **Multi-frequency support** — nodes on different radio settings? Add `radio:` to the node entry;
+  mchd hops the gateway, manages the node, and restores the home frequency when done.
+- **Staggered scheduler** — nodes are spread randomly across the sync window so mchd restarts never
+  cause a sync surge.
+- **DM commands** — You can send commands to mchd over the mesh from your MeshCore device. Useful
+  in the field: just replaced a node and want to bring it into compliance immediately? Send `sync
+  <pubkey>` as a direct message to the gateway from wherever you are on the mesh. Note: the
+  replacement node must already be in the gateway's contact store — a brand-new node won't be
+  reachable until its advertisement has been received and it has been added to config.
+- **Rate limiting** — mchd never talks to more than one node at a time. After finishing each node
+  it waits `inter_node_delay_seconds` before starting the next (skipped if there is only one node
+  in the run). Each node is visited at most once per `sync_interval_days`, spread randomly across
+  the window.
+- **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
+
+## Requirements
+
+- Python 3.11+
+- Linux (tested on Raspberry Pi OS / Ubuntu); macOS works for development
+- A MeshCore node attached over USB serial (the gateway)
+
+## Install
+
+### Development
+
+```bash
+git clone https://github.com/rdmarsh/mch
+cd mch
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+`mchd` and `mch` are then available inside the venv.
+
+### Production (server / Raspberry Pi)
+
+Clone to a permanent location and install into a venv there:
+
+```bash
+sudo git clone https://github.com/rdmarsh/mch /opt/mch
+cd /opt/mch
+python3 -m venv .venv
+source .venv/bin/activate
+pip install .
+deactivate
+```
+
+Symlink the binaries onto the system PATH so the service file works as-is:
+
+```bash
+sudo ln -sf /opt/mch/.venv/bin/mchd /usr/local/bin/mchd
+sudo ln -sf /opt/mch/.venv/bin/mch  /usr/local/bin/mch
+```
+
+#### Create the system user and directories
+
+```bash
+# Dedicated system account — no home dir, no login shell
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
+    --comment "Mesh Config Herder" mch
+# Grant serial port access
+sudo usermod -aG dialout mch
+
+# Config directory — group-readable so operators can inspect, not world-readable
+sudo install -d -o root -g mch -m 750 /usr/local/etc/mch
+
+# Config and secrets
+sudo install -o root -g mch -m 640 examples/config.yaml /usr/local/etc/mch/config.yaml
+sudo install -o root -g mch -m 600 examples/secrets.yaml /usr/local/etc/mch/secrets.yaml
+
+# Database directory
+sudo install -d -o mch -g mch -m 755 /var/lib/mch
+```
+
+#### Add yourself to the mch group
+
+The `mch` CLI talks to the daemon over a Unix socket owned by the `mch` group. Any user who needs
+CLI access must be in that group:
+
+```bash
+sudo usermod -aG mch <your-username>
+```
+
+Log out and back in (or run `newgrp mch`) for the membership to take effect.
+
+#### Install and start the service
+
+```bash
+sudo cp systemd/mchd.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mchd
+```
+
+Check it started:
+
+```bash
+sudo systemctl status mchd
+mch status
+```
+
+## udev rule (recommended)
+
+By default a MeshCore node appears as `/dev/ttyACM0` or similar, and that path can change between
+reboots if you have other USB serial devices. A udev rule creates a stable symlink at
+`/dev/meshcore0` so your config never needs updating, and lets systemd start mchd automatically
+when the gateway is plugged in.
+
+**Find your device's vendor ID, product ID, and serial number:**
+
+Plug in the gateway node, then run:
+
+```bash
+udevadm info --name=/dev/ttyACM0 --attribute-walk \
+    | grep -E 'idVendor|idProduct|serial' | head -8
+```
+
+Use the values from the **first** (innermost) block — that is the USB device itself, not the hub.
+For example:
+
+```
+ATTRS{idVendor}=="303a"
+ATTRS{idProduct}=="0002"
+ATTRS{serial}=="441BF66F9FDC"
+```
+
+Common vendor/product IDs for MeshCore hardware:
+
+| Chip | idVendor | idProduct |
+|---|---|---|
+| ESP32-S3 (most recent MeshCore hardware) | `303a` | `0002` |
+| Seeed XIAO (nrf52) | `2886` | `0045` |
+| CP2102 | `10c4` | `ea60` |
+| CH340 | `1a86` | `7523` |
+
+**Create the rule:**
+
+Create `/etc/udev/rules.d/99-meshcore.rules`. If you know the serial number of your gateway
+device (recommended — prevents the rule matching a different device of the same type):
+
+```
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{serial}=="441BF66F9FDC", \
+  SYMLINK+="meshcore0", GROUP="dialout", MODE="0660", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}="mchd.service"
+```
+
+Or match by vendor and product alone (simpler, but matches any device of that type):
+
+```
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="0002", \
+  SYMLINK+="meshcore0", GROUP="dialout", MODE="0660", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}="mchd.service"
+```
+
+Replace the `idVendor`, `idProduct`, and `serial` values with the ones from your hardware.
+
+The `TAG+="systemd"` line makes the device visible as a systemd device unit
+(`dev-meshcore0.device`), which is what `mchd.service` waits on at boot.
+
+**Reload udev and test:**
+
+```bash
+sudo udevadm control --reload-rules
+# Unplug and replug the gateway, then verify:
+ls -l /dev/meshcore0
+```
+
+Set the `device` path in `/usr/local/etc/mch/config.yaml` to `/dev/meshcore0`.
+
+## Configuration
+
+Copy `examples/config.yaml` to `/usr/local/etc/mch/config.yaml` and edit it. The example file
+documents every available option with comments.
+
+A minimal working config:
+
+```yaml
+gateway:
+  device: /dev/meshcore0
+  baud: 115200
+  radio:
+    freq: 915.800
+    bw: 250
+    sf: 10
+    cr: 5
+
+scheduler:
+  sync_interval_days: 1
+  inter_node_delay_seconds: 120
+
+nodes:
+  - pubkey_prefix: aabbccdd
+    name: MyRepeater
+    default_policy: enforce
+    settings:
+      owner.info: "Managed by mch"
+```
+
+Run `mch contacts` to list repeater nodes visible to the gateway that are not yet in your config,
+with pubkey prefixes ready to paste in.
+
+**Passwords:** nodes that require a login go in `secrets.yaml` (mode 0600):
+
+```yaml
+nodes:
+  aabbccdd: "hunter2"
+```
+
+mchd only uses the password when it gets a permission error from a node — it does not send it on
+every connection. After the first successful login the gateway's public key is added to the node's
+ACL, so subsequent syncs proceed without a password. Keep the entry in `secrets.yaml` anyway: if
+the ACL is cleared (without a factory reset), mchd can re-enrol automatically using the configured
+password. After a factory reset the node's password reverts to unknown, so manual re-enrolment
+is required — mchd will mark the node offline until the password is corrected.
+
+## CLI reference
+
+```
+mch status           Daemon health, queue depth, gateway info
+mch nodes            All managed nodes: last seen, config state, sync state
+mch node <name>      Detail for one node (name or pubkey prefix)
+mch contacts         Repeater nodes visible to the gateway not yet in config
+mch sync             Trigger an immediate sync cycle (respects rate limiting)
+mch sync <prefix>    Move one node to the front of the queue
+```
+
+`mch sync <prefix>` runs that node immediately and waits — the CLI returns once the sync is
+complete. It collects facts, checks and enforces settings, runs any due operations, then
+reschedules the node back into normal rotation. Use this when you need a result right now:
+
+```
+mch sync 75ab8517    # sync the node whose pubkey starts with 75ab8517; CLI waits for the result
+```
+
+`mch sync` (no argument) starts a full sweep of every node in the background — the CLI returns
+"sync started" immediately and mchd works through the list in config order, pausing
+`inter_node_delay_seconds` between each node, exactly as a scheduled cycle would. With many nodes
+and a long delay this can take a while; check `mch nodes` to watch progress.
+
+## Upgrading
+
+```bash
+cd /opt/mch
+sudo git pull
+source .venv/bin/activate
+pip install .
+deactivate
+sudo systemctl restart mchd
+```

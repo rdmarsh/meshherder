@@ -1,5 +1,5 @@
 # mch configuration - full reference
-# Copy to /etc/mch/config.yaml and trim to what you need.
+# Copy to /usr/local/etc/mch/config.yaml and trim to what you need.
 # See examples/secrets.yaml for the companion secrets file.
 
 gateway:
@@ -46,7 +46,7 @@ scheduler:
 
 db_path: /var/lib/mch/mch.db
 socket_path: /run/mch/mchd.sock
-secrets_file: /etc/mch/secrets.yaml   # optional; default: sibling secrets.yaml
+secrets_file: /usr/local/etc/mch/secrets.yaml   # optional; defaults to secrets.yaml in the same directory as config.yaml
 
 # Facts collected from every node each sync cycle (read-only CMDB data).
 # All fact commands run within a single node session; inter_node_delay_seconds
