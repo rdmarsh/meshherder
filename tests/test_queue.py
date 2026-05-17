@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcherd.config import (
+from mch.config import (
     Config,
     GatewayConfig,
     GroupConfig,
@@ -16,16 +16,16 @@ from mcherd.config import (
     SchedulerConfig,
     SettingConfig,
 )
-from mcherd.db import Database
-from mcherd.gateway import CommandResult, Gateway
-from mcherd.models import (
+from mch.db import Database
+from mch.gateway import CommandResult, Gateway
+from mch.models import (
     Node,
     NodeState,
     OperationRecord,
     OperationStatus,
     SettingPolicy,
 )
-from mcherd.queue import (
+from mch.queue import (
     WorkQueue,
     all_setting_keys,
     get_unfiled_contacts,
@@ -586,7 +586,7 @@ async def test_unfiled_contacts_excludes_non_repeaters(db):
 
 async def test_node_on_different_freq_hops_radio(db):
     """A node with a radio config causes the gateway to hop before processing and restore after."""
-    from mcherd.config import RadioConfig
+    from mch.config import RadioConfig
     node_cfg = _node(pubkey="aabbcc", name="TestNode",
                      radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5))
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -620,7 +620,7 @@ async def test_node_no_radio_config_no_hop(db):
 
 async def test_radio_restored_on_relogin_failure(db):
     """Radio is restored via finally even when processing raises _ReloginFailed."""
-    from mcherd.config import RadioConfig
+    from mch.config import RadioConfig
     node_cfg = _node(
         pubkey="aabbcc", name="TestNode",
         radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5),

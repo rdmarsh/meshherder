@@ -27,7 +27,7 @@ from typing import Any, Awaitable, Callable
 from meshcore import MeshCore
 from meshcore.events import EventType
 
-from mcherd.config import GatewayConfig
+from mch.config import GatewayConfig
 
 log = logging.getLogger(__name__)
 

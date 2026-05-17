@@ -9,8 +9,8 @@ import pytest
 
 from meshcore.events import Event, EventType
 
-from mcherd.config import GatewayConfig
-from mcherd.gateway import CommandResult, Gateway, GatewayError
+from mch.config import GatewayConfig
+from mch.gateway import CommandResult, Gateway, GatewayError
 
 
 def make_event(etype: EventType, payload: object, **attrs) -> Event:
@@ -38,7 +38,7 @@ async def test_connect_sets_info():
     # receive loop must not spin on an unmocked dispatcher — exit cleanly via CancelledError
     fake_mc.dispatcher.wait_for_event = AsyncMock(side_effect=asyncio.CancelledError)
 
-    with patch("mcherd.gateway.MeshCore.create_serial", AsyncMock(return_value=fake_mc)):
+    with patch("mch.gateway.MeshCore.create_serial", AsyncMock(return_value=fake_mc)):
         await gw.connect()
 
     try:
@@ -53,7 +53,7 @@ async def test_connect_raises_when_no_device():
     cfg = make_config()
     gw = Gateway(cfg)
 
-    with patch("mcherd.gateway.MeshCore.create_serial", AsyncMock(return_value=None)):
+    with patch("mch.gateway.MeshCore.create_serial", AsyncMock(return_value=None)):
         with pytest.raises(GatewayError, match="no response from gateway"):
             await gw.connect()
 
@@ -71,7 +71,7 @@ async def test_connect_sets_name_when_configured():
     fake_mc.commands.set_name = AsyncMock(return_value=make_event(EventType.OK, {}))
     fake_mc.dispatcher.wait_for_event = AsyncMock(side_effect=asyncio.CancelledError)
 
-    with patch("mcherd.gateway.MeshCore.create_serial", AsyncMock(return_value=fake_mc)):
+    with patch("mch.gateway.MeshCore.create_serial", AsyncMock(return_value=fake_mc)):
         await gw.connect()
 
     try:

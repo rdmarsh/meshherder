@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mcherd.db import Database
-from mcherd.gateway import Gateway
-from mcherd.messenger import Messenger, _chunk, _find_node
-from mcherd.models import Node, NodeState, SettingPolicy, SettingRecord
+from mch.db import Database
+from mch.gateway import Gateway
+from mch.messenger import Messenger, _chunk, _find_node
+from mch.models import Node, NodeState, SettingPolicy, SettingRecord
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ async def test_status_command_no_nodes(db):
 
 
 async def test_status_command_with_nodes(db):
-    from mcherd.db import Database
+    from mch.db import Database
     await db.upsert_node(Node(pubkey="aa", name="A", state=NodeState.CONFIGURED))
     await db.upsert_node(Node(pubkey="bb", name="B", state=NodeState.PARTIAL))
     m, gw = _make_messenger(db)
@@ -204,7 +204,7 @@ async def test_cmd_command_lists_commands(db):
 async def test_announce_cycle_with_channel(db):
     m, gw = _make_messenger(db, announce_channel=1)
     await m.announce_cycle_complete(node_count=5, drift_count=0)
-    gw.send_channel_msg.assert_called_once_with(1, "mcherd: cycle done — 5 nodes")
+    gw.send_channel_msg.assert_called_once_with(1, "mchd: cycle done — 5 nodes")
 
 
 async def test_announce_cycle_with_drift(db):

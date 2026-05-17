@@ -1,5 +1,5 @@
-# mcherd configuration - full reference
-# Copy to /etc/mcherd/config.yaml and trim to what you need.
+# mch configuration - full reference
+# Copy to /etc/mch/config.yaml and trim to what you need.
 # See examples/secrets.yaml for the companion secrets file.
 
 gateway:
@@ -12,13 +12,13 @@ gateway:
   baud: 115200
 
   # Optional: set/enforce this name on the gateway node on startup.
-  # name: mcherd-gw
+  # name: mch-gw
 
   # Home frequency for the gateway.
-  # If set, mcherd forces the gateway to these settings on startup - useful after
+  # If set, mchd forces the gateway to these settings on startup - useful after
   # a crash or a factory-reset radio that has reverted to default settings.
   # After every per-node frequency hop, the gateway is always restored here.
-  # If not set, mcherd leaves the gateway on whatever frequency it is already on.
+  # If not set, mchd leaves the gateway on whatever frequency it is already on.
   #
   # freq, bw, and sf must match the mesh you are joining - nodes cannot hear each
   # other if these differ. cr can be set independently per node (it is included in
@@ -44,9 +44,9 @@ scheduler:
   # many nodes or a busy channel.
   inter_node_delay_seconds: 120
 
-db_path: /var/lib/mcherd/mcherd.db
-socket_path: /run/mcherd/mcherd.sock
-secrets_file: /etc/mcherd/secrets.yaml   # optional; default: sibling secrets.yaml
+db_path: /var/lib/mch/mch.db
+socket_path: /run/mch/mchd.sock
+secrets_file: /etc/mch/secrets.yaml   # optional; default: sibling secrets.yaml
 
 # Facts collected from every node each sync cycle (read-only CMDB data).
 # All fact commands run within a single node session; inter_node_delay_seconds
@@ -63,7 +63,7 @@ facts:
 # Messenger: incoming DM commands and cycle announcements.
 messenger:
   # Only nodes whose public key starts with one of these prefixes can issue DM
-  # commands to mcherd. Get the public key from 'mch contacts' or 'meshcli list'.
+  # commands to mchd. Get the public key from 'mch contacts' or 'meshcli list'.
   # The mesh protocol only includes the first 12 characters of a public key in
   # messages, so only those 12 characters are actually checked - 12 characters is
   # sufficient. Using the full key is fine too and makes the intent unambiguous.
@@ -72,13 +72,13 @@ messenger:
     - e6a56d4452ad   # Alice portable
 
   # Channel slot number to post sync cycle summaries to (e.g. a channel named
-  # "#mcherd"). MeshCore uses numbered slots - slot 0 is the first channel shown
+  # "#mch"). MeshCore uses numbered slots - slot 0 is the first channel shown
   # in the app. Omit or set to null to disable channel announcements.
   # announce_channel: 1
 
-# Setting policies control what mcherd does when it checks a setting on a node.
+# Setting policies control what mchd does when it checks a setting on a node.
 # Checks happen at each scheduled sync cycle for the node - not continuously.
-# When a node's turn comes up in the scheduler, mcherd reads the current value
+# When a node's turn comes up in the scheduler, mchd reads the current value
 # and acts according to the policy:
 #
 #   enforce - if the current value differs from 'desired', write the desired
@@ -102,23 +102,23 @@ groups:
       # Two ways to configure a setting key:
       #
       # Short form - just the desired value; policy comes from the group/node default:
-      #   owner.info: "Managed by mcherd"
+      #   owner.info: "Managed by mch"
       #
       # Long form - desired value plus an explicit policy and/or check frequency:
       #   owner.info:
-      #     desired: "Managed by mcherd"
+      #     desired: "Managed by mch"
       #     policy: enforce
       #     poll_hours: 12
       #
       # Use the short form when you are happy with the group's default policy.
-      owner.info: "Managed by mcherd"
+      owner.info: "Managed by mch"
       powersaving: "on"
 
   - name: solar-nodes
     default_policy: audit   # read and compare, never write
     settings:
       owner.info:
-        desired: "Solar - Managed by mcherd"
+        desired: "Solar - Managed by mch"
         policy: enforce     # enforce this key even though the group default is audit
     setting_overrides:
       # setting_overrides let you apply a policy to a key for the whole group
@@ -145,11 +145,11 @@ nodes:
     name: SiteB-Tower
     group: repeaters
     settings:
-      owner.info: "SiteB - managed by mcherd"
+      owner.info: "SiteB - managed by mch"
       tx:
         desired: "high"
         policy: enforce
-        # poll_hours: how often mcherd reads this key to check compliance,
+        # poll_hours: how often mchd reads this key to check compliance,
         # independently of the main sync cycle. Default: every sync cycle.
         poll_hours: 12
 
@@ -169,7 +169,7 @@ nodes:
   # Node with recurring operations.
   # Operations are one-shot commands run on a schedule - distinct from settings,
   # which enforce a desired state. An operation just fires a command and records
-  # whether it succeeded. 'every_hours' sets the minimum gap between runs; mcherd
+  # whether it succeeded. 'every_hours' sets the minimum gap between runs; mchd
   # will run the command if it has not run successfully within that window.
   - pubkey_prefix: 11223344
     name: SiteD-Remote
@@ -186,7 +186,7 @@ nodes:
     default_policy: enforce
     settings:
       owner.info:
-        desired: "Standalone - mcherd"
+        desired: "Standalone - mch"
         policy: enforce
       powersaving:
         policy: skip

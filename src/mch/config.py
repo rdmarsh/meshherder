@@ -8,14 +8,14 @@ from pathlib import Path
 
 import yaml
 
-from mcherd.models import SettingPolicy
+from mch.models import SettingPolicy
 
 
 @dataclass
 class GatewayConfig:
     device: str = "/dev/meshcore0"
     baud: int = 115200
-    name: str | None = None  # if set, mcherd applies this name to the gateway on startup
+    name: str | None = None  # if set, mchd applies this name to the gateway on startup
     radio: "RadioConfig | None" = None  # if set, gateway is forced to this freq on startup and restored to it after every hop
 
 
@@ -75,7 +75,7 @@ class MessengerConfig:
     """Config for mesh DM control and channel announcements."""
     # pubkey prefixes allowed to issue DM commands (e.g. operator's handheld)
     allowed_prefixes: list[str] = field(default_factory=list)
-    # channel slot number to post cycle summaries to (e.g. 1 for #mcherd)
+    # channel slot number to post cycle summaries to (e.g. 1 for #mch)
     announce_channel: int | None = None
 
 
@@ -87,8 +87,8 @@ class Config:
     groups: list[GroupConfig] = field(default_factory=list)
     messenger: MessengerConfig = field(default_factory=MessengerConfig)
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
-    db_path: str = "mcherd.db"
-    socket_path: str = "/run/mcherd/mcherd.sock"
+    db_path: str = "mch.db"
+    socket_path: str = "/run/mch/mchd.sock"
     secrets: dict[str, str] = field(default_factory=dict)  # pubkey_prefix -> password
 
 
@@ -104,8 +104,8 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     cfg = Config(
         gateway=GatewayConfig(**gw_raw, radio=gw_radio),
         scheduler=SchedulerConfig(**sched_raw),
-        db_path=raw.get("db_path", "mcherd.db"),
-        socket_path=raw.get("socket_path", "/run/mcherd.sock"),
+        db_path=raw.get("db_path", "mch.db"),
+        socket_path=raw.get("socket_path", "/run/mch.sock"),
         facts=raw.get("facts", ["ver", "board", "role"]),
         nodes=[_parse_node(n) for n in raw.get("nodes", [])],
         groups=[_parse_group(g) for g in raw.get("groups", [])],

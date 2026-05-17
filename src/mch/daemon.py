@@ -1,5 +1,5 @@
 """
-mcherd daemon — main entry point.
+mchd daemon — main entry point.
 
 Lifecycle:
   1. Load config
@@ -21,12 +21,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mcherd.config import Config, load as load_config
-from mcherd.db import Database
-from mcherd.gateway import Gateway, GatewayError
-from mcherd.messenger import Messenger
-from mcherd.models import NodeState
-from mcherd.queue import WorkQueue
+from mch.config import Config, load as load_config
+from mch.db import Database
+from mch.gateway import Gateway, GatewayError
+from mch.messenger import Messenger
+from mch.models import NodeState
+from mch.queue import WorkQueue
 
 log = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ async def _dispatch(
         return {"ok": True, "data": "sync started"}
 
     if cmd == "contacts":
-        from mcherd.queue import get_unfiled_contacts
+        from mch.queue import get_unfiled_contacts
         gateway = wq._gateway
         unfiled = await get_unfiled_contacts(config, gateway)
         return {"ok": True, "data": unfiled}
@@ -208,7 +208,7 @@ class Daemon:
 
         self._db = Database(Path(config.db_path))
         await self._db.open()
-        await self._db.write_log(None, "INFO", "mcherd starting")
+        await self._db.write_log(None, "INFO", "mchd starting")
 
         self._gateway = Gateway(config.gateway)
         try:
@@ -247,14 +247,14 @@ class Daemon:
         self._server = await asyncio.start_unix_server(
             client_connected, path=sock_path
         )
-        os.chmod(sock_path, 0o660)  # group-writable so mcherd group members can connect
+        os.chmod(sock_path, 0o660)  # group-writable so mch group members can connect
         log.info("control socket listening at %s", sock_path)
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
 
-        log.info("mcherd started")
+        log.info("mchd started")
         await self._wq.run()
 
     async def _shutdown(self) -> None:
@@ -269,7 +269,7 @@ class Daemon:
         if self._gateway:
             await self._gateway.disconnect()
         if self._db:
-            await self._db.write_log(None, "INFO", "mcherd stopped")
+            await self._db.write_log(None, "INFO", "mchd stopped")
             await self._db.close()
 
 
@@ -280,7 +280,7 @@ class Daemon:
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="mcherd — MeshCore node management daemon")
+    parser = argparse.ArgumentParser(description="mchd — Mesh Config Herder node management daemon")
     parser.add_argument("-c", "--config", default="config.yaml", help="path to config.yaml")
     parser.add_argument(
         "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]

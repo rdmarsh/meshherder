@@ -27,8 +27,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from mcherd.db import Database
-from mcherd.gateway import Gateway
+from mch.db import Database
+from mch.gateway import Gateway
 
 log = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class Messenger:
         for n in nodes:
             state_counts[n.state.value] = state_counts.get(n.state.value, 0) + 1
 
-        lines = [f"mcherd status — {len(nodes)} nodes"]
+        lines = [f"mchd status — {len(nodes)} nodes"]
         for state, count in sorted(state_counts.items()):
             lines.append(f"  {state}: {count}")
         if drifted:
@@ -223,7 +223,7 @@ class Messenger:
         if self._announce_channel is None:
             return
         drift_str = f", {drift_count} drifted" if drift_count else ""
-        msg = f"mcherd: cycle done — {node_count} nodes{drift_str}"
+        msg = f"mchd: cycle done — {node_count} nodes{drift_str}"
         ok = await self._gateway.send_channel_msg(self._announce_channel, msg)
         if not ok:
             log.warning("failed to post cycle announcement to channel %d", self._announce_channel)
@@ -239,7 +239,7 @@ class Messenger:
 
 def _help_text() -> str:
     return (
-        "mcherd commands:\n"
+        "mchd commands:\n"
         "  status        fleet overview\n"
         "  nodes         list all nodes\n"
         "  node <name>   node detail\n"

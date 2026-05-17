@@ -1,5 +1,5 @@
 [Unit]
-Description=mcherd — MeshCore fleet management daemon
+Description=mchd — Mesh Config Herder
 After=network.target
 # Wait for the USB gateway device if it has a udev rule
 After=dev-meshcore0.device
@@ -8,38 +8,40 @@ Wants=dev-meshcore0.device
 [Service]
 Type=simple
 # Recommended: create a dedicated system account with no login shell:
-#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin mcherd
-#   sudo usermod -aG dialout mcherd
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin mch
+#   sudo usermod -aG dialout mch
+# Users who need mch CLI access must be in the mch group:
+#   sudo usermod -aG mch <username>
 # For a single-user / dev setup you can use your own account instead.
-User=mcherd
-Group=mcherd
+User=mch
+Group=mch
 # dialout group is required for serial port access
 SupplementaryGroups=dialout
 
-WorkingDirectory=/etc/mcherd
-ExecStart=/usr/local/bin/mcherd --config /etc/mcherd/config.yaml
+WorkingDirectory=/etc/mch
+ExecStart=/usr/local/bin/mchd --config /etc/mch/config.yaml
 Restart=on-failure
 RestartSec=10
 
-# Hardening — keep the daemon's blast radius small
+# Hardening - keep the daemon's blast radius small
 NoNewPrivileges=yes
 ProtectSystem=strict
 # read-only rather than yes so a venv under /home can be used as ExecStart
 ProtectHome=read-only
 # DB directory and socket directory must be listed here
-ReadWritePaths=/var/lib/mcherd /run/mcherd
+ReadWritePaths=/var/lib/mch /run/mch
 # Serial port access
 DeviceAllow=/dev/meshcore0 rw
 DeviceAllow=char-tty rw
 
-# Creates /run/mcherd/ with 0755 and cleans it on stop.
-# socket_path in config.yaml must be /run/mcherd/mcherd.sock
-RuntimeDirectory=mcherd
+# Creates /run/mch/ with 0750 and cleans it on stop.
+# socket_path in config.yaml must be /run/mch/mchd.sock
+RuntimeDirectory=mch
 RuntimeDirectoryMode=0750
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=mcherd
+SyslogIdentifier=mchd
 
 [Install]
 WantedBy=multi-user.target
