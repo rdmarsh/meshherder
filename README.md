@@ -197,9 +197,9 @@ gateway:
   device: /dev/meshcore0
   baud: 115200
   radio:
-    freq: 915.800
-    bw: 250
-    sf: 10
+    freq: 915.075
+    bw: 125
+    sf: 9
     cr: 5
 
 scheduler:
@@ -230,6 +230,68 @@ ACL, so subsequent syncs proceed without a password. Keep the entry in `secrets.
 the ACL is cleared (without a factory reset), mchd can re-enrol automatically using the configured
 password. After a factory reset the node's password reverts to unknown, so manual re-enrolment
 is required — mchd will mark the node offline until the password is corrected.
+
+## Typical workflow
+
+### First run — discover and add nodes
+
+1. Plug in the gateway node and start mchd.
+2. Run `mch contacts` to list repeater nodes the gateway can already see but that aren't in your
+   config yet. Each entry prints ready-to-paste snippets:
+
+```
+# ── MySite-East ─────────────────────────────────────────────────
+# full pubkey: aabbccdd1122...
+
+# config.yaml — append to the 'nodes:' section:
+  - pubkey_prefix: aabbccdd
+    name: "MySite-East"
+    group:           # assign to a group, or remove this line
+
+# secrets.yaml — append to the 'nodes:' section:
+  aabbccdd: ""     # add password if required, or leave blank
+```
+
+3. Copy the snippets you want into your config files, fill in any passwords, then restart mchd:
+   `sudo systemctl restart mchd`
+4. Run `mch nodes` to confirm the node is now known, then `mch sync <prefix>` to sync it
+   immediately without waiting for the scheduler.
+
+### Building a node on the bench
+
+Power the node on near the gateway. MeshCore nodes broadcast advertisements on startup; within a
+minute or two the gateway will have stored the contact. Run `mch contacts` again to see it, copy the
+snippet, add it to config, and restart mchd. If the node needs a login password, add it to
+`secrets.yaml` before syncing.
+
+### Day-to-day checks
+
+```
+mch nodes          # overall fleet view — state, last seen, drift
+mch node <name>    # detail for one node — facts, settings, recent operations
+mch contacts       # nodes visible but not yet managed
+```
+
+### Forcing a sync
+
+```
+mch sync <prefix>  # sync one node right now (CLI waits for the result)
+mch sync           # sweep all nodes in the background
+```
+
+Use `mch sync <prefix>` after editing a node's desired settings in config — it applies the changes
+immediately rather than waiting for the next scheduled cycle.
+
+### Adding a node in the field
+
+If you have replaced a node or commissioned a new one in the field, send a DM to the gateway from
+your MeshCore device: `sync <pubkey-prefix>`. mchd will sync that node immediately. The node must
+already be in your config and visible to the gateway; brand-new nodes need to have advertised first.
+
+### Changing a setting fleet-wide
+
+Add the setting to a group in `config.yaml`, assign nodes to the group, restart mchd, then run
+`mch sync` to push the change to all nodes without waiting for the scheduler.
 
 ## CLI reference
 
