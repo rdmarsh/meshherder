@@ -189,6 +189,7 @@ nodes:
         every_hours: 6       # run if not run in the last 6 hours
       - command: reboot
         every_hours: 168     # run weekly (168 hours = 7 days)
+        fire_and_forget: true  # node reboots before it can reply; treat no-response as success
 
   # Fully standalone node with no group.
   - pubkey_prefix: 55667788

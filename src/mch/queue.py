@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from mch.config import Config, NodeConfig, GroupConfig, SettingConfig
+from mch.config import Config, NodeConfig, GroupConfig, OperationConfig, SettingConfig
 from mch.db import Database
 from mch.gateway import CommandResult, Gateway, GatewayError
 
@@ -640,16 +640,23 @@ class WorkQueue:
         run = failed = 0
         pending = await self._db.get_pending_operations(pubkey)
 
+        op_cfg_by_cmd = {o.command: o for o in node_cfg.operations}
+
         for op in pending:
             log.info("  operation: %r", op.command)
+            faf = op_cfg_by_cmd.get(op.command, OperationConfig()).fire_and_forget
             res = await self._send_authed(contact, op.command, node, node_cfg)
             op.run_at = datetime.now(UTC)
             op.response = res.text or res.error
 
-            if res.success:
+            if res.success or faf:
                 op.status = OperationStatus.SUCCESS
                 run += 1
-                await self._db.write_log(pubkey, "INFO", f"operation ok: {op.command!r}")
+                if faf and not res.success:
+                    log.info("  operation sent (fire-and-forget): %r", op.command)
+                    await self._db.write_log(pubkey, "INFO", f"operation sent (fire-and-forget): {op.command!r}")
+                else:
+                    await self._db.write_log(pubkey, "INFO", f"operation ok: {op.command!r}")
             else:
                 op.status = OperationStatus.FAILED
                 failed += 1

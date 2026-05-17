@@ -426,6 +426,47 @@ async def test_operation_row_updated_not_duplicated(db):
     assert last.status == OperationStatus.SUCCESS
 
 
+async def test_fire_and_forget_op_marked_success_on_timeout(db):
+    """An op with fire_and_forget=True is marked SUCCESS even when send_command fails."""
+    from mch.config import OperationConfig
+    op_cfg = OperationConfig(command="reboot", every_hours=168, fire_and_forget=True)
+    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    # node reboots before responding — gateway returns a failure/timeout
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    assert results[0].operations_run == 1
+    assert results[0].operations_failed == 0
+
+    last = await db.get_last_operation("aabbccdd1122", "reboot")
+    assert last is not None
+    assert last.status == OperationStatus.SUCCESS
+
+
+async def test_fire_and_forget_false_still_fails_on_timeout(db):
+    """A normal op (fire_and_forget=False) is still marked FAILED when send_command fails."""
+    from mch.config import OperationConfig
+    op_cfg = OperationConfig(command="clock sync", every_hours=24, fire_and_forget=False)
+    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+    assert results[0].operations_run == 0
+    assert results[0].operations_failed == 1
+
+
 async def test_cycle_runs_pending_operations(db):
     node_cfg = _node(pubkey="aabbcc", name="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])

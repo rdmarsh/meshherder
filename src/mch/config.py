@@ -38,6 +38,7 @@ class OperationConfig:
     """A one-shot or recurring command to run on a node."""
     command: str = ""
     every_hours: int = 24
+    fire_and_forget: bool = False  # if True, treat timeout/no-response as success (e.g. reboot)
 
 
 @dataclass
