@@ -168,6 +168,13 @@ async def _dispatch(
     if cmd == "logs":
         pubkey = req.get("pubkey")
         limit = int(req.get("limit", 50))
+        if pubkey:
+            # expand prefix to full pubkey using the same logic as the node handler
+            node = await db.get_node(pubkey)
+            if not node:
+                all_nodes = await db.get_all_nodes()
+                node = next((n for n in all_nodes if n.pubkey.startswith(pubkey)), None)
+            pubkey = node.pubkey if node else pubkey
         logs = await db.get_logs(pubkey, limit=limit)
         return {"ok": True, "data": logs}
 
