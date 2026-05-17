@@ -81,7 +81,7 @@ class Gateway:
 
         self.info = result.payload
         log.info(
-            "gateway connected: name=%r  freq=%.3f  bw=%g  sf=%d  cr=%d",
+            "gateway connected: name=%r freq=%.3f bw=%g sf=%d cr=%d",
             self.info.get("name"),
             self.info.get("radio_freq"),
             self.info.get("radio_bw"),

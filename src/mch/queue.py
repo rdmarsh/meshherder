@@ -467,7 +467,7 @@ class WorkQueue:
         await self._db.upsert_node(node)
 
         log.info(
-            "  %r done — facts:%d  settings:%d/%d enforced  drift:%d  ops:%d/%d failed",
+            "  %r done — facts:%d settings:%d/%d enforced drift:%d ops:%d/%d failed",
             name, result.facts_collected,
             s_enforced, s_checked, s_drifted,
             op_run, op_failed,
