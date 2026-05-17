@@ -238,30 +238,34 @@ async def test_cycle_audit_does_not_set(db):
 # login / auth flow
 # ------------------------------------------------------------------
 
-async def test_cycle_login_failure_skips_node(db):
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+async def test_permission_error_login_failure_marks_offline(db):
+    """When a command returns 'no permission' and re-login fails, node is marked offline."""
+    node_cfg = _node(
+        pubkey="aabbcc", name="TestNode",
+        settings={"name": SettingConfig(desired="TestNode", policy=SettingPolicy.ENFORCE)},
+    )
     cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
     cfg.secrets = {"aabbcc": "badpass"}
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.login = AsyncMock(return_value=False)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
-    assert results[0].reachable is False
-    assert results[0].error == "login failed"
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.OFFLINE
 
 
-async def test_auth_cached_skips_login(db):
-    """If auth_cached=True in DB, login is not called even if a password is configured."""
+async def test_no_permission_error_means_no_login(db):
+    """When commands succeed normally, login is never called regardless of secrets config."""
     node_cfg = _node(pubkey="aabbcc", name="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     cfg.secrets = {"aabbcc": "hunter2"}
 
-    # pre-seed node with auth_cached=True
-    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode", auth_cached=True))
-
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
@@ -270,21 +274,6 @@ async def test_auth_cached_skips_login(db):
     await wq.run_cycle()
     gw.login.assert_not_awaited()
 
-
-async def test_no_password_skips_login(db):
-    """If there is no secrets entry for a node, login is not called."""
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
-    cfg = _make_config(node_cfgs=[node_cfg])
-    cfg.facts = []
-    # no secrets entry
-
-    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.set_contact_favourite = AsyncMock(return_value=True)
-    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
-    wq = WorkQueue(cfg, gw, db)
-
-    await wq.run_cycle()
-    gw.login.assert_not_awaited()
 
 
 async def test_permission_error_triggers_relogin_and_retry(db):

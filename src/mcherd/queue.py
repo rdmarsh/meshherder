@@ -394,20 +394,6 @@ class WorkQueue:
         node.state = NodeState.CONFIGURING
         await self._db.upsert_node(node)
 
-        # login if needed
-        password = self._config.secrets.get(node_cfg.pubkey_prefix)
-        if password and not node.auth_cached:
-            ok = await self._gateway.login(contact, password)
-            if not ok:
-                log.warning("login failed for %r — skipping this cycle", name)
-                node.state = NodeState.OFFLINE
-                await self._db.upsert_node(node)
-                await self._db.write_log(pubkey, "WARNING", "login failed")
-                result.error = "login failed"
-                return result
-            node.auth_cached = True
-            await self._db.upsert_node(node)
-
         result.reachable = True
         now = datetime.now(UTC)
         node.last_seen = now
