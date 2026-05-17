@@ -491,7 +491,9 @@ class WorkQueue:
                     )
                     if set_res.success:
                         enforced += 1
+                        drifted -= 1  # enforcement fixed it — don't count as residual drift
                         setting.drift = False
+                        setting.observed = desired  # update observed to reflect the new value
                         setting.last_set = datetime.now(UTC)
                         await self._db.write_log(
                             pubkey, "INFO", f"set {key}={desired!r} (was {observed!r})"
