@@ -50,6 +50,7 @@ def _check(resp: dict[str, Any]) -> Any:
 # ---------------------------------------------------------------------------
 
 @click.group()
+@click.version_option(package_name="mch")
 @click.option(
     "--socket", "-s",
     default=DEFAULT_SOCKET,
