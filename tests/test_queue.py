@@ -135,6 +135,9 @@ def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:
     gw.get_contacts = AsyncMock(return_value=contacts or [])
     gw.login = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text=cmd_text))
+    gw.hop_radio = AsyncMock(return_value=(915.800, 250, 10, 5))
+    gw.restore_radio = AsyncMock()
+    gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
     return gw
 
 
@@ -575,3 +578,64 @@ async def test_unfiled_contacts_excludes_non_repeaters(db):
     names = [c["adv_name"] for c in result]
     assert "NewREP" in names
     assert "Companion" not in names
+
+
+# ------------------------------------------------------------------
+# frequency hopping
+# ------------------------------------------------------------------
+
+async def test_node_on_different_freq_hops_radio(db):
+    """A node with a radio config causes the gateway to hop before processing and restore after."""
+    from mcherd.config import RadioConfig
+    node_cfg = _node(pubkey="aabbcc", name="TestNode",
+                     radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5))
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    gw.hop_radio.assert_awaited_once_with(915.075, 125, 9, 5)
+    gw.restore_radio.assert_awaited_once_with(915.800, 250, 10, 5)
+
+
+async def test_node_no_radio_config_no_hop(db):
+    """A node without a radio config never causes a frequency hop."""
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    gw.hop_radio.assert_not_awaited()
+    gw.restore_radio.assert_not_awaited()
+
+
+async def test_radio_restored_on_relogin_failure(db):
+    """Radio is restored via finally even when processing raises _ReloginFailed."""
+    from mcherd.config import RadioConfig
+    node_cfg = _node(
+        pubkey="aabbcc", name="TestNode",
+        radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5),
+        settings={"name": SettingConfig(desired="X", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"aabbcc": "pw"}
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.login = AsyncMock(return_value=False)  # re-login fails → _ReloginFailed
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    gw.hop_radio.assert_awaited_once()
+    gw.restore_radio.assert_awaited_once()  # restored even on failure

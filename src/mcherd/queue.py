@@ -404,6 +404,20 @@ class WorkQueue:
         if not contact.get("flags", 0) & 1:
             await self._gateway.set_contact_favourite(contact)
 
+        # hop the gateway radio if this node lives on a different frequency
+        node_radio = node_cfg.radio
+        gw_freq = self._gateway.info.get("radio_freq")
+        need_hop = node_radio is not None and node_radio.freq != gw_freq
+        saved_radio: tuple | None = None
+        if need_hop:
+            log.info(
+                "  hopping to %.3f/%d/SF%d for %r",
+                node_radio.freq, node_radio.bw, node_radio.sf, name,
+            )
+            saved_radio = await self._gateway.hop_radio(
+                node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
+            )
+
         try:
             # collect facts
             result.facts_collected = await self._collect_facts(pubkey, contact, node, node_cfg)
@@ -428,7 +442,11 @@ class WorkQueue:
             await self._db.upsert_node(node)
             await self._db.write_log(pubkey, "ERROR", f"re-login failed: {exc}")
             result.error = str(exc)
-            return result
+            return result  # finally still runs to restore radio
+
+        finally:
+            if saved_radio is not None:
+                await self._gateway.restore_radio(*saved_radio)
 
         # mark node state
         if s_drifted > 0 or op_failed > 0:
