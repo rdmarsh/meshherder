@@ -129,13 +129,13 @@ def node(ctx: click.Context, pubkey: str) -> None:
     resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
     data = _check(resp)
 
-    click.echo(f"name:       {data['name']}")
-    click.echo(f"pubkey:     {data['pubkey']}")
-    click.echo(f"group:      {data.get('group') or '—'}")
-    click.echo(f"state:      {data['state']}")
-    click.echo(f"last seen:  {data.get('last_seen') or 'never'}")
-    click.echo(f"last conn:  {data.get('last_connected') or 'never'}")
-    click.echo(f"auth cached:{data.get('auth_cached', False)}")
+    click.echo(f"name:        {data['name']}")
+    click.echo(f"pubkey:      {data['pubkey']}")
+    click.echo(f"group:       {data.get('group') or '—'}")
+    click.echo(f"state:       {data['state']}")
+    click.echo(f"last seen:   {data.get('last_seen') or 'never'}")
+    click.echo(f"last conn:   {data.get('last_connected') or 'never'}")
+    click.echo(f"auth cached: {data.get('auth_cached', False)}")
     click.echo("")
 
     facts = data.get("facts", {})
@@ -163,10 +163,11 @@ def node(ctx: click.Context, pubkey: str) -> None:
 
     logs = data.get("logs", [])
     if logs:
-        click.echo("recent logs:")
+        click.echo("recent activity:")
         for entry in logs[:10]:
-            ts = (entry.get("timestamp") or "")[:19]
-            click.echo(f"  [{entry['level']:<7}] {ts}  {entry['message']}")
+            ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
+            level = entry["level"]
+            click.echo(f"  [{level:<5}] {ts}  {entry['message']}")
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +227,7 @@ def drift(ctx: click.Context) -> None:
 @click.option("--limit", "-n", default=50, show_default=True, help="Max log lines")
 @click.pass_context
 def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
-    """Show daemon logs (optionally filtered to a node pubkey)."""
+    """Show recent per-node activity log (optionally filtered to one node by pubkey prefix)."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "logs", "pubkey": pubkey, "limit": limit})
     data = _check(resp)
 
@@ -235,9 +236,9 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
         return
 
     for entry in data:
-        ts = (entry.get("timestamp") or "")[:19]
+        ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
         node_label = f" [{entry['node_pubkey'][:12]}]" if entry.get("node_pubkey") else ""
-        click.echo(f"{ts}  {entry['level']:<7}{node_label}  {entry['message']}")
+        click.echo(f"{ts} [{entry['level']:<5}]{node_label} {entry['message']}")
 
 
 # ---------------------------------------------------------------------------
