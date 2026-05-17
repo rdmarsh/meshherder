@@ -40,6 +40,15 @@ class OperationConfig:
 
 
 @dataclass
+class RadioConfig:
+    """Radio parameters for a node on a non-default frequency."""
+    freq: float
+    bw: int
+    sf: int
+    cr: int
+
+
+@dataclass
 class NodeConfig:
     pubkey_prefix: str
     name: str = ""
@@ -47,6 +56,7 @@ class NodeConfig:
     default_policy: SettingPolicy | None = None
     settings: dict[str, SettingConfig] = field(default_factory=dict)
     operations: list[OperationConfig] = field(default_factory=list)
+    radio: RadioConfig | None = None  # if set, gateway hops to this freq to manage the node
 
 
 @dataclass
@@ -133,6 +143,9 @@ def _parse_node(raw: dict) -> NodeConfig:
         OperationConfig(**op) if isinstance(op, dict) else OperationConfig(command=op)
         for op in raw.get("operations", [])
     ]
+    radio_raw = raw.get("radio")
+    radio = RadioConfig(**radio_raw) if radio_raw else None
+
     return NodeConfig(
         pubkey_prefix=raw["pubkey_prefix"],
         name=raw.get("name", ""),
@@ -140,6 +153,7 @@ def _parse_node(raw: dict) -> NodeConfig:
         default_policy=SettingPolicy(policy) if policy else None,
         settings=settings,
         operations=operations,
+        radio=radio,
     )
 
 

@@ -226,6 +226,46 @@ class Gateway:
     # auth
     # ------------------------------------------------------------------
 
+    async def hop_radio(
+        self, freq: float, bw: int, sf: int, cr: int
+    ) -> tuple[float, float, int, int]:
+        """
+        Temporarily change the gateway radio config to reach a node on a different frequency.
+
+        Returns the saved (freq, bw, sf, cr) so the caller can restore it.
+        Always use in a try/finally so the radio is always restored.
+        """
+        mc = self._require_connected()
+        saved = (
+            self.info.get("radio_freq"),
+            self.info.get("radio_bw"),
+            self.info.get("radio_sf"),
+            self.info.get("radio_cr"),
+        )
+        log.info(
+            "hopping radio: %.3f/%.0f/SF%d → %.3f/%d/SF%d",
+            saved[0], saved[1], saved[2], freq, bw, sf,
+        )
+        await mc.commands.set_radio(freq, bw, sf, cr)
+        await asyncio.sleep(0.5)  # let radio settle before sending
+        self.info["radio_freq"] = freq
+        self.info["radio_bw"] = bw
+        self.info["radio_sf"] = sf
+        self.info["radio_cr"] = cr
+        return saved
+
+    async def restore_radio(
+        self, freq: float, bw: float, sf: int, cr: int
+    ) -> None:
+        """Restore the gateway radio config after a frequency hop."""
+        mc = self._require_connected()
+        await mc.commands.set_radio(freq, bw, sf, cr)
+        self.info["radio_freq"] = freq
+        self.info["radio_bw"] = bw
+        self.info["radio_sf"] = sf
+        self.info["radio_cr"] = cr
+        log.info("radio restored: %.3f/%.0f/SF%d", freq, bw, sf)
+
     async def login(self, contact: dict[str, Any], password: str) -> bool:
         """
         Authenticate to a managed node.  After the first successful login
