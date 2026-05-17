@@ -171,6 +171,7 @@ class WorkQueue:
         self._messenger = messenger
         self._running = False
         self._current_task: asyncio.Task | None = None
+        self._contacts: list[dict[str, Any]] = []  # cached at startup; refreshed by run_cycle
 
     async def run(self) -> None:
         """
@@ -183,12 +184,12 @@ class WorkQueue:
         self._running = True
         log.info("work queue started (interval=%.1fd)", self._config.scheduler.sync_interval_days)
 
-        contacts = await self._gateway.get_contacts(managed_only=False)
+        self._contacts = await self._gateway.get_contacts(managed_only=False)
         await self._reschedule_overdue()
 
         while self._running:
             try:
-                await self._run_next_due(contacts)
+                await self._run_next_due(self._contacts)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -278,7 +279,9 @@ class WorkQueue:
         if len(prefix) % 2 != 0:
             raise ValueError(f"prefix must have an even number of hex chars (got {len(prefix)!r} — {prefix!r})")
 
-        contacts = await self._gateway.get_contacts(managed_only=False)
+        # use cached contacts — calling get_contacts() concurrently with the receive loop
+        # races on meshcore_py's dispatcher and causes timeouts
+        contacts = self._contacts
         repeaters = [c for c in contacts if c.get("type") == CONTACT_TYPE_REPEATER]
         matches = [c for c in repeaters if c["public_key"].startswith(prefix)]
 
@@ -319,8 +322,8 @@ class WorkQueue:
         Used for testing and for mch sync (no-arg full sweep).
         """
         log.info("--- cycle start ---")
-        contacts = await self._gateway.get_contacts(managed_only=False)
-        contact_by_pubkey = {c["public_key"]: c for c in contacts}
+        self._contacts = await self._gateway.get_contacts(managed_only=False)
+        contact_by_pubkey = {c["public_key"]: c for c in self._contacts}
 
         # register all visible contacts with the messenger so it can reply to DMs
         if self._messenger:
