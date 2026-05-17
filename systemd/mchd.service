@@ -8,7 +8,7 @@ Wants=dev-meshcore0.device
 [Service]
 Type=simple
 # Recommended: create a dedicated system account with no login shell:
-#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin mch
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Mesh Config Herder" mch
 #   sudo usermod -aG dialout mch
 # Users who need mch CLI access must be in the mch group:
 #   sudo usermod -aG mch <username>
@@ -18,8 +18,8 @@ Group=mch
 # dialout group is required for serial port access
 SupplementaryGroups=dialout
 
-WorkingDirectory=/etc/mch
-ExecStart=/usr/local/bin/mchd --config /etc/mch/config.yaml
+WorkingDirectory=/usr/local/etc/mch
+ExecStart=/usr/local/bin/mchd --config /usr/local/etc/mch/config.yaml
 Restart=on-failure
 RestartSec=10
 
@@ -28,7 +28,10 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 # read-only rather than yes so a venv under /home can be used as ExecStart
 ProtectHome=read-only
-# DB directory and socket directory must be listed here
+# DB and socket directories need write access; config dir needs read access.
+# ProtectSystem=strict makes /usr read-only, so /usr/local/etc/mch must be
+# listed explicitly to allow reading config and secrets at startup.
+ReadOnlyPaths=/usr/local/etc/mch
 ReadWritePaths=/var/lib/mch /run/mch
 # Serial port access
 DeviceAllow=/dev/meshcore0 rw

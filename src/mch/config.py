@@ -87,7 +87,7 @@ class Config:
     groups: list[GroupConfig] = field(default_factory=list)
     messenger: MessengerConfig = field(default_factory=MessengerConfig)
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
-    db_path: str = "mch.db"
+    db_path: str = "/var/lib/mch/mch.db"
     socket_path: str = "/run/mch/mchd.sock"
     secrets: dict[str, str] = field(default_factory=dict)  # pubkey_prefix -> password
 
@@ -104,8 +104,8 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     cfg = Config(
         gateway=GatewayConfig(**gw_raw, radio=gw_radio),
         scheduler=SchedulerConfig(**sched_raw),
-        db_path=raw.get("db_path", "mch.db"),
-        socket_path=raw.get("socket_path", "/run/mch.sock"),
+        db_path=raw.get("db_path", "/var/lib/mch/mch.db"),
+        socket_path=raw.get("socket_path", "/run/mch/mchd.sock"),
         facts=raw.get("facts", ["ver", "board", "role"]),
         nodes=[_parse_node(n) for n in raw.get("nodes", [])],
         groups=[_parse_group(g) for g in raw.get("groups", [])],
