@@ -83,3 +83,4 @@ class OperationRecord:
     queued_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     run_at: datetime | None = None
     response: str | None = None
+    id: int | None = None     # DB primary key; set when loaded from DB

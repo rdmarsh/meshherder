@@ -657,7 +657,7 @@ class WorkQueue:
                     pubkey, "ERROR", f"operation failed: {op.command!r}: {res.error}"
                 )
 
-            await self._db.upsert_operation(op)
+            await self._db.update_operation(op)
 
         return run, failed
 

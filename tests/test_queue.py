@@ -400,6 +400,32 @@ async def test_config_operations_reseeded_when_due(db):
     assert results[0].operations_run == 1
 
 
+async def test_operation_row_updated_not_duplicated(db):
+    """Running a pending op updates the original row in-place — no duplicate INSERT."""
+    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+
+    # Insert a PENDING operation directly (simulates what _seed_operations does)
+    op = OperationRecord(node_pubkey="aabbccdd1122", command="clock sync")
+    await db.upsert_operation(op)
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="synced"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    # The original PENDING row must have been updated to SUCCESS — no new row inserted
+    pending = await db.get_pending_operations("aabbccdd1122")
+    assert pending == [], f"original PENDING row was never updated — still in queue: {pending}"
+
+    last = await db.get_last_operation("aabbccdd1122", "clock sync")
+    assert last is not None
+    assert last.status == OperationStatus.SUCCESS
+
+
 async def test_cycle_runs_pending_operations(db):
     node_cfg = _node(pubkey="aabbcc", name="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])

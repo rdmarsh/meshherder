@@ -385,7 +385,7 @@ def _row_to_setting(row: aiosqlite.Row) -> SettingRecord:
 
 
 def _row_to_operation(row: aiosqlite.Row) -> OperationRecord:
-    op = OperationRecord(
+    return OperationRecord(
         node_pubkey=row["node_pubkey"],
         command=row["command"],
         every_hours=row["every_hours"],
@@ -393,5 +393,5 @@ def _row_to_operation(row: aiosqlite.Row) -> OperationRecord:
         queued_at=_parse_dt(row["queued_at"]) or datetime.now(UTC),
         run_at=_parse_dt(row["run_at"]),
         response=row["response"],
+        id=row["id"],
     )
-    return op
