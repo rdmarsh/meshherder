@@ -290,19 +290,41 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
 # contacts — gateway REP nodes not yet in config.yaml
 # ---------------------------------------------------------------------------
 
+def _filter_contacts(contacts: list[dict], query: str | None) -> list[dict]:
+    """Filter contacts by pubkey prefix or name substring."""
+    if not query:
+        return contacts
+    q = query.lower()
+    return [
+        c for c in contacts
+        if c.get("public_key", "").startswith(query)
+        or q in (c.get("adv_name") or "").lower()
+    ]
+
+
 @cli.command()
+@click.argument("query", required=False, default=None)
 @click.pass_context
-def contacts(ctx: click.Context) -> None:
+def contacts(ctx: click.Context, query: str | None) -> None:
     """Show gateway repeater contacts not yet in your config.yaml.
+
+    Optionally filter by pubkey prefix or name substring:
+
+      mch contacts 4e       # pubkeys starting with 4e
+      mch contacts mill     # names containing "mill"
 
     Prints ready-to-paste YAML snippets. Review and append to the nodes:
     section of your config.yaml for any nodes you want mch to manage.
     """
     resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
     data = _check(resp)
+    data = _filter_contacts(data or [], query)
 
     if not data:
-        click.echo("no unfiled repeater contacts found")
+        if query:
+            click.echo(f"no contacts matching '{query}'")
+        else:
+            click.echo("no unfiled repeater contacts found")
         return
 
     click.echo("# Repeater contacts visible to the gateway but not in your config.yaml.")
