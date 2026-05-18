@@ -151,9 +151,6 @@ def nodes(ctx: click.Context) -> None:
             gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
 
-    example = f'"{data[0].get("label") or data[0]["pubkey"][:8]}"'
-    click.echo(f"\n  mch node {example} for full details, mch recommend {example} for settings")
-
 
 # ---------------------------------------------------------------------------
 # node
@@ -362,10 +359,10 @@ def recommend(ctx: click.Context, pubkey: str | None) -> None:
 
 
 def _recommend_table(data: list) -> None:
-    label_w = max(_wlen("label"), max((_wlen(n.get("label") or "-") for n in data), default=0))
+    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in data), default=0))
 
     row = "  {}  {:<4}  {:<7}  {}"
-    click.echo(row.format(_wpad("label", label_w), "nbrs", "txdelay", "direct.txdelay"))
+    click.echo(row.format(_wpad("LABEL", label_w), "NBRS", "TXDELAY", "DIRECT.TXDELAY"))
     click.echo(row.format(_wpad("-----", label_w), "----", "-------", "--------------"))
     for n in data:
         count = n["neighbour_count"]
@@ -377,9 +374,6 @@ def _recommend_table(data: list) -> None:
             profile["direct_txdelay"] if profile else "-",
         ))
 
-    example = f'"{data[0].get("label") or data[0]["pubkey"][:8]}"'
-    click.echo(f"\n  mch recommend {example} for full recommendations")
-
 
 def _recommend_detail(n: dict) -> None:
     count = n["neighbour_count"]
@@ -387,19 +381,18 @@ def _recommend_detail(n: dict) -> None:
 
     click.echo(f"label:      {n.get('label') or '-'}")
     click.echo(f"name:       {n['name']}")
-
-    if count is None:
-        click.echo("")
-        click.echo("(no neighbour data - add 'neighbors' to facts: in config.yaml and run mch sync)")
-        return
-
-    click.echo(f"neighbours: {count}")
-    if profile:
-        click.echo(f"profile:    {profile['name']} - {profile['description']}")
-
     click.echo("")
 
-    # Build the full list: profile settings first, then universal
+    if count is None:
+        click.echo("(no neighbour data - add 'neighbors' to facts: in config.yaml and run mch sync)")
+        click.echo("")
+    else:
+        click.echo(f"neighbours: {count}")
+        if profile:
+            click.echo(f"profile:    {profile['name']} - {profile['description']}")
+        click.echo("")
+
+    # Build the full list: profile settings (if known) first, then universal
     settings: list[tuple[str, str, str]] = []
     if profile:
         settings.append(("txdelay",        profile["txdelay"],        "Flood retransmit delay - high-reach nodes fire first"))
@@ -407,6 +400,9 @@ def _recommend_detail(n: dict) -> None:
 
     for u in n.get("universal", []):
         settings.append((u["key"], u["value"], u["description"]))
+
+    if not settings:
+        return
 
     key_w = max(len(s[0]) for s in settings)
     val_w = max(len(s[1]) for s in settings)
@@ -418,9 +414,9 @@ def _recommend_detail(n: dict) -> None:
     click.echo("")
     click.echo("Paste into config.yaml settings: block for this node:")
     for key, val, _ in settings:
-        click.echo(f"    {key}:")
-        click.echo(f'      desired: "{val}"')
-        click.echo(f"      policy: enforce")
+        click.echo(f"      {key}:")
+        click.echo(f'        desired: "{val}"')
+        click.echo(f"        policy: enforce")
 
 
 # ---------------------------------------------------------------------------
