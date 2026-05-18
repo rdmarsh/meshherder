@@ -94,21 +94,20 @@ async def _dispatch(
 
     if cmd == "nodes":
         nodes = await db.get_all_nodes()
-        return {
-            "ok": True,
-            "data": [
-                {
-                    "pubkey": n.pubkey,
-                    "name": n.name,
-                    "label": n.label,
-                    "group": n.group,
-                    "state": n.state.value,
-                    "last_seen": n.last_seen.isoformat() if n.last_seen else None,
-                    "last_connected": n.last_connected.isoformat() if n.last_connected else None,
-                }
-                for n in nodes
-            ],
-        }
+        rows = []
+        for n in nodes:
+            facts = await db.get_facts(n.pubkey)
+            rows.append({
+                "pubkey": n.pubkey,
+                "name": n.name,
+                "label": n.label,
+                "group": n.group,
+                "state": n.state.value,
+                "last_seen": n.last_seen.isoformat() if n.last_seen else None,
+                "last_connected": n.last_connected.isoformat() if n.last_connected else None,
+                "neighbors": facts.get("neighbors"),
+            })
+        return {"ok": True, "data": rows}
 
     if cmd == "node":
         pubkey = req.get("pubkey", "")
