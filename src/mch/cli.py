@@ -361,9 +361,9 @@ def recommend(ctx: click.Context, pubkey: str | None) -> None:
 def _recommend_table(data: list) -> None:
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
 
-    row = "  {}  {:<10}  {:<10}  {:<7}  {}"
-    click.echo(row.format(_wpad("LABEL", label_w), "NEIGHBOURS", "PROFILE", "TXDELAY", "DIRECT.TXDELAY"))
-    click.echo(row.format(_wpad("-----", label_w), "----------", "-------", "-------", "--------------"))
+    row = "  {}  {:<4}  {:<10}  {:<7}  {}"
+    click.echo(row.format(_wpad("LABEL", label_w), "NBRS", "PROFILE", "TXDELAY", "DIRECT.TXDELAY"))
+    click.echo(row.format(_wpad("-----", label_w), "----", "-------", "-------", "--------------"))
     for n in data:
         count = n["neighbour_count"]
         profile = n["profile"]
