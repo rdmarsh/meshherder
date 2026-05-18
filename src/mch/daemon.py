@@ -122,6 +122,7 @@ async def _dispatch(
                 "last_seen": n.last_seen.isoformat() if n.last_seen else None,
                 "last_connected": n.last_connected.isoformat() if n.last_connected else None,
                 "neighbors": facts.get("neighbors"),
+                "ver": facts.get("ver"),
             })
         return {"ok": True, "data": rows}
 

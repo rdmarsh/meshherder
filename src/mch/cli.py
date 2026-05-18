@@ -122,26 +122,33 @@ def nodes(ctx: click.Context) -> None:
         click.echo("no nodes in database")
         return
 
-    group_w = max(len("GROUP"),   max((len(n.get("group") or "—")    for n in data), default=0))
-    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
-    name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])              for n in data), default=0))
-    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "—") for n in data), default=0))
+    def _short_ver(raw: str | None) -> str:
+        if not raw:
+            return "—"
+        return raw.split("-")[0]  # "v1.15.0-dee3e26..." → "v1.15.0"
 
-    row = "  {:<10}  {}  {:<{gw}}  {}  {:<{nw}}  {:<16}  {}"
-    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "LAST SEEN", "PUBKEY", gw=group_w, nw=nbrs_w))
-    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---------", "------", gw=group_w, nw=nbrs_w))
+    group_w = max(len("GROUP"),   max((len(n.get("group") or "—")         for n in data), default=0))
+    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—")       for n in data), default=0))
+    name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])                    for n in data), default=0))
+    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "—")      for n in data), default=0))
+    ver_w   = max(len("VER"),     max((len(_short_ver(n.get("ver")))       for n in data), default=0))
+
+    row = "  {:<10}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
+    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "VER", "LAST SEEN", "PUBKEY", gw=group_w, nw=nbrs_w, vw=ver_w))
+    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---", "---------", "------", gw=group_w, nw=nbrs_w, vw=ver_w))
     for n in data:
         last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
         group = (n.get("group") or "—")
         nbrs  = n.get("neighbors") or "—"
+        ver   = _short_ver(n.get("ver"))
         click.echo(row.format(
             n["state"],
             _wpad(n.get("label") or "—", label_w),
             group,
             _wpad(n["name"], name_w),
-            nbrs,
+            nbrs, ver,
             last, n["pubkey"][:16] + "…",
-            gw=group_w, nw=nbrs_w,
+            gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
 
 
