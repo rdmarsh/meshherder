@@ -37,6 +37,7 @@ class OperationStatus(Enum):
 class Node:
     pubkey: str           # stable identity — names can change
     name: str
+    label: str = ""       # operator's local label from config; never pushed to hardware
     group: str | None = None
     state: NodeState = NodeState.UNKNOWN
     last_seen: datetime | None = None

@@ -115,13 +115,18 @@ def nodes(ctx: click.Context) -> None:
         click.echo("no nodes in database")
         return
 
-    row = "  {:<12}  {}  {:<10}  {:<16}  {}"
-    click.echo(row.format("STATE", _wpad("NAME", 22), "GROUP", "LAST SEEN", "PUBKEY"))
-    click.echo(row.format("-----", _wpad("----", 22), "-----", "---------", "------"))
+    row = "  {:<12}  {}  {}  {:<10}  {:<16}  {}"
+    click.echo(row.format("STATE", _wpad("LABEL", 22), _wpad("NAME", 20), "GROUP", "LAST SEEN", "PUBKEY"))
+    click.echo(row.format("-----", _wpad("-----", 22), _wpad("----", 20), "-----", "---------", "------"))
     for n in data:
         last = (n.get("last_seen") or "never")[:16]
         group = (n.get("group") or "—")[:10]
-        click.echo(row.format(n["state"], _wpad(n["name"][:22], 22), group, last, n["pubkey"][:16] + "…"))
+        click.echo(row.format(
+            n["state"],
+            _wpad((n.get("label") or "—")[:22], 22),
+            _wpad(n["name"][:20], 20),
+            group, last, n["pubkey"][:16] + "…",
+        ))
 
 
 # ---------------------------------------------------------------------------

@@ -97,6 +97,7 @@ async def _dispatch(
                 {
                     "pubkey": n.pubkey,
                     "name": n.name,
+                    "label": n.label,
                     "group": n.group,
                     "state": n.state.value,
                     "last_seen": n.last_seen.isoformat() if n.last_seen else None,
