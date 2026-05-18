@@ -122,6 +122,27 @@ async def test_nodes_dispatch_includes_neighbors(db, wq, config):
     assert resp["data"][0]["neighbors"] == "7"
 
 
+async def test_nodes_dispatch_includes_ver(db, wq, config):
+    """nodes command should include the ver fact for each node."""
+    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.15.0-dee3e26 (Build: 19-Apr-2026)"))
+
+    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"][0]["ver"] == "v1.15.0-dee3e26 (Build: 19-Apr-2026)"
+
+
+async def test_nodes_dispatch_ver_absent_when_not_collected(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
+
+    assert resp["data"][0]["ver"] is None
+
+
 async def test_nodes_dispatch_neighbors_absent_when_not_collected(db, wq, config):
     """nodes command returns None for neighbors when fact not yet collected."""
     node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
