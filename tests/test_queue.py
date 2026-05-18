@@ -768,3 +768,48 @@ async def test_radio_restored_on_relogin_failure(db):
     await wq.run_cycle()
     gw.hop_radio.assert_awaited_once()
     gw.restore_radio.assert_awaited_once()  # restored even on failure
+
+
+# ------------------------------------------------------------------
+# label stored in DB and seeded on startup
+# ------------------------------------------------------------------
+
+async def test_label_written_to_db_on_sync(db):
+    """Label from NodeConfig is persisted to the nodes table during a sync."""
+    node_cfg = _node(pubkey="aabbcc", label="My Site")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node is not None
+    assert node.label == "My Site"
+
+
+async def test_seed_node_labels_updates_existing_db_entry(db):
+    """_seed_node_labels() writes label into an already-existing DB node on startup."""
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="OldName", label=""))
+    node_cfg = _node(pubkey="aabbcc", label="New Label")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq._seed_node_labels()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.label == "New Label"
+
+
+async def test_seed_node_labels_skips_unknown_nodes(db):
+    """_seed_node_labels() silently skips config entries with no matching DB row."""
+    node_cfg = _node(pubkey="aabbcc", label="Ghost")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    gw = _make_gateway(contacts=[])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq._seed_node_labels()  # should not raise
+
+    assert await db.get_node("aabbccdd1122") is None

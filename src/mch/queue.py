@@ -185,6 +185,7 @@ class WorkQueue:
         log.info("work queue started (interval=%.1fd)", self._config.scheduler.sync_interval_days)
 
         self._contacts = await self._gateway.get_contacts(managed_only=False)
+        await self._seed_node_labels()
         await self._reschedule_overdue()
 
         while self._running:
@@ -252,6 +253,25 @@ class WorkQueue:
         interval_s = self._config.scheduler.sync_interval_days * 86400
         jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
         await self._db.set_next_sync(node.pubkey, datetime.now(UTC) + timedelta(seconds=interval_s + jitter))
+
+    async def _seed_node_labels(self) -> None:
+        """Write labels from config into the DB for any nodes already in the DB.
+
+        Ensures labels are current immediately on restart — not just after the
+        next sync cycle for each node.
+        """
+        all_nodes = await self._db.get_all_nodes()
+        pubkey_to_node = {n.pubkey: n for n in all_nodes}
+        for node_cfg in self._config.nodes:
+            node = next(
+                (n for pk, n in pubkey_to_node.items() if pk.startswith(node_cfg.pubkey_prefix)),
+                None,
+            )
+            if node is None:
+                continue
+            if node.label != node_cfg.label:
+                node.label = node_cfg.label
+                await self._db.upsert_node(node)
 
     async def _reschedule_overdue(self) -> None:
         """
@@ -401,6 +421,7 @@ class WorkQueue:
         # ensure node exists in db
         node = await self._db.get_node(pubkey) or Node(pubkey=pubkey, name=name)
         node.name = name
+        node.label = node_cfg.label
         node.state = NodeState.CONFIGURING
         await self._db.upsert_node(node)
 

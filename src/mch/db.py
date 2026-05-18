@@ -24,6 +24,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
     pubkey          TEXT PRIMARY KEY,
     name            TEXT NOT NULL DEFAULT '',
+    label           TEXT NOT NULL DEFAULT '',
     node_group      TEXT,
     state           TEXT NOT NULL DEFAULT 'unknown',
     last_seen       TEXT,
@@ -89,6 +90,13 @@ class Database:
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
+        # migration: add label column to existing databases
+        try:
+            await self._db.execute(
+                "ALTER TABLE nodes ADD COLUMN label TEXT NOT NULL DEFAULT ''"
+            )
+        except aiosqlite.OperationalError:
+            pass  # column already exists
         await self._db.commit()
         log.debug("database opened: %s", self._path)
 
@@ -111,12 +119,13 @@ class Database:
         db = self._db_required()
         await db.execute(
             """
-            INSERT INTO nodes (pubkey, name, node_group, state, last_seen, last_connected,
+            INSERT INTO nodes (pubkey, name, label, node_group, state, last_seen, last_connected,
                                auth_required, auth_cached, next_sync_at)
-            VALUES (:pubkey, :name, :group, :state, :last_seen, :last_connected,
+            VALUES (:pubkey, :name, :label, :group, :state, :last_seen, :last_connected,
                     :auth_required, :auth_cached, :next_sync_at)
             ON CONFLICT(pubkey) DO UPDATE SET
                 name           = excluded.name,
+                label          = excluded.label,
                 node_group     = excluded.node_group,
                 state          = excluded.state,
                 last_seen      = excluded.last_seen,
@@ -128,6 +137,7 @@ class Database:
             {
                 "pubkey":         node.pubkey,
                 "name":           node.name,
+                "label":          node.label,
                 "group":          node.group,
                 "state":          node.state.value,
                 "last_seen":      _dt(node.last_seen),
@@ -360,6 +370,7 @@ def _row_to_node(row: aiosqlite.Row) -> Node:
     return Node(
         pubkey=row["pubkey"],
         name=row["name"],
+        label=row["label"],
         group=row["node_group"],
         state=NodeState(row["state"]),
         last_seen=_parse_dt(row["last_seen"]),
