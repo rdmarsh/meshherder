@@ -151,6 +151,9 @@ def nodes(ctx: click.Context) -> None:
             gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
 
+    example = f'"{data[0].get("label") or data[0]["pubkey"][:8]}"'
+    click.echo(f"\n  mch node {example} — full details   mch recommend {example} — settings")
+
 
 # ---------------------------------------------------------------------------
 # node
@@ -359,21 +362,23 @@ def recommend(ctx: click.Context, pubkey: str | None) -> None:
 
 
 def _recommend_table(data: list) -> None:
-    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
+    label_w = max(_wlen("label"), max((_wlen(n.get("label") or "—") for n in data), default=0))
 
-    row = "  {}  {:<4}  {:<10}  {:<7}  {}"
-    click.echo(row.format(_wpad("LABEL", label_w), "NBRS", "PROFILE", "TXDELAY", "DIRECT.TXDELAY"))
-    click.echo(row.format(_wpad("-----", label_w), "----", "-------", "-------", "--------------"))
+    row = "  {}  {:<4}  {:<7}  {}"
+    click.echo(row.format(_wpad("label", label_w), "nbrs", "txdelay", "direct.txdelay"))
+    click.echo(row.format(_wpad("-----", label_w), "----", "-------", "--------------"))
     for n in data:
         count = n["neighbour_count"]
         profile = n["profile"]
         click.echo(row.format(
             _wpad(n.get("label") or "—", label_w),
             str(count) if count is not None else "—",
-            profile["name"] if profile else "(no data)",
             profile["txdelay"] if profile else "—",
             profile["direct_txdelay"] if profile else "—",
         ))
+
+    example = f'"{data[0].get("label") or data[0]["pubkey"][:8]}"'
+    click.echo(f"\n  mch recommend {example} — full recommendations")
 
 
 def _recommend_detail(n: dict) -> None:
