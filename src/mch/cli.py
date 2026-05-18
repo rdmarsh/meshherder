@@ -97,11 +97,14 @@ def status(ctx: click.Context) -> None:
         click.echo("  (no nodes in database yet)")
         return
 
-    row = "  {:<16}  {}  {}"
-    click.echo(row.format("STATE", _wpad("NAME", 22), "PUBKEY"))
-    click.echo(row.format("-----", _wpad("----", 22), "------"))
+    state_w = max(len("STATE"), max((len(n["state"])        for n in nodes), default=0))
+    name_w  = max(_wlen("NAME"), max((_wlen(n["name"][:22]) for n in nodes), default=0))
+
+    row = "  {:<{sw}}  {}  {}"
+    click.echo(row.format("STATE", _wpad("NAME", name_w), "PUBKEY", sw=state_w))
+    click.echo(row.format("-----", _wpad("----", name_w), "------", sw=state_w))
     for n in nodes:
-        click.echo(row.format(n["state"], _wpad(n["name"][:22], 22), n["pubkey"][:16] + "…"))
+        click.echo(row.format(n["state"], _wpad(n["name"][:22], name_w), n["pubkey"][:16] + "…", sw=state_w))
 
 
 # ---------------------------------------------------------------------------
