@@ -287,9 +287,11 @@ snippet, add it to config, and restart mchd. If the node needs a login password,
 ### Day-to-day checks
 
 ```
-mch nodes          # overall fleet view — state, last seen, drift
-mch node <name>    # detail for one node — facts, settings, recent operations
-mch contacts       # nodes visible but not yet managed
+mch nodes                   # fleet view: state, firmware version, neighbour count, last seen
+mch node <label|prefix>     # detail for one node: facts, settings, recent activity
+mch recommend               # suggested txdelay for every node based on neighbour count
+mch recommend <label|prefix> # full recommendations + paste-ready config block
+mch contacts                # nodes visible to the gateway but not yet in config
 ```
 
 ### Forcing a sync
@@ -316,17 +318,20 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 ## CLI reference
 
 ```
-mch status              Daemon health, queue depth, gateway info
-mch nodes               All managed nodes: last seen, config state, sync state
-mch node <prefix>       Detail for one node — facts, settings, recent activity
-mch logs                Recent per-node activity across all nodes
-mch logs <prefix>       Activity for one node
-mch contacts            Repeater nodes visible to the gateway not yet in config
-mch sync                Trigger an immediate sync cycle (respects rate limiting)
-mch sync <prefix>       Move one node to the front of the queue
-mch start               Start mchd via systemd (alias: sudo systemctl start mchd)
-mch stop                Stop mchd via systemd
-mch restart             Restart mchd via systemd
+mch status                    Daemon health and fleet summary
+mch nodes                     All managed nodes: state, firmware version, neighbour count, last seen
+mch node <label|prefix>       Detail for one node: facts, settings, recent activity
+mch recommend                 Suggested txdelay for all nodes based on neighbour count
+mch recommend <label|prefix>  Full recommendations + paste-ready config block for one node
+mch drift                     Settings currently drifted from desired across the fleet
+mch logs                      Recent per-node activity across all nodes
+mch logs <prefix>             Activity for one node
+mch contacts                  Repeater nodes visible to the gateway not yet in config
+mch sync                      Trigger an immediate sync cycle (respects rate limiting)
+mch sync <prefix>             Sync one node immediately; CLI waits for the result
+mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
+mch stop                      Stop mchd via systemd
+mch restart                   Restart mchd via systemd
 ```
 
 `mch sync <prefix>` runs that node immediately and waits — the CLI returns once the sync is
