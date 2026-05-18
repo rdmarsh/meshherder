@@ -231,6 +231,26 @@ the ACL is cleared (without a factory reset), mchd can re-enrol automatically us
 password. After a factory reset the node's password reverts to unknown, so manual re-enrolment
 is required — mchd will mark the node offline until the password is corrected.
 
+### Node name vs. mesh-visible name
+
+`name:` in a node entry is mch's **local label** — it only ever appears on the host running mchd.
+Use whatever is useful to you as the operator: full location, site code, anything.
+
+`settings.name.desired:` is what gets **enforced on the hardware** and broadcast across the mesh —
+visible to anyone scanning. If you don't want your deployment location appearing on the mesh, set a
+neutral name here and keep the descriptive one in `name:`:
+
+```yaml
+nodes:
+  - pubkey_prefix: aabbccdd
+    name: "East Hill Site — cabinet 3"   # local label only, never leaves this machine
+    default_policy: enforce
+    settings:
+      name:
+        desired: "📡 Millbrook"          # pushed to hardware; visible across the mesh
+      owner.info: "Managed by mch"
+```
+
 ## Typical workflow
 
 ### First run — discover and add nodes
@@ -311,7 +331,7 @@ complete. It collects facts, checks and enforces settings, runs any due operatio
 reschedules the node back into normal rotation. Use this when you need a result right now:
 
 ```
-mch sync 75ab8517    # sync the node whose pubkey starts with 75ab8517; CLI waits for the result
+mch sync aabbccdd    # sync the node whose pubkey starts with aabbccdd; CLI waits for the result
 ```
 
 `mch sync` (no argument) starts a full sweep of every node in the background — the CLI returns
@@ -330,20 +350,20 @@ journalctl -u mchd -f
 A normal startup and sync looks like this:
 
 ```
-mchd: gateway connected: name='🦷 mch-gw' freq=915.075 bw=125 sf=9 cr=5
+mchd: gateway connected: name='🤖 mch-gw' freq=915.075 bw=125 sf=9 cr=5
 mchd: work queue started (interval=1.0d)
-mchd: processing node '🦷 Quakers Hill Test' (75ab8517...)
-mchd: hopping to 915.800/250/SF10 for '🦷 Quakers Hill Test'
-mchd: hopping radio: 915.075/125/SF9 → 915.800/250/SF10
+mchd: processing node '📡 Millbrook' (aabbccdd...)
+mchd: hopping to 916.575/62.5/SF7 for '📡 Millbrook'
+mchd: hopping radio: 915.075/125/SF9 → 916.575/62.5/SF7
 mchd: radio restored: 915.075/125/SF9
-mchd: '🦷 Quakers Hill Test' done — facts:5 settings:1/1 enforced drift:0 ops:0/0 failed
+mchd: '📡 Millbrook' done — facts:5 settings:1/1 enforced drift:0 ops:0/0 failed
 ```
 
 Per-node activity (settings changes, operation results, errors) is also stored in the local
 database and shown by `mch node` and `mch logs`:
 
 ```
-mch node 75ab8517
+mch node aabbccdd
 
   state:       configured
   ...
@@ -354,7 +374,7 @@ mch node 75ab8517
 
 ```
 mch logs               # recent activity across all nodes
-mch logs 75ab8517      # filtered to one node (prefix ok)
+mch logs aabbccdd      # filtered to one node (prefix ok)
 mch logs -n 100        # last 100 entries
 ```
 
