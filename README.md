@@ -117,6 +117,9 @@ sudo systemctl status mchd
 mch status
 ```
 
+> **Note:** the systemd unit is named `mchd` — always use `systemctl ... mchd`, not `mch`.
+> The `mch start`, `mch stop`, and `mch restart` CLI commands are shortcuts to the same thing.
+
 ## udev rule (recommended)
 
 By default a MeshCore node appears as `/dev/ttyACM0` or similar, and that path can change between
@@ -324,6 +327,9 @@ mch logs <prefix>       Activity for one node
 mch contacts            Repeater nodes visible to the gateway not yet in config
 mch sync                Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>       Move one node to the front of the queue
+mch start               Start mchd via systemd (alias: sudo systemctl start mchd)
+mch stop                Stop mchd via systemd
+mch restart             Restart mchd via systemd
 ```
 
 `mch sync <prefix>` runs that node immediately and waits — the CLI returns once the sync is
