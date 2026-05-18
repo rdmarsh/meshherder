@@ -58,6 +58,17 @@ db_path: /var/lib/mch/mch.db
 socket_path: /run/mch/mchd.sock
 secrets_file: /usr/local/etc/mch/secrets.yaml   # optional; defaults to secrets.yaml in the same directory as config.yaml
 
+# Profiles file for 'mch recommend'. Three options (in priority order):
+#
+#   profiles_file: /usr/local/etc/mch/profiles.yaml   # use a local override file
+#   profiles_url:  https://example.com/profiles.yaml  # fetch on startup, cached 24h
+#   (neither)                                          # use the bundled default
+#
+# The bundled default covers AU/NZ 915 MHz settings. Override if your region uses
+# different RF settings or you want to tune the neighbour-count thresholds.
+# profiles_file: /usr/local/etc/mch/profiles.yaml
+# profiles_url:  https://raw.githubusercontent.com/rdmarsh/mch/main/src/mch/data/profiles.yaml
+
 # Facts collected from every node each sync cycle (read-only CMDB data).
 # All fact commands run within a single node session; inter_node_delay_seconds
 # sits between nodes, not between individual fact commands. 'ver' and 'board'
@@ -69,6 +80,7 @@ facts:
   - owner.name   # operator name set on the node
   - lat          # latitude - stored per-node for network planning and mapping tools
   - lon          # longitude
+  - neighbors    # neighbour count - used by 'mch recommend' to suggest txdelay settings
 
 # Messenger: incoming DM commands and cycle announcements.
 messenger:

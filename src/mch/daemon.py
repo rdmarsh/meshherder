@@ -196,6 +196,45 @@ async def _dispatch(
             ],
         }
 
+    if cmd == "recommend":
+        from mch.recommend import get_profile, load_profiles
+        from pathlib import Path as _Path
+        profiles_file = _Path(config.profiles_file) if config.profiles_file else None
+        profiles, universal = load_profiles(
+            profiles_url=config.profiles_url,
+            profiles_file=profiles_file,
+        )
+        pubkey = req.get("pubkey")
+        nodes = await db.get_all_nodes()
+        if pubkey:
+            node = next((n for n in nodes if n.pubkey.startswith(pubkey)), None)
+            if not node:
+                return {"ok": False, "error": f"node {pubkey!r} not found"}
+            nodes = [node]
+        result = []
+        for n in nodes:
+            facts = await db.get_facts(n.pubkey)
+            raw_count = facts.get("neighbors")
+            count = int(raw_count) if raw_count is not None else None
+            profile = get_profile(count, profiles) if count is not None else None
+            result.append({
+                "pubkey": n.pubkey,
+                "label": n.label,
+                "name": n.name,
+                "neighbour_count": count,
+                "profile": {
+                    "name": profile.name,
+                    "txdelay": profile.txdelay,
+                    "direct_txdelay": profile.direct_txdelay,
+                    "description": profile.description,
+                } if profile else None,
+                "universal": [
+                    {"key": u.key, "value": u.value, "description": u.description}
+                    for u in universal
+                ],
+            })
+        return {"ok": True, "data": result}
+
     return {"ok": False, "error": f"unknown command: {cmd!r}"}
 
 

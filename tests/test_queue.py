@@ -813,3 +813,41 @@ async def test_seed_node_labels_skips_unknown_nodes(db):
     await wq._seed_node_labels()  # should not raise
 
     assert await db.get_node("aabbccdd1122") is None
+
+
+# ---------------------------------------------------------------------------
+# neighbors fact collection
+# ---------------------------------------------------------------------------
+
+async def test_collect_facts_neighbors_sends_bare_command(db):
+    """'neighbors' in facts list sends bare 'neighbors', not 'get neighbors'."""
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["neighbors"]
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="> NodeA abc"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    calls = [call.args[1] for call in gw.send_command.call_args_list]
+    assert "neighbors" in calls
+    assert "get neighbors" not in calls
+
+
+async def test_collect_facts_neighbors_stores_count(db):
+    """'neighbors' fact stores the neighbour count as a string, not raw text."""
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["neighbors"]
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    raw = "> NodeA abc\n> NodeB def\n> NodeC ghi"
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text=raw))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    facts = await db.get_facts("aabbccdd1122")
+    assert facts.get("neighbors") == "3"

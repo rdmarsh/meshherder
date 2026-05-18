@@ -91,6 +91,10 @@ class Config:
     db_path: str = "/var/lib/mch/mch.db"
     socket_path: str = "/run/mch/mchd.sock"
     secrets: dict[str, str] = field(default_factory=dict)  # pubkey_prefix -> password
+    # profiles_url: fetch profiles.yaml from this URL on startup (cached 24h)
+    profiles_url: str | None = None
+    # profiles_file: use this local file instead of the bundled default
+    profiles_file: str | None = None
 
 
 def load(config_path: Path, secrets_path: Path | None = None) -> Config:
@@ -114,6 +118,8 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
             allowed_prefixes=msg_raw.get("allowed_prefixes", []),
             announce_channel=msg_raw.get("announce_channel"),
         ),
+        profiles_url=raw.get("profiles_url"),
+        profiles_file=raw.get("profiles_file"),
     )
 
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
