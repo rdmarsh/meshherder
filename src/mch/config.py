@@ -53,7 +53,7 @@ class RadioConfig:
 @dataclass
 class NodeConfig:
     pubkey_prefix: str
-    name: str = ""
+    label: str = ""
     group: str | None = None
     default_policy: SettingPolicy | None = None
     settings: dict[str, SettingConfig] = field(default_factory=dict)
@@ -152,7 +152,7 @@ def _parse_node(raw: dict) -> NodeConfig:
 
     return NodeConfig(
         pubkey_prefix=raw["pubkey_prefix"],
-        name=raw.get("name", ""),
+        label=raw.get("label", ""),
         group=raw.get("group"),
         default_policy=SettingPolicy(policy) if policy else None,
         settings=settings,

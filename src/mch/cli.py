@@ -274,7 +274,7 @@ def contacts(ctx: click.Context) -> None:
 
         click.echo("# config.yaml — append to the 'nodes:' section:")
         click.echo(f"  - pubkey_prefix: {prefix}")
-        click.echo(f'    name: "{name}"')
+        click.echo(f'    label: "{name}"')
         click.echo(f"    group:           # assign to a group, or remove this line\n")
 
         click.echo("# secrets.yaml — append to the 'nodes:' section:")

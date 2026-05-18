@@ -208,7 +208,7 @@ scheduler:
 
 nodes:
   - pubkey_prefix: aabbccdd
-    name: MyRepeater
+    label: MyRepeater
     default_policy: enforce
     settings:
       owner.info: "Managed by mch"
@@ -231,19 +231,19 @@ the ACL is cleared (without a factory reset), mchd can re-enrol automatically us
 password. After a factory reset the node's password reverts to unknown, so manual re-enrolment
 is required — mchd will mark the node offline until the password is corrected.
 
-### Node name vs. mesh-visible name
+### Node label vs. mesh-visible name
 
-`name:` in a node entry is mch's **local label** — it only ever appears on the host running mchd.
+`label:` is mch's **local label** for the node — it only ever appears on the host running mchd.
 Use whatever is useful to you as the operator: full location, site code, anything.
 
 `settings.name.desired:` is what gets **enforced on the hardware** and broadcast across the mesh —
 visible to anyone scanning. If you don't want your deployment location appearing on the mesh, set a
-neutral name here and keep the descriptive one in `name:`:
+neutral name here and keep the descriptive one in `label:`:
 
 ```yaml
 nodes:
   - pubkey_prefix: aabbccdd
-    name: "East Hill Site — cabinet 3"   # local label only, never leaves this machine
+    label: "East Hill Site — cabinet 3"  # local only, never leaves this machine
     default_policy: enforce
     settings:
       name:
@@ -265,7 +265,7 @@ nodes:
 
 # config.yaml — append to the 'nodes:' section:
   - pubkey_prefix: aabbccdd
-    name: "MySite-East"
+    label: "MySite-East"
     group:           # assign to a group, or remove this line
 
 # secrets.yaml — append to the 'nodes:' section:

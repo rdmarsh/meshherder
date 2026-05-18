@@ -337,10 +337,10 @@ class WorkQueue:
             contact = self._find_contact(node_cfg.pubkey_prefix, contact_by_pubkey)
             if contact is None:
                 log.warning("node %r (%s) not in gateway contacts — skipping",
-                            node_cfg.name, node_cfg.pubkey_prefix)
+                            node_cfg.label, node_cfg.pubkey_prefix)
                 results.append(NodeResult(
                     pubkey=node_cfg.pubkey_prefix,
-                    name=node_cfg.name,
+                    name=node_cfg.label,
                     reachable=False,
                     error="not in gateway contacts",
                 ))
@@ -348,10 +348,10 @@ class WorkQueue:
 
             if contact.get("type") != CONTACT_TYPE_REPEATER:
                 log.warning("node %r (%s) is not a repeater (type=%s) — skipping",
-                            node_cfg.name, node_cfg.pubkey_prefix, contact.get("type"))
+                            node_cfg.label, node_cfg.pubkey_prefix, contact.get("type"))
                 results.append(NodeResult(
                     pubkey=node_cfg.pubkey_prefix,
-                    name=node_cfg.name,
+                    name=node_cfg.label,
                     reachable=False,
                     error="not a repeater",
                 ))
@@ -393,7 +393,7 @@ class WorkQueue:
         contact: dict[str, Any],
     ) -> NodeResult:
         pubkey = contact["public_key"]
-        name = contact.get("adv_name", node_cfg.name)
+        name = contact.get("adv_name", node_cfg.label)
         result = NodeResult(pubkey=pubkey, name=name)
 
         log.info("processing node %r (%s…)", name, pubkey[:12])

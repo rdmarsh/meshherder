@@ -143,7 +143,7 @@ groups:
 # Run 'mch contacts' to see nodes visible to the gateway with their public keys.
 nodes:
 
-  # Minimal entry: name and group, inherits all group settings and policy.
+  # Minimal entry: label and group, inherits all group settings and policy.
   - pubkey_prefix: aabbccdd
     name: SiteA-Rooftop
     group: repeaters
