@@ -150,7 +150,10 @@ def nodes(ctx: click.Context) -> None:
 @click.argument("pubkey")
 @click.pass_context
 def node(ctx: click.Context, pubkey: str) -> None:
-    """Show details for a single node (partial pubkey match ok)."""
+    """Show details for a single node.
+
+    PUBKEY: pubkey prefix or label (case-insensitive).
+    """
     resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
     data = _check(resp)
 
@@ -319,7 +322,7 @@ def contacts(ctx: click.Context) -> None:
 def recommend(ctx: click.Context, pubkey: str | None) -> None:
     """Show recommended settings based on each node's neighbour count.
 
-    PUBKEY: partial pubkey prefix. Omit to show all nodes.
+    PUBKEY: pubkey prefix or label (case-insensitive). Omit to show all nodes.
 
     Prints the matching profile (e.g. rooftop, tower), recommended txdelay
     and universal settings with one-line explanations, and a ready-to-paste

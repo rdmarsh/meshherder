@@ -78,6 +78,34 @@ async def test_node_dispatch_unknown_pubkey_returns_error(db, wq, config):
     assert "not found" in resp["error"]
 
 
+async def test_node_dispatch_label_match(db, wq, config):
+    """node command should match by label when pubkey prefix lookup fails."""
+    node = await _seed_node_with_facts(db)
+    # node.label == "test"
+    resp = await _dispatch({"cmd": "node", "pubkey": "test"}, wq, db, config)
+    assert resp["ok"] is True
+    assert resp["data"]["pubkey"] == node.pubkey
+
+
+async def test_node_dispatch_label_match_case_insensitive(db, wq, config):
+    node = await _seed_node_with_facts(db)
+    resp = await _dispatch({"cmd": "node", "pubkey": "TEST"}, wq, db, config)
+    assert resp["ok"] is True
+    assert resp["data"]["pubkey"] == node.pubkey
+
+
+async def test_recommend_dispatch_label_match(db, wq, config):
+    """recommend command should match by label when pubkey prefix lookup fails."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower Node", label="QH Test", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="5"))
+
+    resp = await _dispatch({"cmd": "recommend", "pubkey": "QH Test"}, wq, db, config)
+    assert resp["ok"] is True
+    assert len(resp["data"]) == 1
+    assert resp["data"][0]["label"] == "QH Test"
+
+
 # ------------------------------------------------------------------
 # nodes command — includes neighbors fact
 # ------------------------------------------------------------------
