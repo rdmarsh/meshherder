@@ -65,6 +65,22 @@ async def _handle_client(
         pass  # client disconnected before response was sent (e.g. CLI timed out)
 
 
+async def _resolve_node(query: str, db: Database) -> "Any":
+    """Resolve a pubkey prefix or label to a Node, or return None."""
+    from mch.models import Node as _Node
+    node = await db.get_node(query)
+    if node:
+        return node
+    all_nodes = await db.get_all_nodes()
+    # pubkey prefix match
+    node = next((n for n in all_nodes if n.pubkey.startswith(query)), None)
+    if node:
+        return node
+    # case-insensitive label match
+    q = query.lower()
+    return next((n for n in all_nodes if (n.label or "").lower() == q), None)
+
+
 async def _dispatch(
     req: dict[str, Any],
     wq: WorkQueue,
@@ -111,11 +127,7 @@ async def _dispatch(
 
     if cmd == "node":
         pubkey = req.get("pubkey", "")
-        node = await db.get_node(pubkey)
-        if not node:
-            # fall back to prefix match
-            all_nodes = await db.get_all_nodes()
-            node = next((n for n in all_nodes if n.pubkey.startswith(pubkey)), None)
+        node = await _resolve_node(pubkey, db)
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
         facts = await db.get_facts(node.pubkey)
@@ -209,7 +221,7 @@ async def _dispatch(
         pubkey = req.get("pubkey")
         nodes = await db.get_all_nodes()
         if pubkey:
-            node = next((n for n in nodes if n.pubkey.startswith(pubkey)), None)
+            node = await _resolve_node(pubkey, db)
             if not node:
                 return {"ok": False, "error": f"node {pubkey!r} not found"}
             nodes = [node]
