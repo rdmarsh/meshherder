@@ -20,10 +20,14 @@ import click
 DEFAULT_SOCKET = "/run/mch/mchd.sock"
 
 
+def _wlen(s: str) -> int:
+    """Visual width of a string — wide chars (emoji, CJK) count as 2 columns."""
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
 def _wpad(s: str, width: int) -> str:
-    """Left-justify s in a field of visual width, accounting for wide chars (emoji, CJK)."""
-    visual = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
-    return s + " " * max(0, width - visual)
+    """Left-justify s in a field of visual width."""
+    return s + " " * max(0, width - _wlen(s))
 
 
 async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
@@ -115,18 +119,23 @@ def nodes(ctx: click.Context) -> None:
         click.echo("no nodes in database")
         return
 
-    row = "  {:<10}  {}  {:<12}  {}  {:<16}  {}"
-    click.echo(row.format("STATE", _wpad("LABEL", 20), "GROUP", _wpad("NAME", 18), "LAST SEEN", "PUBKEY"))
-    click.echo(row.format("-----", _wpad("-----", 20), "-----", _wpad("----", 18), "---------", "------"))
+    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
+    name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])              for n in data), default=0))
+    group_w = max(len("GROUP"),   max((len(n.get("group") or "—")    for n in data), default=0))
+
+    row = "  {:<10}  {}  {:<{gw}}  {}  {:<16}  {}"
+    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "LAST SEEN", "PUBKEY", gw=group_w))
+    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "---------", "------", gw=group_w))
     for n in data:
-        last = (n.get("last_seen") or "never")[:16]
-        group = (n.get("group") or "—")[:12]
+        last  = (n.get("last_seen") or "never")[:16]
+        group = (n.get("group") or "—")
         click.echo(row.format(
             n["state"],
-            _wpad((n.get("label") or "—")[:20], 20),
+            _wpad(n.get("label") or "—", label_w),
             group,
-            _wpad(n["name"][:18], 18),
+            _wpad(n["name"], name_w),
             last, n["pubkey"][:16] + "…",
+            gw=group_w,
         ))
 
 
