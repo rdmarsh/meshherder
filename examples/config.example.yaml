@@ -145,15 +145,15 @@ nodes:
 
   # Minimal entry: group and label, inherits all group settings and policy.
   - pubkey_prefix: aabbccdd
-    group: repeaters
     label: SiteA-Rooftop
+    group: repeaters
 
   # Per-node setting overrides layered on top of group settings.
   # Settings defined here are merged with the group settings; the node entry
   # wins on any key that appears in both.
   - pubkey_prefix: eeff0011
-    group: repeaters
     label: SiteB-Tower
+    group: repeaters
     settings:
       owner.info: "SiteB - managed by mch"
       tx:
@@ -168,8 +168,8 @@ nodes:
   # sync, then restores its home frequency. The node is otherwise managed
   # identically to any other node.
   - pubkey_prefix: 2fd9c7bb
-    group: repeaters
     label: SiteC-Valley
+    group: repeaters
     radio:
       freq: 916.575   # node is on a different frequency to the gateway home above
       bw: 62.5
@@ -182,8 +182,8 @@ nodes:
   # whether it succeeded. 'every_hours' sets the minimum gap between runs; mchd
   # will run the command if it has not run successfully within that window.
   - pubkey_prefix: 11223344
-    group: solar-nodes
     label: SiteD-Remote
+    group: solar-nodes
     operations:
       - command: clock sync
         every_hours: 6       # run if not run in the last 6 hours
