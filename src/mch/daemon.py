@@ -116,9 +116,9 @@ async def _dispatch(
             node = next((n for n in all_nodes if n.pubkey.startswith(pubkey)), None)
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
-        facts = await db.get_facts(pubkey)
-        settings = await db.get_settings(pubkey)
-        logs = await db.get_logs(pubkey, limit=20)
+        facts = await db.get_facts(node.pubkey)
+        settings = await db.get_settings(node.pubkey)
+        logs = await db.get_logs(node.pubkey, limit=20)
         return {
             "ok": True,
             "data": {
