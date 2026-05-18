@@ -295,7 +295,7 @@ def contacts(ctx: click.Context) -> None:
 @cli.command()
 def start() -> None:
     """Start the mchd daemon via systemd."""
-    result = subprocess.run(["systemctl", "start", "mch"], capture_output=True, text=True)
+    result = subprocess.run(["systemctl", "start", "mchd"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl start failed", err=True)
         raise SystemExit(result.returncode)
@@ -305,7 +305,7 @@ def start() -> None:
 @cli.command()
 def stop() -> None:
     """Stop the mchd daemon via systemd."""
-    result = subprocess.run(["systemctl", "stop", "mch"], capture_output=True, text=True)
+    result = subprocess.run(["systemctl", "stop", "mchd"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl stop failed", err=True)
         raise SystemExit(result.returncode)
@@ -315,7 +315,7 @@ def stop() -> None:
 @cli.command()
 def restart() -> None:
     """Restart the mchd daemon via systemd."""
-    result = subprocess.run(["systemctl", "restart", "mch"], capture_output=True, text=True)
+    result = subprocess.run(["systemctl", "restart", "mchd"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl restart failed", err=True)
         raise SystemExit(result.returncode)
