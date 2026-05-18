@@ -304,6 +304,97 @@ def contacts(ctx: click.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# recommend
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("pubkey", required=False)
+@click.pass_context
+def recommend(ctx: click.Context, pubkey: str | None) -> None:
+    """Show recommended settings based on each node's neighbour count.
+
+    PUBKEY: partial pubkey prefix. Omit to show all nodes.
+
+    Prints the matching profile (e.g. rooftop, tower), recommended txdelay
+    and universal settings with one-line explanations, and a ready-to-paste
+    config.yaml settings: block.
+
+    Requires 'neighbors' in the facts: list in config.yaml and at least
+    one completed sync cycle to populate the neighbour count.
+    """
+    resp = _rpc(ctx.obj["socket"], {"cmd": "recommend", "pubkey": pubkey})
+    data = _check(resp)
+
+    if not data:
+        click.echo("no nodes in database")
+        return
+
+    if pubkey:
+        _recommend_detail(data[0])
+    else:
+        _recommend_table(data)
+
+
+def _recommend_table(data: list) -> None:
+    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
+
+    row = "  {}  {:<10}  {:<10}  {}"
+    click.echo(row.format(_wpad("LABEL", label_w), "NEIGHBOURS", "PROFILE", "txdelay"))
+    click.echo(row.format(_wpad("-----", label_w), "----------", "-------", "-------"))
+    for n in data:
+        count = n["neighbour_count"]
+        profile = n["profile"]
+        click.echo(row.format(
+            _wpad(n.get("label") or "—", label_w),
+            str(count) if count is not None else "—",
+            profile["name"] if profile else "(no data)",
+            profile["txdelay"] if profile else "—",
+        ))
+
+
+def _recommend_detail(n: dict) -> None:
+    count = n["neighbour_count"]
+    profile = n["profile"]
+
+    click.echo(f"label:      {n.get('label') or '—'}")
+    click.echo(f"name:       {n['name']}")
+
+    if count is None:
+        click.echo("")
+        click.echo("(no neighbour data — add 'neighbors' to facts: in config.yaml and run mch sync)")
+        return
+
+    click.echo(f"neighbours: {count}")
+    if profile:
+        click.echo(f"profile:    {profile['name']} — {profile['description']}")
+
+    click.echo("")
+
+    # Build the full list: profile settings first, then universal
+    settings: list[tuple[str, str, str]] = []
+    if profile:
+        settings.append(("txdelay",        profile["txdelay"],        "Flood retransmit delay — high-reach nodes fire first"))
+        settings.append(("direct.txdelay", profile["direct_txdelay"], "Direct traffic delay (lower than flood delay)"))
+
+    for u in n.get("universal", []):
+        settings.append((u["key"], u["value"], u["description"]))
+
+    key_w = max(len(s[0]) for s in settings)
+    val_w = max(len(s[1]) for s in settings)
+
+    click.echo("Recommended settings:")
+    for key, val, desc in settings:
+        click.echo(f"  {key:<{key_w}}  {val:<{val_w}}  {desc}")
+
+    click.echo("")
+    click.echo("Paste into config.yaml settings: block for this node:")
+    for key, val, _ in settings:
+        click.echo(f"    {key}:")
+        click.echo(f'      desired: "{val}"')
+        click.echo(f"      policy: enforce")
+
+
+# ---------------------------------------------------------------------------
 # start / stop (via systemd)
 # ---------------------------------------------------------------------------
 

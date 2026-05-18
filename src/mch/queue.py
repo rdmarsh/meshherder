@@ -541,13 +541,20 @@ class WorkQueue:
         """Run all declared fact commands and store results."""
         collected = 0
         for key in self._config.facts:
-            cmd = f"get {key}" if key not in ("ver", "board") else key
+            # neighbors and ver/board are bare commands; everything else is `get <key>`
+            cmd = f"get {key}" if key not in ("ver", "board", "neighbors") else key
             res = await self._send_authed(contact, cmd, node, node_cfg)
             if res.success and res.text:
+                if key == "neighbors":
+                    # store the count, not the raw multi-line list
+                    from mch.recommend import parse_neighbour_count
+                    value = str(parse_neighbour_count(res.text))
+                else:
+                    value = res.text.strip()
                 await self._db.upsert_fact(NodeFact(
                     node_pubkey=pubkey,
                     key=key,
-                    value=res.text.strip(),
+                    value=value,
                 ))
                 collected += 1
             else:

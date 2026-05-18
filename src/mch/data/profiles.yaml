@@ -1,0 +1,73 @@
+# mch repeater profiles — txdelay by neighbour count
+#
+# Sydney model: high-reach nodes (many neighbours) fire first to cover the most
+# area before lower nodes fill the channel. Ground-level nodes wait longest.
+#
+# Sources:
+#   https://meshsydney.com/wiki#repeater-profiles
+#   https://tennmesh.com/settings/
+#   https://docs.meshcore.io/cli_commands/
+#
+# Profiles are matched top-to-bottom; the first entry with
+# min_neighbours <= the node's count is used.
+#
+# To customise for your region, copy this file somewhere and set
+# profiles_file: /path/to/your/profiles.yaml in config.yaml.
+# Or set profiles_url: to fetch an up-to-date copy automatically.
+
+profiles:
+  - name: tower
+    min_neighbours: 20
+    txdelay: "0.3"
+    direct_txdelay: "0.1"
+    description: "Hilltop or tower — fires first to cover the most area"
+
+  - name: elevated
+    min_neighbours: 15
+    txdelay: "0.6"
+    direct_txdelay: "0.3"
+    description: "Elevated site — rooftop car park, house with clear line of sight"
+
+  - name: rooftop
+    min_neighbours: 5
+    txdelay: "1.0"
+    direct_txdelay: "0.5"
+    description: "Suburban rooftop"
+
+  - name: indoor
+    min_neighbours: 1
+    txdelay: "1.4"
+    direct_txdelay: "1.0"
+    description: "Indoor or ground-level"
+
+  - name: mobile
+    min_neighbours: 0
+    txdelay: "2.0"
+    direct_txdelay: "2.0"
+    description: "Vehicle or portable — waits longest"
+
+# Universal settings recommended for all repeaters regardless of neighbour count.
+#
+# radio: the freq,bw,sf,cr string is sent via `set radio` and enforces the node's
+# radio configuration. This is separate from the NodeConfig radio: block (gateway
+# hop config). Verify the value matches your regional mesh before applying.
+universal:
+  - key: radio
+    value: "915.075,125,9,5"
+    description: "Australia:Mid preset — verify this matches your regional mesh"
+
+  - key: path.hash.mode
+    value: "1"
+    description: "2-byte advert path hashes — reduces routing ambiguity (fw >= 1.14)"
+
+  - key: loop.detect
+    value: "minimal"
+    description: "Drop looping packets conservatively — avoids false positives"
+
+  - key: multi.acks
+    value: "1"
+    description: "Accept acks from multiple repeaters, improving delivery reliability"
+
+  - key: agc.reset.interval
+    value: "4"
+    description: "Reset radio AGC every 4 s — cures deafness from nearby interference"
