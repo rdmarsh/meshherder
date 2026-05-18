@@ -143,17 +143,17 @@ groups:
 # Run 'mch contacts' to see nodes visible to the gateway with their public keys.
 nodes:
 
-  # Minimal entry: label and group, inherits all group settings and policy.
+  # Minimal entry: group and label, inherits all group settings and policy.
   - pubkey_prefix: aabbccdd
-    name: SiteA-Rooftop
     group: repeaters
+    label: SiteA-Rooftop
 
   # Per-node setting overrides layered on top of group settings.
   # Settings defined here are merged with the group settings; the node entry
   # wins on any key that appears in both.
   - pubkey_prefix: eeff0011
-    name: SiteB-Tower
     group: repeaters
+    label: SiteB-Tower
     settings:
       owner.info: "SiteB - managed by mch"
       tx:
@@ -168,8 +168,8 @@ nodes:
   # sync, then restores its home frequency. The node is otherwise managed
   # identically to any other node.
   - pubkey_prefix: 2fd9c7bb
-    name: SiteC-Valley
     group: repeaters
+    label: SiteC-Valley
     radio:
       freq: 916.575   # node is on a different frequency to the gateway home above
       bw: 62.5
@@ -182,8 +182,8 @@ nodes:
   # whether it succeeded. 'every_hours' sets the minimum gap between runs; mchd
   # will run the command if it has not run successfully within that window.
   - pubkey_prefix: 11223344
-    name: SiteD-Remote
     group: solar-nodes
+    label: SiteD-Remote
     operations:
       - command: clock sync
         every_hours: 6       # run if not run in the last 6 hours
@@ -193,7 +193,7 @@ nodes:
 
   # Fully standalone node with no group.
   - pubkey_prefix: 55667788
-    name: SiteE-Standalone
+    label: SiteE-Standalone
     default_policy: enforce
     settings:
       owner.info:
