@@ -123,16 +123,16 @@ def nodes(ctx: click.Context) -> None:
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
     name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])              for n in data), default=0))
 
-    row = "  {:<10}  {:<{gw}}  {}  {}  {:<16}  {}"
-    click.echo(row.format("STATE", "GROUP", _wpad("LABEL", label_w), _wpad("NAME", name_w), "LAST SEEN", "PUBKEY", gw=group_w))
-    click.echo(row.format("-----", "-----", _wpad("-----", label_w), _wpad("----", name_w), "---------", "------", gw=group_w))
+    row = "  {:<10}  {}  {:<{gw}}  {}  {:<16}  {}"
+    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "LAST SEEN", "PUBKEY", gw=group_w))
+    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "---------", "------", gw=group_w))
     for n in data:
         last  = (n.get("last_seen") or "never")[:16]
         group = (n.get("group") or "—")
         click.echo(row.format(
             n["state"],
-            group,
             _wpad(n.get("label") or "—", label_w),
+            group,
             _wpad(n["name"], name_w),
             last, n["pubkey"][:16] + "…",
             gw=group_w,
