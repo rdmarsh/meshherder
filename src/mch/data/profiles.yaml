@@ -20,13 +20,13 @@ profiles:
     min_neighbours: 20
     txdelay: "0.3"
     direct_txdelay: "0.1"
-    description: "Hilltop or tower -fires first to cover the most area"
+    description: "Hilltop or tower - fires first to cover the most area"
 
   - name: elevated
     min_neighbours: 15
     txdelay: "0.6"
     direct_txdelay: "0.3"
-    description: "Elevated site -rooftop car park, house with clear line of sight"
+    description: "Elevated site - rooftop car park, house with clear line of sight"
 
   - name: rooftop
     min_neighbours: 5
@@ -44,7 +44,7 @@ profiles:
     min_neighbours: 0
     txdelay: "2.0"
     direct_txdelay: "2.0"
-    description: "Vehicle or portable -waits longest"
+    description: "Vehicle or portable - waits longest"
 
 # Universal settings recommended for all repeaters regardless of neighbour count.
 #
@@ -54,15 +54,15 @@ profiles:
 universal:
   - key: radio
     value: "915.075,125,9,5"
-    description: "Australia:Mid preset -verify this matches your regional mesh"
+    description: "Australia:Mid preset - verify this matches your regional mesh"
 
   - key: path.hash.mode
     value: "1"
-    description: "2-byte advert path hashes -reduces routing ambiguity (fw >= 1.14)"
+    description: "2-byte advert path hashes - reduces routing ambiguity (fw >= 1.14)"
 
   - key: loop.detect
     value: "minimal"
-    description: "Drop looping packets conservatively -avoids false positives"
+    description: "Drop looping packets conservatively - avoids false positives"
 
   - key: multi.acks
     value: "1"
@@ -70,4 +70,4 @@ universal:
 
   - key: agc.reset.interval
     value: "4"
-    description: "Reset radio AGC every 4 s -cures deafness from nearby interference"
+    description: "Reset radio AGC every 4 s - cures deafness from nearby interference"
