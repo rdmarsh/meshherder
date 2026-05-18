@@ -128,7 +128,7 @@ def nodes(ctx: click.Context) -> None:
     click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "LAST SEEN", "PUBKEY", gw=group_w, nw=nbrs_w))
     click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---------", "------", gw=group_w, nw=nbrs_w))
     for n in data:
-        last  = (n.get("last_seen") or "never")[:16]
+        last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
         group = (n.get("group") or "—")
         nbrs  = n.get("neighbors") or "—"
         click.echo(row.format(
