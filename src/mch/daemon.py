@@ -124,6 +124,7 @@ async def _dispatch(
             "data": {
                 "pubkey": node.pubkey,
                 "name": node.name,
+                "label": node.label,
                 "group": node.group,
                 "state": node.state.value,
                 "last_seen": node.last_seen.isoformat() if node.last_seen else None,

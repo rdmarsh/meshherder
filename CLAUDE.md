@@ -161,7 +161,7 @@ login = await mc.commands.send_login_sync(contact, password, timeout=30, min_tim
 | `clock` | Get current UTC time |
 | `ver` | Firmware version |
 | `board` | Hardware name |
-| `get name` / `set name <name>` | Node name (max 24–32 bytes) |
+| `get name` / `set name <name>` | Node name — max 31 chars (confirmed on v1.14.1 Seeed Xiao-nrf52: 32 sent → 31 stored) |
 | `get role` | Node role |
 | `get public.key` | Node identity |
 | `neighbors` | List 8 most recent peer adverts (repeater only) |
