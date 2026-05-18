@@ -122,20 +122,23 @@ def nodes(ctx: click.Context) -> None:
     group_w = max(len("GROUP"),   max((len(n.get("group") or "—")    for n in data), default=0))
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
     name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])              for n in data), default=0))
+    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "—") for n in data), default=0))
 
-    row = "  {:<10}  {}  {:<{gw}}  {}  {:<16}  {}"
-    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "LAST SEEN", "PUBKEY", gw=group_w))
-    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "---------", "------", gw=group_w))
+    row = "  {:<10}  {}  {:<{gw}}  {}  {:<{nw}}  {:<16}  {}"
+    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "LAST SEEN", "PUBKEY", gw=group_w, nw=nbrs_w))
+    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---------", "------", gw=group_w, nw=nbrs_w))
     for n in data:
         last  = (n.get("last_seen") or "never")[:16]
         group = (n.get("group") or "—")
+        nbrs  = n.get("neighbors") or "—"
         click.echo(row.format(
             n["state"],
             _wpad(n.get("label") or "—", label_w),
             group,
             _wpad(n["name"], name_w),
+            nbrs,
             last, n["pubkey"][:16] + "…",
-            gw=group_w,
+            gw=group_w, nw=nbrs_w,
         ))
 
 
@@ -151,12 +154,15 @@ def node(ctx: click.Context, pubkey: str) -> None:
     resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
     data = _check(resp)
 
+    def _ts(v: str | None) -> str:
+        return (v or "")[:19].replace("T", " ") or "never"
+
     click.echo(f"label:       {data.get('label') or '—'}")
     click.echo(f"group:       {data.get('group') or '—'}")
     click.echo(f"name:        {data['name']}")
     click.echo(f"state:       {data['state']}")
-    click.echo(f"last seen:   {data.get('last_seen') or 'never'}")
-    click.echo(f"last conn:   {data.get('last_connected') or 'never'}")
+    click.echo(f"last seen:   {_ts(data.get('last_seen'))}")
+    click.echo(f"last conn:   {_ts(data.get('last_connected'))}")
     click.echo(f"pubkey:      {data['pubkey']}")
     click.echo(f"auth cached: {data.get('auth_cached', False)}")
 
@@ -338,9 +344,9 @@ def recommend(ctx: click.Context, pubkey: str | None) -> None:
 def _recommend_table(data: list) -> None:
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—") for n in data), default=0))
 
-    row = "  {}  {:<10}  {:<10}  {}"
-    click.echo(row.format(_wpad("LABEL", label_w), "NEIGHBOURS", "PROFILE", "txdelay"))
-    click.echo(row.format(_wpad("-----", label_w), "----------", "-------", "-------"))
+    row = "  {}  {:<10}  {:<10}  {:<7}  {}"
+    click.echo(row.format(_wpad("LABEL", label_w), "NEIGHBOURS", "PROFILE", "TXDELAY", "DIRECT.TXDELAY"))
+    click.echo(row.format(_wpad("-----", label_w), "----------", "-------", "-------", "--------------"))
     for n in data:
         count = n["neighbour_count"]
         profile = n["profile"]
@@ -349,6 +355,7 @@ def _recommend_table(data: list) -> None:
             str(count) if count is not None else "—",
             profile["name"] if profile else "(no data)",
             profile["txdelay"] if profile else "—",
+            profile["direct_txdelay"] if profile else "—",
         ))
 
 

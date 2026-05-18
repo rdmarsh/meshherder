@@ -76,3 +76,30 @@ async def test_node_dispatch_unknown_pubkey_returns_error(db, wq, config):
     resp = await _dispatch({"cmd": "node", "pubkey": "deadbeef"}, wq, db, config)
     assert resp["ok"] is False
     assert "not found" in resp["error"]
+
+
+# ------------------------------------------------------------------
+# nodes command — includes neighbors fact
+# ------------------------------------------------------------------
+
+async def test_nodes_dispatch_includes_neighbors(db, wq, config):
+    """nodes command should include the neighbors fact for each node."""
+    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="7"))
+
+    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"][0]["neighbors"] == "7"
+
+
+async def test_nodes_dispatch_neighbors_absent_when_not_collected(db, wq, config):
+    """nodes command returns None for neighbors when fact not yet collected."""
+    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"][0]["neighbors"] is None
