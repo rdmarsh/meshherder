@@ -56,11 +56,9 @@ pip install -e ".[dev]"
 Clone to a permanent location, create a venv, and install into it:
 
 ```bash
-sudo mkdir -p /opt/mch
-sudo chown $USER /opt/mch
-git clone https://github.com/rdmarsh/mch /opt/mch
-python3 -m venv /opt/mch/.venv
-/opt/mch/.venv/bin/pip install /opt/mch
+sudo git clone https://github.com/rdmarsh/mch /opt/mch
+sudo python3 -m venv /opt/mch/.venv
+sudo /opt/mch/.venv/bin/pip install /opt/mch
 ```
 
 Symlink the binaries onto the system PATH so the service file works as-is:
