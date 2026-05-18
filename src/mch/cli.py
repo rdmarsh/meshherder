@@ -10,6 +10,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,12 @@ import click
 
 
 DEFAULT_SOCKET = "/run/mch/mchd.sock"
+
+
+def _wpad(s: str, width: int) -> str:
+    """Left-justify s in a field of visual width, accounting for wide chars (emoji, CJK)."""
+    visual = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+    return s + " " * max(0, width - visual)
 
 
 async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
@@ -86,11 +93,11 @@ def status(ctx: click.Context) -> None:
         click.echo("  (no nodes in database yet)")
         return
 
-    fmt = "  {:<16}  {:<22}  {}"
-    click.echo(fmt.format("STATE", "NAME", "PUBKEY"))
-    click.echo(fmt.format("-----", "----", "------"))
+    row = "  {:<16}  {}  {}"
+    click.echo(row.format("STATE", _wpad("NAME", 22), "PUBKEY"))
+    click.echo(row.format("-----", _wpad("----", 22), "------"))
     for n in nodes:
-        click.echo(fmt.format(n["state"], n["name"][:22], n["pubkey"][:16] + "…"))
+        click.echo(row.format(n["state"], _wpad(n["name"][:22], 22), n["pubkey"][:16] + "…"))
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +115,13 @@ def nodes(ctx: click.Context) -> None:
         click.echo("no nodes in database")
         return
 
-    fmt = "  {:<12}  {:<22}  {:<10}  {:<16}  {}"
-    click.echo(fmt.format("STATE", "NAME", "GROUP", "LAST SEEN", "PUBKEY"))
-    click.echo(fmt.format("-----", "----", "-----", "---------", "------"))
+    row = "  {:<12}  {}  {:<10}  {:<16}  {}"
+    click.echo(row.format("STATE", _wpad("NAME", 22), "GROUP", "LAST SEEN", "PUBKEY"))
+    click.echo(row.format("-----", _wpad("----", 22), "-----", "---------", "------"))
     for n in data:
         last = (n.get("last_seen") or "never")[:16]
         group = (n.get("group") or "—")[:10]
-        click.echo(fmt.format(n["state"], n["name"][:22], group, last, n["pubkey"][:16] + "…"))
+        click.echo(row.format(n["state"], _wpad(n["name"][:22], 22), group, last, n["pubkey"][:16] + "…"))
 
 
 # ---------------------------------------------------------------------------
