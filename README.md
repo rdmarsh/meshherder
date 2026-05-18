@@ -53,15 +53,12 @@ pip install -e ".[dev]"
 
 ### Production (server / Raspberry Pi)
 
-Clone to a permanent location and install into a venv there:
+Clone to a permanent location, create a venv, and install into it:
 
 ```bash
 sudo git clone https://github.com/rdmarsh/mch /opt/mch
-cd /opt/mch
-python3 -m venv .venv
-source .venv/bin/activate
-pip install .
-deactivate
+sudo python3 -m venv /opt/mch/.venv
+sudo /opt/mch/.venv/bin/pip install /opt/mch
 ```
 
 Symlink the binaries onto the system PATH so the service file works as-is:
