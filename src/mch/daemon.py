@@ -57,9 +57,12 @@ async def _handle_client(
         log.exception("client handler error: %s", exc)
         resp = {"ok": False, "error": str(exc)}
 
-    writer.write((json.dumps(resp) + "\n").encode())
-    await writer.drain()
-    writer.close()
+    try:
+        writer.write((json.dumps(resp) + "\n").encode())
+        await writer.drain()
+        writer.close()
+    except (ConnectionResetError, BrokenPipeError):
+        pass  # client disconnected before response was sent (e.g. CLI timed out)
 
 
 async def _dispatch(
