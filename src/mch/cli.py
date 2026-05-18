@@ -174,18 +174,22 @@ def node(ctx: click.Context, pubkey: str) -> None:
 
     facts = data.get("facts", {})
     if facts:
+        key_w = max(len(k) for k in facts) + 1  # +1 for the colon
         click.echo("facts:")
         for k, v in sorted(facts.items()):
-            click.echo(f"  {k}: {v}")
+            click.echo(f"  {(k + ':'):<{key_w}}  {v}")
         click.echo("")
 
     settings = data.get("settings", [])
     if settings:
-        click.echo("settings:")
+        any_drift = any(s["drift"] for s in settings)
+        legend = "  (~ = drifted from desired)" if any_drift else ""
+        click.echo(f"settings:{legend}")
         sfmt = "  {:<2}  {:<22}  {:<14}  {:<14}  {}"
-        click.echo(sfmt.format("!", "KEY", "DESIRED", "OBSERVED", "POLICY"))
+        click.echo(sfmt.format("~", "KEY", "DESIRED", "OBSERVED", "POLICY"))
+        click.echo(sfmt.format("-", "---", "-------", "--------", "------"))
         for s in settings:
-            drift_flag = "*" if s["drift"] else " "
+            drift_flag = "~" if s["drift"] else " "
             click.echo(sfmt.format(
                 drift_flag,
                 s["key"][:22],
