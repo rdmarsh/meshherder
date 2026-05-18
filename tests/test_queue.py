@@ -164,7 +164,7 @@ def _contact(pubkey="aabbccdd1122", name="TestNode", type_=2, flags=0):
 # ------------------------------------------------------------------
 
 async def test_cycle_node_not_in_contacts(db):
-    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", name="Missing")])
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", label="Missing")])
     gw = _make_gateway(contacts=[])  # no contacts
     wq = WorkQueue(cfg, gw, db)
 
@@ -179,7 +179,7 @@ async def test_cycle_node_not_in_contacts(db):
 # ------------------------------------------------------------------
 
 async def test_cycle_collects_facts(db):
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg], )
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
@@ -197,7 +197,7 @@ async def test_cycle_collects_facts(db):
 async def test_cycle_enforces_drifted_setting(db):
     node_cfg = _node(
         pubkey="aabbcc",
-        name="TestNode",
+        label="TestNode",
         settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -219,7 +219,7 @@ async def test_cycle_enforces_drifted_setting(db):
 async def test_cycle_audit_does_not_set(db):
     node_cfg = _node(
         pubkey="aabbcc",
-        name="TestNode",
+        label="TestNode",
         settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.AUDIT)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -244,7 +244,7 @@ async def test_cycle_audit_does_not_set(db):
 async def test_permission_error_login_failure_marks_offline(db):
     """When a command returns 'no permission' and re-login fails, node is marked offline."""
     node_cfg = _node(
-        pubkey="aabbcc", name="TestNode",
+        pubkey="aabbcc", label="TestNode",
         settings={"name": SettingConfig(desired="TestNode", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -264,7 +264,7 @@ async def test_permission_error_login_failure_marks_offline(db):
 
 async def test_no_permission_error_means_no_login(db):
     """When commands succeed normally, login is never called regardless of secrets config."""
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     cfg.secrets = {"aabbcc": "hunter2"}
@@ -282,7 +282,7 @@ async def test_no_permission_error_means_no_login(db):
 async def test_permission_error_triggers_relogin_and_retry(db):
     """A permission-denied response on a command clears auth_cached, re-logins, and retries."""
     node_cfg = _node(
-        pubkey="aabbcc", name="TestNode",
+        pubkey="aabbcc", label="TestNode",
         settings={"name": SettingConfig(desired="TestNode", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -314,7 +314,7 @@ async def test_permission_error_triggers_relogin_and_retry(db):
 async def test_permission_error_relogin_fails_marks_node_offline(db):
     """If re-login after a permission error also fails, the node is marked offline."""
     node_cfg = _node(
-        pubkey="aabbcc", name="TestNode",
+        pubkey="aabbcc", label="TestNode",
         settings={"name": SettingConfig(desired="TestNode", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -344,7 +344,7 @@ async def test_config_operations_seeded_on_first_run(db):
     """Operations in config are queued as pending when they have never run."""
     from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24)
-    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
@@ -360,7 +360,7 @@ async def test_config_operations_not_reseeded_if_recent(db):
     """Operations that ran within every_hours are not re-queued."""
     from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24)
-    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
@@ -382,7 +382,7 @@ async def test_config_operations_reseeded_when_due(db):
     """Operations that ran longer than every_hours ago are re-queued."""
     from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24)
-    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
@@ -402,7 +402,7 @@ async def test_config_operations_reseeded_when_due(db):
 
 async def test_operation_row_updated_not_duplicated(db):
     """Running a pending op updates the original row in-place — no duplicate INSERT."""
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
@@ -430,7 +430,7 @@ async def test_fire_and_forget_op_marked_success_on_timeout(db):
     """An op with fire_and_forget=True is marked SUCCESS even when send_command fails."""
     from mch.config import OperationConfig
     op_cfg = OperationConfig(command="reboot", every_hours=168, fire_and_forget=True)
-    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
@@ -453,7 +453,7 @@ async def test_fire_and_forget_false_still_fails_on_timeout(db):
     """A normal op (fire_and_forget=False) is still marked FAILED when send_command fails."""
     from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24, fire_and_forget=False)
-    node_cfg = _node(pubkey="aabbcc", name="TestNode", operations=[op_cfg])
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
@@ -468,7 +468,7 @@ async def test_fire_and_forget_false_still_fails_on_timeout(db):
 
 
 async def test_cycle_runs_pending_operations(db):
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
 
@@ -492,7 +492,7 @@ async def test_cycle_runs_pending_operations(db):
 
 async def test_cycle_skips_non_repeater_contacts(db):
     """CLI contacts (type=1) are not processed even if pubkey matches config."""
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     gw = _make_gateway(contacts=[_contact("aabbccdd1122", type_=1)])  # CLI, not REP
@@ -509,7 +509,7 @@ async def test_cycle_skips_non_repeater_contacts(db):
 
 async def test_cycle_sets_favourite_flag_on_unfavourited_contact(db):
     """A managed contact that is not yet favourited (flags=0) gets flagged."""
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     contact = _contact("aabbccdd1122", flags=0)
@@ -524,7 +524,7 @@ async def test_cycle_sets_favourite_flag_on_unfavourited_contact(db):
 
 async def test_cycle_skips_favourite_if_already_set(db):
     """set_contact_favourite is not called when contact already has flags=1."""
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     contact = _contact("aabbccdd1122", flags=1)  # already favourited
@@ -544,7 +544,7 @@ async def test_cycle_skips_favourite_if_already_set(db):
 async def test_run_node_forces_immediate_sync(db):
     """run_node processes a node regardless of its next_sync_at."""
     from datetime import timedelta
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     # node is scheduled far in the future — run_node should bypass that
@@ -573,8 +573,8 @@ async def test_run_node_odd_prefix_rejected(db):
 
 async def test_run_node_ambiguous_prefix_raises(db):
     """A prefix matching multiple contacts raises ValueError."""
-    node_cfg1 = _node(pubkey="aa11", name="Node1")
-    node_cfg2 = _node(pubkey="aa22", name="Node2")
+    node_cfg1 = _node(pubkey="aa11", label="Node1")
+    node_cfg2 = _node(pubkey="aa22", label="Node2")
     cfg = _make_config(node_cfgs=[node_cfg1, node_cfg2])
     contacts = [
         _contact("aa11bbcc1122", name="Node1"),
@@ -657,7 +657,7 @@ async def test_unfiled_contacts_excludes_managed_nodes(db):
 async def test_cycle_state_configured_after_successful_enforcement(db):
     """State is CONFIGURED after drift is detected and successfully enforced."""
     node_cfg = _node(
-        pubkey="aabbcc", name="TestNode",
+        pubkey="aabbcc", label="TestNode",
         settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -677,7 +677,7 @@ async def test_cycle_state_configured_after_successful_enforcement(db):
 async def test_cycle_observed_updated_after_set(db):
     """After a successful set, the observed value in the DB reflects the new value."""
     node_cfg = _node(
-        pubkey="aabbcc", name="TestNode",
+        pubkey="aabbcc", label="TestNode",
         settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -716,7 +716,7 @@ async def test_unfiled_contacts_excludes_non_repeaters(db):
 async def test_node_on_different_freq_hops_radio(db):
     """A node with a radio config causes the gateway to hop before processing and restore after."""
     from mch.config import RadioConfig
-    node_cfg = _node(pubkey="aabbcc", name="TestNode",
+    node_cfg = _node(pubkey="aabbcc", label="TestNode",
                      radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5))
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
@@ -733,7 +733,7 @@ async def test_node_on_different_freq_hops_radio(db):
 
 async def test_node_no_radio_config_no_hop(db):
     """A node without a radio config never causes a frequency hop."""
-    node_cfg = _node(pubkey="aabbcc", name="TestNode")
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
 
@@ -751,7 +751,7 @@ async def test_radio_restored_on_relogin_failure(db):
     """Radio is restored via finally even when processing raises _ReloginFailed."""
     from mch.config import RadioConfig
     node_cfg = _node(
-        pubkey="aabbcc", name="TestNode",
+        pubkey="aabbcc", label="TestNode",
         radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5),
         settings={"name": SettingConfig(desired="X", policy=SettingPolicy.ENFORCE)},
     )
