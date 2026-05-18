@@ -151,8 +151,8 @@ def node(ctx: click.Context, pubkey: str) -> None:
     resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
     data = _check(resp)
 
-    click.echo(f"group:       {data.get('group') or '—'}")
     click.echo(f"label:       {data.get('label') or '—'}")
+    click.echo(f"group:       {data.get('group') or '—'}")
     click.echo(f"name:        {data['name']}")
     click.echo(f"state:       {data['state']}")
     click.echo(f"last seen:   {data.get('last_seen') or 'never'}")
