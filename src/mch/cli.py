@@ -124,13 +124,13 @@ def nodes(ctx: click.Context) -> None:
 
     def _short_ver(raw: str | None) -> str:
         if not raw:
-            return "—"
+            return "-"
         return raw.split("-")[0]  # "v1.15.0-dee3e26..." → "v1.15.0"
 
-    group_w = max(len("GROUP"),   max((len(n.get("group") or "—")         for n in data), default=0))
-    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "—")       for n in data), default=0))
+    group_w = max(len("GROUP"),   max((len(n.get("group") or "-")         for n in data), default=0))
+    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-")       for n in data), default=0))
     name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])                    for n in data), default=0))
-    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "—")      for n in data), default=0))
+    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "-")      for n in data), default=0))
     ver_w   = max(len("VER"),     max((len(_short_ver(n.get("ver")))       for n in data), default=0))
 
     row = "  {:<10}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
@@ -138,12 +138,12 @@ def nodes(ctx: click.Context) -> None:
     click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---", "---------", "------", gw=group_w, nw=nbrs_w, vw=ver_w))
     for n in data:
         last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
-        group = (n.get("group") or "—")
-        nbrs  = n.get("neighbors") or "—"
+        group = (n.get("group") or "-")
+        nbrs  = n.get("neighbors") or "-"
         ver   = _short_ver(n.get("ver"))
         click.echo(row.format(
             n["state"],
-            _wpad(n.get("label") or "—", label_w),
+            _wpad(n.get("label") or "-", label_w),
             group,
             _wpad(n["name"], name_w),
             nbrs, ver,
@@ -152,7 +152,7 @@ def nodes(ctx: click.Context) -> None:
         ))
 
     example = f'"{data[0].get("label") or data[0]["pubkey"][:8]}"'
-    click.echo(f"\n  mch node {example} — full details   mch recommend {example} — settings")
+    click.echo(f"\n  mch node {example} for full details, mch recommend {example} for settings")
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +173,8 @@ def node(ctx: click.Context, pubkey: str) -> None:
     def _ts(v: str | None) -> str:
         return (v or "")[:19].replace("T", " ") or "never"
 
-    click.echo(f"label:       {data.get('label') or '—'}")
-    click.echo(f"group:       {data.get('group') or '—'}")
+    click.echo(f"label:       {data.get('label') or '-'}")
+    click.echo(f"group:       {data.get('group') or '-'}")
     click.echo(f"name:        {data['name']}")
     click.echo(f"state:       {data['state']}")
     click.echo(f"last seen:   {_ts(data.get('last_seen'))}")
@@ -203,8 +203,8 @@ def node(ctx: click.Context, pubkey: str) -> None:
             click.echo(sfmt.format(
                 drift_flag,
                 s["key"][:22],
-                (s.get("desired") or "—")[:14],
-                (s.get("observed") or "—")[:14],
+                (s.get("desired") or "-")[:14],
+                (s.get("observed") or "-")[:14],
                 s["policy"],
             ))
         click.echo("")
@@ -260,8 +260,8 @@ def drift(ctx: click.Context) -> None:
         click.echo(fmt.format(
             s["node_pubkey"][:16],
             s["key"][:22],
-            (s.get("desired") or "—")[:14],
-            (s.get("observed") or "—")[:14],
+            (s.get("desired") or "-")[:14],
+            (s.get("observed") or "-")[:14],
             s["policy"],
         ))
 
@@ -362,7 +362,7 @@ def recommend(ctx: click.Context, pubkey: str | None) -> None:
 
 
 def _recommend_table(data: list) -> None:
-    label_w = max(_wlen("label"), max((_wlen(n.get("label") or "—") for n in data), default=0))
+    label_w = max(_wlen("label"), max((_wlen(n.get("label") or "-") for n in data), default=0))
 
     row = "  {}  {:<4}  {:<7}  {}"
     click.echo(row.format(_wpad("label", label_w), "nbrs", "txdelay", "direct.txdelay"))
@@ -371,38 +371,38 @@ def _recommend_table(data: list) -> None:
         count = n["neighbour_count"]
         profile = n["profile"]
         click.echo(row.format(
-            _wpad(n.get("label") or "—", label_w),
-            str(count) if count is not None else "—",
-            profile["txdelay"] if profile else "—",
-            profile["direct_txdelay"] if profile else "—",
+            _wpad(n.get("label") or "-", label_w),
+            str(count) if count is not None else "-",
+            profile["txdelay"] if profile else "-",
+            profile["direct_txdelay"] if profile else "-",
         ))
 
     example = f'"{data[0].get("label") or data[0]["pubkey"][:8]}"'
-    click.echo(f"\n  mch recommend {example} — full recommendations")
+    click.echo(f"\n  mch recommend {example} for full recommendations")
 
 
 def _recommend_detail(n: dict) -> None:
     count = n["neighbour_count"]
     profile = n["profile"]
 
-    click.echo(f"label:      {n.get('label') or '—'}")
+    click.echo(f"label:      {n.get('label') or '-'}")
     click.echo(f"name:       {n['name']}")
 
     if count is None:
         click.echo("")
-        click.echo("(no neighbour data — add 'neighbors' to facts: in config.yaml and run mch sync)")
+        click.echo("(no neighbour data - add 'neighbors' to facts: in config.yaml and run mch sync)")
         return
 
     click.echo(f"neighbours: {count}")
     if profile:
-        click.echo(f"profile:    {profile['name']} — {profile['description']}")
+        click.echo(f"profile:    {profile['name']} - {profile['description']}")
 
     click.echo("")
 
     # Build the full list: profile settings first, then universal
     settings: list[tuple[str, str, str]] = []
     if profile:
-        settings.append(("txdelay",        profile["txdelay"],        "Flood retransmit delay — high-reach nodes fire first"))
+        settings.append(("txdelay",        profile["txdelay"],        "Flood retransmit delay - high-reach nodes fire first"))
         settings.append(("direct.txdelay", profile["direct_txdelay"], "Direct traffic delay (lower than flood delay)"))
 
     for u in n.get("universal", []):
