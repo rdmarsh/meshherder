@@ -296,12 +296,14 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 ## CLI reference
 
 ```
-mch status           Daemon health, queue depth, gateway info
-mch nodes            All managed nodes: last seen, config state, sync state
-mch node <name>      Detail for one node (name or pubkey prefix)
-mch contacts         Repeater nodes visible to the gateway not yet in config
-mch sync             Trigger an immediate sync cycle (respects rate limiting)
-mch sync <prefix>    Move one node to the front of the queue
+mch status              Daemon health, queue depth, gateway info
+mch nodes               All managed nodes: last seen, config state, sync state
+mch node <prefix>       Detail for one node — facts, settings, recent activity
+mch logs                Recent per-node activity across all nodes
+mch logs <prefix>       Activity for one node
+mch contacts            Repeater nodes visible to the gateway not yet in config
+mch sync                Trigger an immediate sync cycle (respects rate limiting)
+mch sync <prefix>       Move one node to the front of the queue
 ```
 
 `mch sync <prefix>` runs that node immediately and waits — the CLI returns once the sync is
@@ -316,6 +318,54 @@ mch sync 75ab8517    # sync the node whose pubkey starts with 75ab8517; CLI wait
 "sync started" immediately and mchd works through the list in config order, pausing
 `inter_node_delay_seconds` between each node, exactly as a scheduled cycle would. With many nodes
 and a long delay this can take a while; check `mch nodes` to watch progress.
+
+## Logs
+
+mchd logs to the systemd journal. Follow live output with:
+
+```bash
+journalctl -u mchd -f
+```
+
+A normal startup and sync looks like this:
+
+```
+mchd: gateway connected: name='🦷 mch-gw' freq=915.075 bw=125 sf=9 cr=5
+mchd: work queue started (interval=1.0d)
+mchd: processing node '🦷 Quakers Hill Test' (75ab8517...)
+mchd: hopping to 915.800/250/SF10 for '🦷 Quakers Hill Test'
+mchd: hopping radio: 915.075/125/SF9 → 915.800/250/SF10
+mchd: radio restored: 915.075/125/SF9
+mchd: '🦷 Quakers Hill Test' done — facts:5 settings:1/1 enforced drift:0 ops:0/0 failed
+```
+
+Per-node activity (settings changes, operation results, errors) is also stored in the local
+database and shown by `mch node` and `mch logs`:
+
+```
+mch node 75ab8517
+
+  state:       configured
+  ...
+  recent activity:
+    [INFO ] 2026-05-18 09:27  set owner.info='Managed by mch' (was '')
+    [INFO ] 2026-05-18 09:27  operation ok: 'clock sync'
+```
+
+```
+mch logs               # recent activity across all nodes
+mch logs 75ab8517      # filtered to one node (prefix ok)
+mch logs -n 100        # last 100 entries
+```
+
+If a node shows as `partial`, `mch logs <prefix>` will show what failed:
+
+```
+2026-05-17 14:38 [ERROR] operation failed: 'reboot': timeout — no response from node
+```
+
+In this case `reboot` timed out because the node rebooted before it could reply — mark it
+`fire_and_forget: true` in your config and it will be treated as success.
 
 ## Upgrading
 
