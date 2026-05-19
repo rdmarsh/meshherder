@@ -91,19 +91,9 @@ def status(ctx: click.Context, query: str | None) -> None:
     all_nodes = data.get("nodes", [])
     nodes = _filter_nodes(all_nodes, query)
     issue_count = data.get("issues", 0)
+    filtered = bool(query and len(nodes) != len(all_nodes))
 
-    node_summary = f"nodes: {len(nodes)}"
-    if query and len(nodes) != len(all_nodes):
-        node_summary += f" (filtered from {len(all_nodes)})"
-    click.echo(f"{node_summary}  issues: {issue_count}")
-    click.echo("")
-
-    if not nodes:
-        if query:
-            click.echo(f"  (no nodes matching '{query}')")
-        else:
-            click.echo("  (no nodes in database yet)")
-    else:
+    if nodes:
         def _short_ver(raw: str | None) -> str:
             if not raw:
                 return "-"
@@ -133,10 +123,19 @@ def status(ctx: click.Context, query: str | None) -> None:
                 last, n["pubkey"][:16] + "…",
                 sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
             ))
+    elif query:
+        click.echo(f"  no nodes matching '{query}'")
+    else:
+        click.echo("  no nodes in database")
 
-    if issue_count:
-        click.echo("")
-        click.echo(f"{issue_count} issue(s) - run 'mch issues' for details")
+    click.echo("")
+    if filtered:
+        click.echo(f"{len(nodes)} of {len(all_nodes)} nodes")
+    else:
+        footer = f"{len(all_nodes)} nodes"
+        if issue_count:
+            footer += f"  {issue_count} issues - run 'mch issues' for details"
+        click.echo(footer)
 
 
 # ---------------------------------------------------------------------------
