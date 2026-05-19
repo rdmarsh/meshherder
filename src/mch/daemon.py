@@ -153,6 +153,7 @@ async def _dispatch(
                 "last_connected": node.last_connected.isoformat() if node.last_connected else None,
                 "auth_required": node.auth_required,
                 "auth_cached": node.auth_cached,
+                "passwd_known": any(node.pubkey.startswith(p) for p in config.secrets),
                 "facts": facts,
                 "settings": [
                     {

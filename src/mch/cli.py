@@ -130,11 +130,12 @@ def status(ctx: click.Context, query: str | None) -> None:
 
     click.echo("")
     if filtered:
-        click.echo(f"{len(nodes)} of {len(all_nodes)} nodes")
+        click.echo(f"{len(nodes)} of {len(all_nodes)} nodes shown")
     else:
         footer = f"{len(all_nodes)} nodes"
         if issue_count:
-            footer += f"  {issue_count} issues - run 'mch issues' for details"
+            issue_word = "issue" if issue_count == 1 else "issues"
+            footer += f"  {issue_count} {issue_word} - run 'mch issues' for details"
         click.echo(footer)
 
 
@@ -163,7 +164,8 @@ def node(ctx: click.Context, pubkey: str) -> None:
     click.echo(f"last seen:   {_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ts(data.get('last_connected'))}")
     click.echo(f"pubkey:      {data['pubkey']}")
-    click.echo(f"auth cached: {data.get('auth_cached', False)}")
+    click.echo(f"acl:         {'yes' if data.get('auth_cached') else 'no'}")
+    click.echo(f"passwd:      {'yes' if data.get('passwd_known') else 'no'}")
 
     facts = data.get("facts", {})
     if facts:
@@ -260,13 +262,14 @@ def issues(ctx: click.Context, query: str | None) -> None:
     if bad_state:
         click.echo("problem states:")
         name_w = max(_wlen("NODE"), max((_wlen(n.get("label") or n["name"]) for n in bad_state), default=0))
-        fmt = "  {}  {:<12}  {}"
-        click.echo(fmt.format(_wpad("NODE", name_w), "STATE", "LAST SEEN"))
-        click.echo(fmt.format(_wpad("----", name_w), "-----", "---------"))
+        fmt = "  {}  {:<12}  {:<16}  {}"
+        click.echo(fmt.format(_wpad("NODE", name_w), "STATE", "LAST SEEN", "PUBKEY"))
+        click.echo(fmt.format(_wpad("----", name_w), "-----", "---------", "------"))
         for n in bad_state:
             label = n.get("label") or n["name"]
             last = (n.get("last_seen") or "never")[:16].replace("T", " ")
-            click.echo(fmt.format(_wpad(label, name_w), n["state"], last))
+            pubkey = n.get("pubkey", "")[:16] + "…" if n.get("pubkey") else "-"
+            click.echo(fmt.format(_wpad(label, name_w), n["state"], last, pubkey))
         click.echo("")
 
     if ghosts:
