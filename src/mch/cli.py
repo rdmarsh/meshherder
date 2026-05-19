@@ -250,11 +250,12 @@ def sync(ctx: click.Context, node: str | None) -> None:
 def drift(ctx: click.Context, query: str | None) -> None:
     """Show all settings currently drifted from desired."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "drift"})
-    data = _filter_drift(_check(resp) or [], query)
+    all_data = _check(resp) or []
+    data = _filter_drift(all_data, query)
 
     if not data:
-        if query:
-            click.echo(f"no drift detected for '{query}'")
+        if query and all_data:
+            click.echo(f"no drift for '{query}'")
         else:
             click.echo("no drift detected")
         return
