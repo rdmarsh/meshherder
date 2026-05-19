@@ -185,6 +185,7 @@ class WorkQueue:
         log.info("work queue started (interval=%.1fd)", self._config.scheduler.sync_interval_days)
 
         self._contacts = await self._gateway.get_contacts(managed_only=False)
+        await self._seed_from_config()
         await self._seed_node_labels()
         await self._reschedule_overdue()
 
@@ -253,6 +254,50 @@ class WorkQueue:
         interval_s = self._config.scheduler.sync_interval_days * 86400
         jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
         await self._db.set_next_sync(node.pubkey, datetime.now(UTC) + timedelta(seconds=interval_s + jitter))
+
+    async def _seed_from_config(self) -> None:
+        """Seed DB entries for config nodes visible to the gateway.
+
+        Cross-references config.nodes against all gateway contacts. Inserts any
+        config-listed node found in contacts that isn't already in the DB.
+        Auto-favourites matched nodes so they aren't evicted on a dense mesh.
+        Logs a warning for config nodes with no matching gateway contact.
+        """
+        db_nodes = await self._db.get_all_nodes()
+        known_pubkeys = {n.pubkey for n in db_nodes}
+
+        for node_cfg in self._config.nodes:
+            contact = next(
+                (c for c in self._contacts
+                 if c["public_key"].startswith(node_cfg.pubkey_prefix)
+                 and c.get("type") == CONTACT_TYPE_REPEATER),
+                None,
+            )
+            if contact is None:
+                log.warning(
+                    "config node '%s' (prefix: %s) not visible to gateway — cannot manage",
+                    node_cfg.label or node_cfg.pubkey_prefix,
+                    node_cfg.pubkey_prefix,
+                )
+                continue
+
+            pubkey = contact["public_key"]
+
+            if pubkey not in known_pubkeys:
+                node = Node(
+                    pubkey=pubkey,
+                    name=contact.get("adv_name", ""),
+                    label=node_cfg.label or "",
+                    group=node_cfg.group,
+                    state=NodeState.UNKNOWN,
+                )
+                await self._db.upsert_node(node)
+                log.info("seeded node '%s' from config (%s)", node_cfg.label or pubkey[:12], pubkey[:12])
+
+            # auto-favourite: guard against eviction on a dense mesh
+            if not contact.get("flags", 0) & 1:
+                await self._gateway.set_contact_favourite(contact)
+                log.info("favourited '%s' (%s)", node_cfg.label or pubkey[:12], pubkey[:12])
 
     async def _seed_node_labels(self) -> None:
         """Write labels from config into the DB for any nodes already in the DB.
