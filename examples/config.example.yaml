@@ -176,17 +176,25 @@ nodes:
         poll_hours: 12
 
   # Node on a non-default frequency.
-  # The gateway temporarily changes its radio to reach this node, runs the full
-  # sync, then restores its home frequency. The node is otherwise managed
-  # identically to any other node.
+  # 'via:' tells mchd to temporarily hop the gateway to this frequency to reach
+  # the node, run the full sync, then restore the gateway's home frequency.
+  # The node is otherwise managed identically to any other node.
+  #
+  # Short form (comma-separated: freq,bw,sf,cr) - same format as settings.radio.desired:
   - pubkey_prefix: 2fd9c7bb
     label: SiteC-Valley
     group: repeaters
-    radio:
-      freq: 916.575   # node is on a different frequency to the gateway home above
-      bw: 62.5
-      sf: 7
-      cr: 8
+    via: "916.575,62.5,7,8"   # freq MHz, bw kHz, sf, cr
+  #
+  # Long form (explicit keys) - useful when you want to annotate each value:
+  # - pubkey_prefix: 2fd9c7bb
+  #   label: SiteC-Valley
+  #   group: repeaters
+  #   via:
+  #     freq: 916.575   # MHz
+  #     bw: 62.5        # kHz
+  #     sf: 7
+  #     cr: 8
 
   # Node with recurring operations.
   # Operations are one-shot commands run on a schedule - distinct from settings,

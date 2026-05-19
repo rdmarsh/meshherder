@@ -481,7 +481,7 @@ class WorkQueue:
             await self._gateway.set_contact_favourite(contact)
 
         # hop the gateway radio if this node lives on a different frequency
-        node_radio = node_cfg.radio
+        node_radio = node_cfg.via
         gw_freq = self._gateway.info.get("radio_freq")
         need_hop = node_radio is not None and node_radio.freq != gw_freq
         saved_radio: tuple | None = None
