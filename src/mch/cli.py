@@ -90,12 +90,12 @@ def status(ctx: click.Context, query: str | None) -> None:
 
     all_nodes = data.get("nodes", [])
     nodes = _filter_nodes(all_nodes, query)
-    drifted = data.get("issues", 0)
+    issue_count = data.get("issues", 0)
 
     node_summary = f"nodes: {len(nodes)}"
     if query and len(nodes) != len(all_nodes):
         node_summary += f" (filtered from {len(all_nodes)})"
-    click.echo(f"{node_summary}  issues: {drifted}")
+    click.echo(f"{node_summary}  issues: {issue_count}")
     click.echo("")
 
     if not nodes:
@@ -103,66 +103,40 @@ def status(ctx: click.Context, query: str | None) -> None:
             click.echo(f"  (no nodes matching '{query}')")
         else:
             click.echo("  (no nodes in database yet)")
-        return
+    else:
+        def _short_ver(raw: str | None) -> str:
+            if not raw:
+                return "-"
+            return raw.split("-")[0]  # "v1.15.0-dee3e26..." → "v1.15.0"
 
-    state_w = max(len("STATE"), max((len(n["state"])        for n in nodes), default=0))
-    name_w  = max(_wlen("NAME"), max((_wlen(n["name"][:22]) for n in nodes), default=0))
+        state_w = max(len("STATE"),   max((len(n["state"])                        for n in nodes), default=0))
+        group_w = max(len("GROUP"),   max((len(n.get("group") or "-")            for n in nodes), default=0))
+        label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-")          for n in nodes), default=0))
+        name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])                       for n in nodes), default=0))
+        nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "-")         for n in nodes), default=0))
+        ver_w   = max(len("VER"),     max((len(_short_ver(n.get("ver")))          for n in nodes), default=0))
 
-    row = "  {:<{sw}}  {}  {}"
-    click.echo(row.format("STATE", _wpad("NAME", name_w), "PUBKEY", sw=state_w))
-    click.echo(row.format("-----", _wpad("----", name_w), "------", sw=state_w))
-    for n in nodes:
-        click.echo(row.format(n["state"], _wpad(n["name"][:22], name_w), n["pubkey"][:16] + "…", sw=state_w))
+        row = "  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
+        click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "VER", "LAST SEEN", "PUBKEY", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
+        click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---", "---------", "------", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
+        for n in nodes:
+            last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
+            group = (n.get("group") or "-")
+            nbrs  = n.get("neighbors") or "-"
+            ver   = _short_ver(n.get("ver"))
+            click.echo(row.format(
+                n["state"],
+                _wpad(n.get("label") or "-", label_w),
+                group,
+                _wpad(n["name"], name_w),
+                nbrs, ver,
+                last, n["pubkey"][:16] + "…",
+                sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
+            ))
 
-
-# ---------------------------------------------------------------------------
-# nodes
-# ---------------------------------------------------------------------------
-
-@cli.command()
-@click.argument("query", required=False, default=None)
-@click.pass_context
-def nodes(ctx: click.Context, query: str | None) -> None:
-    """List all known nodes."""
-    resp = _rpc(ctx.obj["socket"], {"cmd": "nodes"})
-    data = _filter_nodes(_check(resp) or [], query)
-
-    if not data:
-        if query:
-            click.echo(f"no nodes matching '{query}'")
-        else:
-            click.echo("no nodes in database")
-        return
-
-    def _short_ver(raw: str | None) -> str:
-        if not raw:
-            return "-"
-        return raw.split("-")[0]  # "v1.15.0-dee3e26..." → "v1.15.0"
-
-    state_w = max(len("STATE"),   max((len(n["state"])                        for n in data), default=0))
-    group_w = max(len("GROUP"),   max((len(n.get("group") or "-")            for n in data), default=0))
-    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-")          for n in data), default=0))
-    name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])                       for n in data), default=0))
-    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "-")         for n in data), default=0))
-    ver_w   = max(len("VER"),     max((len(_short_ver(n.get("ver")))          for n in data), default=0))
-
-    row = "  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
-    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "VER", "LAST SEEN", "PUBKEY", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
-    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---", "---------", "------", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
-    for n in data:
-        last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
-        group = (n.get("group") or "-")
-        nbrs  = n.get("neighbors") or "-"
-        ver   = _short_ver(n.get("ver"))
-        click.echo(row.format(
-            n["state"],
-            _wpad(n.get("label") or "-", label_w),
-            group,
-            _wpad(n["name"], name_w),
-            nbrs, ver,
-            last, n["pubkey"][:16] + "…",
-            sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
-        ))
+    if issue_count:
+        click.echo("")
+        click.echo(f"{issue_count} issue(s) - run 'mch issues' for details")
 
 
 # ---------------------------------------------------------------------------

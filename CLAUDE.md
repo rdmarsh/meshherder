@@ -44,7 +44,6 @@ mch status
 mch start
 mch stop
 mch sync          # trigger immediate sync cycle
-mch nodes         # list known nodes and their state
 mch node <name>   # show detail for one node
 ```
 
@@ -76,9 +75,8 @@ Managed repeater nodes
 
 **`mch` CLI**
 - Thin client: sends commands to `mchd` over the Unix socket and prints the response.
-- `mch status` — daemon health and queue depth.
+- `mch status` — fleet overview: 8-column table (STATE, LABEL, GROUP, NAME, NBRS, VER, LAST SEEN, PUBKEY) + issue count; footer when issues > 0.
 - `mch start` / `mch stop` — lifecycle (for use outside systemd; systemd uses `systemctl`).
-- `mch nodes` — tabular view of all nodes with last-seen, config status, sync state.
 - `mch node <name-or-pubkey-prefix>` — per-node detail with command history.
 
 **Work queue**

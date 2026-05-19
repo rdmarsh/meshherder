@@ -309,54 +309,6 @@ async def test_logs_dispatch_filtered_by_pubkey_prefix(db, wq, config):
 
 
 # ------------------------------------------------------------------
-# nodes command — includes neighbors fact
-# ------------------------------------------------------------------
-
-async def test_nodes_dispatch_includes_neighbors(db, wq, config):
-    """nodes command should include the neighbors fact for each node."""
-    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
-    await db.upsert_node(node)
-    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="7"))
-
-    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
-
-    assert resp["ok"] is True
-    assert resp["data"][0]["neighbors"] == "7"
-
-
-async def test_nodes_dispatch_includes_ver(db, wq, config):
-    """nodes command should include the ver fact for each node."""
-    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
-    await db.upsert_node(node)
-    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.15.0-dee3e26 (Build: 19-Apr-2026)"))
-
-    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
-
-    assert resp["ok"] is True
-    assert resp["data"][0]["ver"] == "v1.15.0-dee3e26 (Build: 19-Apr-2026)"
-
-
-async def test_nodes_dispatch_ver_absent_when_not_collected(db, wq, config):
-    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
-    await db.upsert_node(node)
-
-    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
-
-    assert resp["data"][0]["ver"] is None
-
-
-async def test_nodes_dispatch_neighbors_absent_when_not_collected(db, wq, config):
-    """nodes command returns None for neighbors when fact not yet collected."""
-    node = Node(pubkey="aabbccdd" * 8, name="Test", label="test", state=NodeState.CONFIGURED)
-    await db.upsert_node(node)
-
-    resp = await _dispatch({"cmd": "nodes"}, wq, db, config)
-
-    assert resp["ok"] is True
-    assert resp["data"][0]["neighbors"] is None
-
-
-# ------------------------------------------------------------------
 # status command
 # ------------------------------------------------------------------
 
@@ -405,9 +357,27 @@ async def test_status_dispatch_includes_label(db, wq, config):
     assert resp["data"]["nodes"][0]["label"] == "site-a"
 
 
-# ------------------------------------------------------------------
-# drift command
-# ------------------------------------------------------------------
+async def test_status_dispatch_includes_group_and_facts(db, wq, config):
+    """status response includes group, ver, and neighbors for each node."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Tower",
+        label="site-a",
+        group="repeaters",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(node)
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="5"))
+
+    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+
+    assert resp["ok"] is True
+    row = resp["data"]["nodes"][0]
+    assert row["group"] == "repeaters"
+    assert row["ver"] == "v1.14.1"
+    assert row["neighbors"] == "5"
+
 
 # ------------------------------------------------------------------
 # issues command
