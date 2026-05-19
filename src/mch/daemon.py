@@ -66,8 +66,11 @@ async def _handle_client(
 
 
 async def _resolve_node(query: str, db: Database) -> "Any":
-    """Resolve a pubkey prefix or label to a Node, or return None."""
-    from mch.models import Node as _Node
+    """Resolve a pubkey prefix, label substring, or name substring to a single Node.
+
+    Returns None if nothing matches.
+    Raises ValueError if the query is ambiguous (matches more than one node).
+    """
     node = await db.get_node(query)
     if node:
         return node
@@ -76,9 +79,18 @@ async def _resolve_node(query: str, db: Database) -> "Any":
     node = next((n for n in all_nodes if n.pubkey.startswith(query)), None)
     if node:
         return node
-    # case-insensitive label match
+    # label/name substring match
     q = query.lower()
-    return next((n for n in all_nodes if (n.label or "").lower() == q), None)
+    matches = [
+        n for n in all_nodes
+        if q in (n.label or "").lower() or q in n.name.lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        labels = ", ".join(repr(n.label or n.pubkey[:8]) for n in matches)
+        raise ValueError(f"ambiguous: {len(matches)} nodes match {query!r} ({labels})")
+    return None
 
 
 async def _dispatch(
@@ -129,7 +141,10 @@ async def _dispatch(
 
     if cmd == "node":
         pubkey = req.get("pubkey", "")
-        node = await _resolve_node(pubkey, db)
+        try:
+            node = await _resolve_node(pubkey, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
         facts = await db.get_facts(node.pubkey)
@@ -187,11 +202,10 @@ async def _dispatch(
         pubkey = req.get("pubkey")
         limit = int(req.get("limit", 50))
         if pubkey:
-            # expand prefix to full pubkey using the same logic as the node handler
-            node = await db.get_node(pubkey)
-            if not node:
-                all_nodes = await db.get_all_nodes()
-                node = next((n for n in all_nodes if n.pubkey.startswith(pubkey)), None)
+            try:
+                node = await _resolve_node(pubkey, db)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
             pubkey = node.pubkey if node else pubkey
         logs = await db.get_logs(pubkey, limit=limit)
         return {"ok": True, "data": logs}
@@ -222,7 +236,10 @@ async def _dispatch(
         pubkey = req.get("pubkey")
         nodes = await db.get_all_nodes()
         if pubkey:
-            node = await _resolve_node(pubkey, db)
+            try:
+                node = await _resolve_node(pubkey, db)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
             if not node:
                 return {"ok": False, "error": f"node {pubkey!r} not found"}
             nodes = [node]
