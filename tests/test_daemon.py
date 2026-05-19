@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 from mch.config import Config
 from mch.daemon import _dispatch
 from mch.db import Database
-from mch.models import Node, NodeFact, NodeState
+from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
 
 
 @pytest.fixture
@@ -210,3 +210,100 @@ async def test_nodes_dispatch_neighbors_absent_when_not_collected(db, wq, config
 
     assert resp["ok"] is True
     assert resp["data"][0]["neighbors"] is None
+
+
+# ------------------------------------------------------------------
+# status command
+# ------------------------------------------------------------------
+
+async def test_status_dispatch_returns_node_list_and_drift_count(db, wq, config):
+    """status command returns node list and a count of drifted settings."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+
+    assert resp["ok"] is True
+    data = resp["data"]
+    assert len(data["nodes"]) == 1
+    assert data["nodes"][0]["pubkey"] == node.pubkey
+    assert data["nodes"][0]["state"] == "configured"
+    assert data["drifted_settings"] == 0
+
+
+async def test_status_dispatch_counts_drifted_settings(db, wq, config):
+    """status drifted_settings count reflects settings with drift=True."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    setting = SettingRecord(
+        node_pubkey=node.pubkey,
+        key="owner.info",
+        desired="Managed by mch",
+        observed="something else",
+        policy=SettingPolicy.ENFORCE,
+        drift=True,
+    )
+    await db.upsert_setting(setting)
+
+    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+
+    assert resp["data"]["drifted_settings"] == 1
+
+
+async def test_status_dispatch_includes_label(db, wq, config):
+    """status nodes list includes the label field."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+
+    assert resp["data"]["nodes"][0]["label"] == "site-a"
+
+
+# ------------------------------------------------------------------
+# drift command
+# ------------------------------------------------------------------
+
+async def test_drift_dispatch_returns_drifted_settings(db, wq, config):
+    """drift command returns settings where drift=True."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    setting = SettingRecord(
+        node_pubkey=node.pubkey,
+        key="owner.info",
+        desired="Managed by mch",
+        observed="wrong value",
+        policy=SettingPolicy.ENFORCE,
+        drift=True,
+    )
+    await db.upsert_setting(setting)
+
+    resp = await _dispatch({"cmd": "drift"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert len(resp["data"]) == 1
+    row = resp["data"][0]
+    assert row["key"] == "owner.info"
+    assert row["desired"] == "Managed by mch"
+    assert row["observed"] == "wrong value"
+    assert row["label"] == "site-a"
+
+
+async def test_drift_dispatch_excludes_non_drifted(db, wq, config):
+    """drift command does not include settings where drift=False."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    setting = SettingRecord(
+        node_pubkey=node.pubkey,
+        key="owner.info",
+        desired="Managed by mch",
+        observed="Managed by mch",
+        policy=SettingPolicy.ENFORCE,
+        drift=False,
+    )
+    await db.upsert_setting(setting)
+
+    resp = await _dispatch({"cmd": "drift"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"] == []
