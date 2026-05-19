@@ -300,10 +300,10 @@ class WorkQueue:
                 log.info("favourited '%s' (%s)", node_cfg.label or pubkey[:12], pubkey[:12])
 
     async def _seed_node_labels(self) -> None:
-        """Write labels from config into the DB for any nodes already in the DB.
+        """Write labels and groups from config into the DB for any nodes already in the DB.
 
-        Ensures labels are current immediately on restart — not just after the
-        next sync cycle for each node.
+        Ensures labels and groups are current immediately on restart — not just after the
+        next sync cycle for each node. Fixes stale group fields after config edits.
         """
         all_nodes = await self._db.get_all_nodes()
         pubkey_to_node = {n.pubkey: n for n in all_nodes}
@@ -314,8 +314,14 @@ class WorkQueue:
             )
             if node is None:
                 continue
+            changed = False
             if node.label != node_cfg.label:
                 node.label = node_cfg.label
+                changed = True
+            if node.group != node_cfg.group:
+                node.group = node_cfg.group
+                changed = True
+            if changed:
                 await self._db.upsert_node(node)
 
     async def _reschedule_overdue(self) -> None:

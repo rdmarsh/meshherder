@@ -90,12 +90,12 @@ def status(ctx: click.Context, query: str | None) -> None:
 
     all_nodes = data.get("nodes", [])
     nodes = _filter_nodes(all_nodes, query)
-    drifted = data.get("drifted_settings", 0)
+    drifted = data.get("issues", 0)
 
     node_summary = f"nodes: {len(nodes)}"
     if query and len(nodes) != len(all_nodes):
         node_summary += f" (filtered from {len(all_nodes)})"
-    click.echo(f"{node_summary}  drifted settings: {drifted}")
+    click.echo(f"{node_summary}  issues: {drifted}")
     click.echo("")
 
     if not nodes:
@@ -249,39 +249,58 @@ def sync(ctx: click.Context, node: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# drift
+# issues
 # ---------------------------------------------------------------------------
 
 @cli.command()
 @click.argument("query", required=False, default=None)
 @click.pass_context
-def drift(ctx: click.Context, query: str | None) -> None:
-    """Show all settings currently drifted from desired."""
-    resp = _rpc(ctx.obj["socket"], {"cmd": "drift"})
-    all_data = _check(resp) or []
-    data = _filter_drift(all_data, query)
+def issues(ctx: click.Context, query: str | None) -> None:
+    """Show all current issues: drifted settings, problem states, and config ghosts."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "issues"})
+    data = _check(resp) or {}
+    drifted = _filter_drift(data.get("drifted", []), query)
+    bad_state = _filter_nodes(data.get("bad_state", []), query)
+    ghosts = _filter_ghosts(data.get("ghosts", []), query)
 
-    if not data:
-        if query and all_data:
-            click.echo(f"no drift for '{query}'")
-        else:
-            click.echo("no drift detected")
+    if not drifted and not bad_state and not ghosts:
+        click.echo("no issues detected")
         return
 
-    node_w = max(len("NODE"), max((len(s.get("label") or s["node_pubkey"][:16]) for s in data), default=0))
-    fmt = "  {:<{nw}}  {:<22}  {:<14}  {:<14}  {}"
-    click.echo(fmt.format("NODE", "KEY", "DESIRED", "OBSERVED", "POLICY", nw=node_w))
-    click.echo(fmt.format("----", "---", "-------", "--------", "------", nw=node_w))
-    for s in data:
-        node = s.get("label") or s["node_pubkey"][:16]
-        click.echo(fmt.format(
-            node,
-            s["key"][:22],
-            (s.get("desired") or "-")[:14],
-            (s.get("observed") or "-")[:14],
-            s["policy"],
-            nw=node_w,
-        ))
+    if drifted:
+        click.echo("drifted settings:")
+        node_w = max(len("NODE"), max((len(s.get("label") or s["node_pubkey"][:16]) for s in drifted), default=0))
+        fmt = "  {:<{nw}}  {:<22}  {:<14}  {:<14}  {}"
+        click.echo(fmt.format("NODE", "KEY", "DESIRED", "OBSERVED", "POLICY", nw=node_w))
+        click.echo(fmt.format("----", "---", "-------", "--------", "------", nw=node_w))
+        for s in drifted:
+            node = s.get("label") or s["node_pubkey"][:16]
+            click.echo(fmt.format(node, s["key"][:22],
+                                  (s.get("desired") or "-")[:14],
+                                  (s.get("observed") or "-")[:14],
+                                  s["policy"], nw=node_w))
+        click.echo("")
+
+    if bad_state:
+        click.echo("problem states:")
+        name_w = max(_wlen("NODE"), max((_wlen(n.get("label") or n["name"]) for n in bad_state), default=0))
+        fmt = "  {}  {:<12}  {}"
+        click.echo(fmt.format(_wpad("NODE", name_w), "STATE", "LAST SEEN"))
+        click.echo(fmt.format(_wpad("----", name_w), "-----", "---------"))
+        for n in bad_state:
+            label = n.get("label") or n["name"]
+            last = (n.get("last_seen") or "never")[:16].replace("T", " ")
+            click.echo(fmt.format(_wpad(label, name_w), n["state"], last))
+        click.echo("")
+
+    if ghosts:
+        click.echo("config ghosts (in config.yaml but not visible to gateway):")
+        label_w = max(len("LABEL"), max((len(g.get("label") or "-") for g in ghosts), default=0))
+        fmt = "  {:<8}  {}"
+        click.echo(fmt.format("PREFIX", _wpad("LABEL", label_w)))
+        click.echo(fmt.format("------", _wpad("-----", label_w)))
+        for g in ghosts:
+            click.echo(fmt.format(g["pubkey_prefix"][:8], g.get("label") or "-"))
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +364,18 @@ def _filter_drift(drifted: list[dict], query: str | None) -> list[dict]:
         s for s in drifted
         if s["node_pubkey"].startswith(query)
         or q in (s.get("label") or "").lower()
+    ]
+
+
+def _filter_ghosts(ghosts: list[dict], query: str | None) -> list[dict]:
+    """Filter ghost config entries by pubkey_prefix or label substring."""
+    if not query:
+        return ghosts
+    q = query.lower()
+    return [
+        g for g in ghosts
+        if g["pubkey_prefix"].startswith(query)
+        or q in (g.get("label") or "").lower()
     ]
 
 

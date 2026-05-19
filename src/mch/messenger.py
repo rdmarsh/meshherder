@@ -8,7 +8,7 @@ Supported DM commands
   nodes             table of all known nodes
   node <name>       details for one node (partial name or pubkey match)
   sync              trigger an immediate sync cycle
-  drift             list settings that are drifted from desired
+  issues            drifted settings and nodes in problem states
   logs [n]          last n daemon log lines (default 10)
 
 Access control
@@ -121,7 +121,7 @@ class Messenger:
         if cmd in ("help", "?"):
             return _help_text()
         if cmd == "cmd":
-            return "status nodes node drift logs help"
+            return "status nodes node issues logs help"
         if cmd == "status":
             return await self._cmd_status()
         if cmd == "nodes":
@@ -130,8 +130,8 @@ class Messenger:
             return await self._cmd_node(arg)
         if cmd == "sync":
             return "sync: not supported over DM (daemon handles scheduling)"
-        if cmd == "drift":
-            return await self._cmd_drift()
+        if cmd == "issues":
+            return await self._cmd_issues()
         if cmd == "logs":
             n = int(arg) if arg.isdigit() else 10
             return await self._cmd_logs(n)
@@ -153,7 +153,7 @@ class Messenger:
         for state, count in sorted(state_counts.items()):
             lines.append(f"  {state}: {count}")
         if drifted:
-            lines.append(f"drift: {len(drifted)} setting(s)")
+            lines.append(f"issues: {len(drifted)} drifted setting(s)")
         return "\n".join(lines)
 
     async def _cmd_nodes(self) -> str:
@@ -193,15 +193,24 @@ class Messenger:
             lines.append("no drift")
         return "\n".join(lines)
 
-    async def _cmd_drift(self) -> str:
+    async def _cmd_issues(self) -> str:
+        nodes = await self._db.get_all_nodes()
         drifted = await self._db.get_drifted_settings()
-        if not drifted:
-            return "no drift"
-        lines = [f"drift ({len(drifted)})"]
-        for s in drifted[:10]:
-            lines.append(f"  {s.node_pubkey[:8]}… {s.key}: {s.observed!r} → {s.desired!r}")
-        if len(drifted) > 10:
-            lines.append(f"  … and {len(drifted) - 10} more")
+        _bad_states = {"unknown", "offline", "configuring", "partial"}
+        bad_state = [n for n in nodes if n.state.value in _bad_states]
+        lines = []
+        if drifted:
+            lines.append(f"drift ({len(drifted)})")
+            for s in drifted[:5]:
+                lines.append(f"  {s.node_pubkey[:8]}… {s.key}: {s.observed!r} → {s.desired!r}")
+            if len(drifted) > 5:
+                lines.append(f"  … and {len(drifted) - 5} more")
+        if bad_state:
+            lines.append(f"bad state ({len(bad_state)})")
+            for n in bad_state[:5]:
+                lines.append(f"  {(n.label or n.name)[:18]} [{n.state.value}]")
+        if not lines:
+            return "no issues"
         return "\n".join(lines)
 
     async def _cmd_logs(self, n: int) -> str:
@@ -243,7 +252,7 @@ def _help_text() -> str:
         "  status        fleet overview\n"
         "  nodes         list all nodes\n"
         "  node <name>   node detail\n"
-        "  drift         drifted settings\n"
+        "  issues        drifted settings and problem nodes\n"
         "  logs [n]      last n log lines\n"
         "  help          this message"
     )

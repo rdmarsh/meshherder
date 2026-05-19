@@ -164,13 +164,13 @@ async def test_node_not_found(db):
     assert "no node" in reply.lower()
 
 
-async def test_drift_command_no_drift(db):
+async def test_issues_command_no_issues(db):
     m, gw = _make_messenger(db)
-    reply = await m._handle_command("drift")
-    assert "no drift" in reply
+    reply = await m._handle_command("issues")
+    assert "no issues" in reply
 
 
-async def test_drift_command_with_drift(db):
+async def test_issues_command_with_drift(db):
     await db.upsert_node(Node(pubkey="aabb", name="N"))
     await db.upsert_setting(SettingRecord(
         node_pubkey="aabb", key="powersaving",
@@ -178,7 +178,7 @@ async def test_drift_command_with_drift(db):
         observed="off", drift=True,
     ))
     m, gw = _make_messenger(db)
-    reply = await m._handle_command("drift")
+    reply = await m._handle_command("issues")
     assert "powersaving" in reply
 
 

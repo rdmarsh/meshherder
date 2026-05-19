@@ -803,6 +803,20 @@ async def test_seed_node_labels_updates_existing_db_entry(db):
     assert node.label == "New Label"
 
 
+async def test_seed_node_labels_updates_group_field(db):
+    """_seed_node_labels() refreshes the group field when it differs from config."""
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="N", label="L", group="OldGroup"))
+    node_cfg = _node(pubkey="aabbcc", label="L", group="NewGroup")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq._seed_node_labels()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.group == "NewGroup"
+
+
 async def test_seed_node_labels_skips_unknown_nodes(db):
     """_seed_node_labels() silently skips config entries with no matching DB row."""
     node_cfg = _node(pubkey="aabbcc", label="Ghost")

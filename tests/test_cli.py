@@ -207,12 +207,12 @@ def test_status_lists_nodes():
     assert "Tower" in result.output
 
 
-def test_status_shows_drifted_count():
+def test_status_shows_issues_count():
     result = _run(["status"], {"ok": True, "data": {
         "nodes": [],
-        "drifted_settings": 3,
+        "issues": 3,
     }})
-    assert "drifted settings: 3" in result.output
+    assert "issues: 3" in result.output
 
 
 def test_status_filtered():
@@ -303,32 +303,62 @@ def test_node_shows_settings_drift_flag():
     assert "owner.info" in result.output
 
 
-# ------ drift ------
+# ------ issues ------
 
-def test_drift_no_drift():
-    result = _run(["drift"], {"ok": True, "data": []})
+_ISSUES_EMPTY = {"ok": True, "data": {"drifted": [], "bad_state": [], "ghosts": []}}
+
+
+def test_issues_no_issues():
+    result = _run(["issues"], _ISSUES_EMPTY)
     assert result.exit_code == 0
-    assert "no drift detected" in result.output
+    assert "no issues detected" in result.output
 
 
-def test_drift_shows_drifted_row():
-    result = _run(["drift"], {"ok": True, "data": [
-        {"node_pubkey": "aabbccdd" * 8, "label": "site-a",
-         "key": "owner.info", "desired": "Managed by mch",
-         "observed": "wrong", "policy": "enforce"},
-    ]})
+def test_issues_shows_drifted_section():
+    data = {"drifted": [{"node_pubkey": "aabbccdd" * 8, "label": "site-a",
+                          "key": "owner.info", "desired": "Managed by mch",
+                          "observed": "wrong", "policy": "enforce"}],
+            "bad_state": [], "ghosts": []}
+    result = _run(["issues"], {"ok": True, "data": data})
     assert result.exit_code == 0
+    assert "drifted settings" in result.output
     assert "owner.info" in result.output
     assert "site-a" in result.output
 
 
-def test_drift_no_match_for_query():
-    result = _run(["drift", "zzz"], {"ok": True, "data": [
-        {"node_pubkey": "aabbccdd" * 8, "label": "site-a",
-         "key": "owner.info", "desired": "Managed by mch",
-         "observed": "wrong", "policy": "enforce"},
-    ]})
-    assert "no drift for" in result.output
+def test_issues_shows_bad_state_section():
+    data = {"drifted": [],
+            "bad_state": [{"pubkey": "aabbccdd" * 8, "label": "wip 07",
+                            "name": "wip 07", "state": "configuring", "last_seen": None}],
+            "ghosts": []}
+    result = _run(["issues"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert "problem states" in result.output
+    assert "configuring" in result.output
+    assert "wip 07" in result.output
+
+
+def test_issues_shows_ghosts_section():
+    data = {"drifted": [], "bad_state": [],
+            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "wrong"}]}
+    result = _run(["issues"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert "ghost" in result.output
+    assert "deadbeef" in result.output
+    assert "wrong" in result.output
+
+
+def test_issues_filtered_by_query():
+    data = {"drifted": [{"node_pubkey": "aabbccdd" * 8, "label": "site-a",
+                          "key": "owner.info", "desired": "x", "observed": "y",
+                          "policy": "enforce"}],
+            "bad_state": [{"pubkey": "11223344" * 8, "label": "site-b",
+                            "name": "B", "state": "offline", "last_seen": None}],
+            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "ghost-node"}]}
+    result = _run(["issues", "site-a"], {"ok": True, "data": data})
+    assert "site-a" in result.output
+    assert "site-b" not in result.output
+    assert "deadbeef" not in result.output
 
 
 # ------ logs ------
