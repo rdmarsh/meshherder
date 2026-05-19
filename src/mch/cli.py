@@ -327,7 +327,10 @@ def contacts(ctx: click.Context, query: str | None) -> None:
             click.echo("no unfiled repeater contacts found")
         return
 
-    click.echo("# Repeater contacts visible to the gateway but not in your config.yaml.")
+    if query:
+        click.echo(f"# Repeater contacts matching '{query}' not in your config.yaml.")
+    else:
+        click.echo("# Repeater contacts visible to the gateway but not in your config.yaml.")
     click.echo("# Review each one, then paste the snippets into your config files.\n")
 
     for c in data:
