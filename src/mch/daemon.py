@@ -197,19 +197,18 @@ async def _dispatch(
 
     if cmd == "drift":
         drifted = await db.get_drifted_settings()
-        return {
-            "ok": True,
-            "data": [
-                {
-                    "node_pubkey": s.node_pubkey,
-                    "key": s.key,
-                    "desired": s.desired,
-                    "observed": s.observed,
-                    "policy": s.policy.value,
-                }
-                for s in drifted
-            ],
-        }
+        rows = []
+        for s in drifted:
+            node = await db.get_node(s.node_pubkey)
+            rows.append({
+                "node_pubkey": s.node_pubkey,
+                "label": node.label if node else "",
+                "key": s.key,
+                "desired": s.desired,
+                "observed": s.observed,
+                "policy": s.policy.value,
+            })
+        return {"ok": True, "data": rows}
 
     if cmd == "hint":
         from mch.recommend import get_profile, load_profiles
