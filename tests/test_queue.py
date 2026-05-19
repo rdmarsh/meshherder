@@ -851,3 +851,104 @@ async def test_collect_facts_neighbors_stores_count(db):
 
     facts = await db.get_facts("aabbccdd1122")
     assert facts.get("neighbors") == "3"
+
+
+# ---------------------------------------------------------------------------
+# _seed_from_config
+# ---------------------------------------------------------------------------
+
+def _make_gateway_with_favourite(contacts=None) -> Gateway:
+    gw = _make_gateway(contacts=contacts or [])
+    gw.set_contact_favourite = AsyncMock()
+    return gw
+
+
+async def test_seed_from_config_inserts_matched_contact(db):
+    """Config node found in gateway contacts and not in DB → inserted into DB."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbccdd", label="My Node")])
+    contact = _contact("aabbccdd11223344556677889900aabb", name="My Node")
+    gw = _make_gateway_with_favourite(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    await wq._seed_from_config()
+
+    nodes = await db.get_all_nodes()
+    assert len(nodes) == 1
+    assert nodes[0].pubkey == "aabbccdd11223344556677889900aabb"
+    assert nodes[0].label == "My Node"
+    assert nodes[0].state == NodeState.UNKNOWN
+
+
+async def test_seed_from_config_favourites_unfavourited_contact(db):
+    """Config node found in contacts with flags=0 → set_contact_favourite called."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbccdd", label="My Node")])
+    contact = _contact("aabbccdd11223344556677889900aabb", flags=0)
+    gw = _make_gateway_with_favourite(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    await wq._seed_from_config()
+
+    gw.set_contact_favourite.assert_awaited_once_with(contact)
+
+
+async def test_seed_from_config_already_favourited_skips_favourite_call(db):
+    """Config node already favourited (flags=1) → set_contact_favourite not called."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbccdd", label="My Node")])
+    contact = _contact("aabbccdd11223344556677889900aabb", flags=1)
+    gw = _make_gateway_with_favourite(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    await wq._seed_from_config()
+
+    gw.set_contact_favourite.assert_not_awaited()
+
+
+async def test_seed_from_config_already_in_db_no_duplicate(db):
+    """Config node already in DB → not re-inserted, but still auto-favourited."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbccdd", label="My Node")])
+    contact = _contact("aabbccdd11223344556677889900aabb", flags=0)
+    existing = Node(pubkey="aabbccdd11223344556677889900aabb", name="My Node", state=NodeState.CONFIGURED)
+    await db.upsert_node(existing)
+
+    gw = _make_gateway_with_favourite(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    await wq._seed_from_config()
+
+    nodes = await db.get_all_nodes()
+    assert len(nodes) == 1  # still just one
+    assert nodes[0].state == NodeState.CONFIGURED  # existing state preserved
+    gw.set_contact_favourite.assert_awaited_once_with(contact)
+
+
+async def test_seed_from_config_not_in_contacts_logs_warning(db, caplog):
+    """Config node with no matching gateway contact → warning logged, nothing inserted."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="deadbeef", label="Ghost Node")])
+    gw = _make_gateway_with_favourite(contacts=[])  # no matching contacts
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = []
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="mch.queue"):
+        await wq._seed_from_config()
+
+    assert len(await db.get_all_nodes()) == 0
+    assert "deadbeef" in caplog.text
+
+
+async def test_seed_from_config_non_rep_contact_ignored(db):
+    """Non-REP contacts (CLI, ROOM) are not matched even if pubkey prefix matches."""
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbccdd", label="My Node")])
+    cli_contact = _contact("aabbccdd11223344556677889900aabb", type_=1)  # CLI, not REP
+    gw = _make_gateway_with_favourite(contacts=[cli_contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [cli_contact]
+
+    await wq._seed_from_config()
+
+    assert len(await db.get_all_nodes()) == 0
+    gw.set_contact_favourite.assert_not_awaited()
