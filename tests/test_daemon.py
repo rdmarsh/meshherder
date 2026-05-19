@@ -94,6 +94,64 @@ async def test_node_dispatch_label_match_case_insensitive(db, wq, config):
     assert resp["data"]["pubkey"] == node.pubkey
 
 
+async def test_node_dispatch_label_substring_match(db, wq, config):
+    """node command matches a label by substring, not just exact match."""
+    node = await _seed_node_with_facts(db)
+    # node.label == "test"; query "es" should match
+    resp = await _dispatch({"cmd": "node", "pubkey": "es"}, wq, db, config)
+    assert resp["ok"] is True
+    assert resp["data"]["pubkey"] == node.pubkey
+
+
+async def test_node_dispatch_name_substring_match(db, wq, config):
+    """node command falls through to name substring when label doesn't match."""
+    node = await _seed_node_with_facts(db)
+    # node.name == "Test Node"; query "ode" should match
+    resp = await _dispatch({"cmd": "node", "pubkey": "ode"}, wq, db, config)
+    assert resp["ok"] is True
+    assert resp["data"]["pubkey"] == node.pubkey
+
+
+async def test_node_dispatch_ambiguous_returns_error(db, wq, config):
+    """node command returns an error when the query matches more than one node."""
+    node1 = Node(pubkey="aabbccdd" * 8, name="Wip Node A", label="wip 01", state=NodeState.CONFIGURED)
+    node2 = Node(pubkey="11223344" * 8, name="Wip Node B", label="wip 02", state=NodeState.CONFIGURED)
+    await db.upsert_node(node1)
+    await db.upsert_node(node2)
+
+    resp = await _dispatch({"cmd": "node", "pubkey": "wip"}, wq, db, config)
+    assert resp["ok"] is False
+    assert "ambiguous" in resp["error"]
+
+
+# ------------------------------------------------------------------
+# logs command — label/name lookup
+# ------------------------------------------------------------------
+
+async def test_logs_dispatch_label_substring_match(db, wq, config):
+    """logs command resolves a label substring to the node's logs."""
+    node = Node(pubkey="aabbccdd" * 8, name="Wip Node", label="wip 07", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.write_log(node.pubkey, "INFO", "test message")
+
+    resp = await _dispatch({"cmd": "logs", "pubkey": "wip"}, wq, db, config)
+    assert resp["ok"] is True
+    assert len(resp["data"]) == 1
+    assert resp["data"][0]["message"] == "test message"
+
+
+async def test_logs_dispatch_ambiguous_returns_error(db, wq, config):
+    """logs command returns an error when the query matches more than one node."""
+    node1 = Node(pubkey="aabbccdd" * 8, name="Wip A", label="wip 01", state=NodeState.CONFIGURED)
+    node2 = Node(pubkey="11223344" * 8, name="Wip B", label="wip 02", state=NodeState.CONFIGURED)
+    await db.upsert_node(node1)
+    await db.upsert_node(node2)
+
+    resp = await _dispatch({"cmd": "logs", "pubkey": "wip"}, wq, db, config)
+    assert resp["ok"] is False
+    assert "ambiguous" in resp["error"]
+
+
 async def test_hint_dispatch_label_match(db, wq, config):
     """hint command should match by label when pubkey prefix lookup fails."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower Node", label="QH Test", state=NodeState.CONFIGURED)
