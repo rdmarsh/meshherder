@@ -112,14 +112,18 @@ def status(ctx: click.Context) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command()
+@click.argument("query", required=False, default=None)
 @click.pass_context
-def nodes(ctx: click.Context) -> None:
+def nodes(ctx: click.Context, query: str | None) -> None:
     """List all known nodes."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "nodes"})
-    data = _check(resp)
+    data = _filter_nodes(_check(resp) or [], query)
 
     if not data:
-        click.echo("no nodes in database")
+        if query:
+            click.echo(f"no nodes matching '{query}'")
+        else:
+            click.echo("no nodes in database")
         return
 
     def _short_ver(raw: str | None) -> str:
@@ -240,26 +244,33 @@ def sync(ctx: click.Context, node: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command()
+@click.argument("query", required=False, default=None)
 @click.pass_context
-def drift(ctx: click.Context) -> None:
+def drift(ctx: click.Context, query: str | None) -> None:
     """Show all settings currently drifted from desired."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "drift"})
-    data = _check(resp)
+    data = _filter_drift(_check(resp) or [], query)
 
     if not data:
-        click.echo("no drift detected")
+        if query:
+            click.echo(f"no drift detected for '{query}'")
+        else:
+            click.echo("no drift detected")
         return
 
-    fmt = "  {:<16}  {:<22}  {:<14}  {:<14}  {}"
-    click.echo(fmt.format("NODE", "KEY", "DESIRED", "OBSERVED", "POLICY"))
-    click.echo(fmt.format("----", "---", "-------", "--------", "------"))
+    node_w = max(len("NODE"), max((len(s.get("label") or s["node_pubkey"][:16]) for s in data), default=0))
+    fmt = "  {:<{nw}}  {:<22}  {:<14}  {:<14}  {}"
+    click.echo(fmt.format("NODE", "KEY", "DESIRED", "OBSERVED", "POLICY", nw=node_w))
+    click.echo(fmt.format("----", "---", "-------", "--------", "------", nw=node_w))
     for s in data:
+        node = s.get("label") or s["node_pubkey"][:16]
         click.echo(fmt.format(
-            s["node_pubkey"][:16],
+            node,
             s["key"][:22],
             (s.get("desired") or "-")[:14],
             (s.get("observed") or "-")[:14],
             s["policy"],
+            nw=node_w,
         ))
 
 
@@ -299,6 +310,31 @@ def _filter_contacts(contacts: list[dict], query: str | None) -> list[dict]:
         c for c in contacts
         if c.get("public_key", "").startswith(query)
         or q in (c.get("adv_name") or "").lower()
+    ]
+
+
+def _filter_nodes(nodes: list[dict], query: str | None) -> list[dict]:
+    """Filter nodes by pubkey prefix, label substring, or name substring."""
+    if not query:
+        return nodes
+    q = query.lower()
+    return [
+        n for n in nodes
+        if n["pubkey"].startswith(query)
+        or q in (n.get("label") or "").lower()
+        or q in n["name"].lower()
+    ]
+
+
+def _filter_drift(drifted: list[dict], query: str | None) -> list[dict]:
+    """Filter drifted settings by pubkey prefix or label substring."""
+    if not query:
+        return drifted
+    q = query.lower()
+    return [
+        s for s in drifted
+        if s["node_pubkey"].startswith(query)
+        or q in (s.get("label") or "").lower()
     ]
 
 
