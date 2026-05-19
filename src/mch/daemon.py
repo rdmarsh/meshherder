@@ -230,7 +230,9 @@ async def _dispatch(
             facts = await db.get_facts(n.pubkey)
             raw_count = facts.get("neighbors")
             count = int(raw_count) if raw_count is not None else None
-            profile = get_profile(count, profiles) if count is not None else None
+            # treat unknown neighbour count as 0 for profile lookup (mobile = most conservative)
+            # count stays None so NBRS displays as '-' in the table
+            profile = get_profile(count if count is not None else 0, profiles)
             result.append({
                 "pubkey": n.pubkey,
                 "label": n.label,
