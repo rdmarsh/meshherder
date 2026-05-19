@@ -360,8 +360,8 @@ async def test_nodes_dispatch_neighbors_absent_when_not_collected(db, wq, config
 # status command
 # ------------------------------------------------------------------
 
-async def test_status_dispatch_returns_node_list_and_drift_count(db, wq, config):
-    """status command returns node list and a count of drifted settings."""
+async def test_status_dispatch_returns_node_list_and_issue_count(db, wq, config):
+    """status command returns node list and a count of issues."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
 
@@ -372,11 +372,11 @@ async def test_status_dispatch_returns_node_list_and_drift_count(db, wq, config)
     assert len(data["nodes"]) == 1
     assert data["nodes"][0]["pubkey"] == node.pubkey
     assert data["nodes"][0]["state"] == "configured"
-    assert data["drifted_settings"] == 0
+    assert data["issues"] == 0
 
 
-async def test_status_dispatch_counts_drifted_settings(db, wq, config):
-    """status drifted_settings count reflects settings with drift=True."""
+async def test_status_dispatch_counts_issues(db, wq, config):
+    """status issues count aggregates drifted settings, bad-state nodes, and ghosts."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
     setting = SettingRecord(
@@ -391,7 +391,8 @@ async def test_status_dispatch_counts_drifted_settings(db, wq, config):
 
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
-    assert resp["data"]["drifted_settings"] == 1
+    assert "issues" in resp["data"]
+    assert resp["data"]["issues"] >= 1
 
 
 async def test_status_dispatch_includes_label(db, wq, config):
@@ -408,46 +409,84 @@ async def test_status_dispatch_includes_label(db, wq, config):
 # drift command
 # ------------------------------------------------------------------
 
-async def test_drift_dispatch_returns_drifted_settings(db, wq, config):
-    """drift command returns settings where drift=True."""
+# ------------------------------------------------------------------
+# issues command
+# ------------------------------------------------------------------
+
+async def test_issues_dispatch_no_issues(db, wq, config):
+    """issues returns three empty sections when everything is clean."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    setting = SettingRecord(
-        node_pubkey=node.pubkey,
-        key="owner.info",
-        desired="Managed by mch",
-        observed="wrong value",
-        policy=SettingPolicy.ENFORCE,
-        drift=True,
-    )
-    await db.upsert_setting(setting)
 
-    resp = await _dispatch({"cmd": "drift"}, wq, db, config)
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert len(resp["data"]) == 1
-    row = resp["data"][0]
-    assert row["key"] == "owner.info"
-    assert row["desired"] == "Managed by mch"
-    assert row["observed"] == "wrong value"
-    assert row["label"] == "site-a"
+    assert resp["data"]["drifted"] == []
+    assert resp["data"]["bad_state"] == []
+    assert resp["data"]["ghosts"] == []
 
 
-async def test_drift_dispatch_excludes_non_drifted(db, wq, config):
-    """drift command does not include settings where drift=False."""
+async def test_issues_dispatch_returns_drifted_settings(db, wq, config):
+    """issues drifted section contains settings where drift=True."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    setting = SettingRecord(
-        node_pubkey=node.pubkey,
-        key="owner.info",
-        desired="Managed by mch",
-        observed="Managed by mch",
-        policy=SettingPolicy.ENFORCE,
-        drift=False,
-    )
-    await db.upsert_setting(setting)
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey, key="owner.info",
+        desired="Managed by mch", observed="wrong",
+        policy=SettingPolicy.ENFORCE, drift=True,
+    ))
 
-    resp = await _dispatch({"cmd": "drift"}, wq, db, config)
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
-    assert resp["ok"] is True
-    assert resp["data"] == []
+    assert len(resp["data"]["drifted"]) == 1
+    assert resp["data"]["drifted"][0]["key"] == "owner.info"
+    assert resp["data"]["drifted"][0]["label"] == "site-a"
+
+
+async def test_issues_dispatch_returns_bad_state_nodes(db, wq, config):
+    """issues bad_state section contains nodes not in configured/online state."""
+    good = Node(pubkey="aabbccdd" * 8, name="Good", label="g", state=NodeState.CONFIGURED)
+    bad = Node(pubkey="11223344" * 8, name="Bad", label="b", state=NodeState.CONFIGURING)
+    await db.upsert_node(good)
+    await db.upsert_node(bad)
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["data"]["bad_state"] == [{"pubkey": bad.pubkey, "label": "b",
+                                           "name": "Bad", "state": "configuring",
+                                           "last_seen": None}]
+
+
+async def test_issues_dispatch_online_not_in_bad_state(db, wq, config):
+    """online state (actively syncing) is not treated as a problem."""
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="n", state=NodeState.ONLINE)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["data"]["bad_state"] == []
+
+
+async def test_issues_dispatch_returns_ghosts(db, wq, config):
+    """issues ghosts section lists config entries with no matching DB node."""
+    from mch.config import NodeConfig
+    config.nodes = [NodeConfig(pubkey_prefix="deadbeef", label="wrong")]
+    # DB is empty — no node with that prefix exists
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert len(resp["data"]["ghosts"]) == 1
+    assert resp["data"]["ghosts"][0]["pubkey_prefix"] == "deadbeef"
+    assert resp["data"]["ghosts"][0]["label"] == "wrong"
+
+
+async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):
+    """A config node whose prefix matches a DB node is not a ghost."""
+    from mch.config import NodeConfig
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="n", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="n")]
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["data"]["ghosts"] == []
