@@ -94,6 +94,17 @@ def test_gateway_radio_still_works(tmp_path):
 # Feature 3: gateway.advert_on_start
 # ------------------------------------------------------------------
 
+def test_radio_freq_rounded_to_three_decimal_places(tmp_path):
+    """Frequencies read back from nodes with float noise are rounded to 3dp."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            via: "915.7999877,250,10,5"
+    """)
+    cfg = load(p)
+    assert cfg.nodes[0].via.freq == 915.800
+
+
 def test_gateway_advert_on_start_defaults_to_never(tmp_path):
     """gateway.advert_on_start defaults to 'never' when not specified."""
     p = _write_config(tmp_path, "gateway: {}")
@@ -153,3 +164,28 @@ def test_secrets_nodes_not_a_mapping_raises_value_error(tmp_path):
     secrets.chmod(0o600)
     with pytest.raises(ValueError, match="mapping"):
         load(p, secrets_path=secrets)
+
+
+# ------------------------------------------------------------------
+# Fleet-wide default password
+# ------------------------------------------------------------------
+
+def test_secrets_default_password_loaded(tmp_path):
+    """secrets.nodes.default is loaded as the fleet-wide fallback password."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  default: fleetpassword\n")
+    secrets.chmod(0o600)
+    cfg = load(p, secrets_path=secrets)
+    assert cfg.secrets.get("default") == "fleetpassword"
+
+
+def test_secrets_default_with_per_node_override(tmp_path):
+    """Per-node entry coexists with default."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd: nodepass\n  default: fleetpass\n")
+    secrets.chmod(0o600)
+    cfg = load(p, secrets_path=secrets)
+    assert cfg.secrets["aabbccdd"] == "nodepass"
+    assert cfg.secrets["default"] == "fleetpass"

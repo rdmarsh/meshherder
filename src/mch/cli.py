@@ -40,7 +40,12 @@ async def _request(socket_path: str, cmd: dict[str, Any], timeout: float = 30) -
 
     writer.write((json.dumps(cmd) + "\n").encode())
     await writer.drain()
-    raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
+    try:
+        raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
+    except (TimeoutError, asyncio.TimeoutError):
+        writer.close()
+        click.echo(f"error: timed out waiting for daemon response ({timeout:.0f}s)", err=True)
+        raise SystemExit(1)
     writer.close()
     return json.loads(raw)
 
@@ -197,7 +202,7 @@ def node(ctx: click.Context, pubkey: str) -> None:
     logs = data.get("logs", [])
     if logs:
         click.echo("recent activity:")
-        for entry in logs[:10]:
+        for entry in reversed(logs[:10]):
             ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
             level = entry["level"]
             click.echo(f"  [{level:<5}] {ts}  {entry['message']}")
@@ -312,7 +317,7 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
         click.echo("no logs")
         return
 
-    for entry in data:
+    for entry in reversed(data):
         ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
         node_label = f" [{entry['node_pubkey'][:12]}]" if entry.get("node_pubkey") else ""
         click.echo(f"{ts} [{entry['level']:<5}]{node_label} {entry['message']}")
@@ -567,7 +572,7 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple, yes: bool) -> None:
             click.echo("cancelled", err=True)
             raise SystemExit(1)
 
-    resp = _rpc(ctx.obj["socket"], {"cmd": "exec", "pubkey": pubkey, "command": cmd_str}, timeout=60)
+    resp = _rpc(ctx.obj["socket"], {"cmd": "exec", "pubkey": pubkey, "command": cmd_str}, timeout=90)
     data = _check(resp)
     click.echo(data)
 

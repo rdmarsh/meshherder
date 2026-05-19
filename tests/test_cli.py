@@ -1,7 +1,8 @@
 """Tests for CLI helper functions and command output."""
 
+import asyncio
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, MagicMock
 
 from click.testing import CliRunner
 
@@ -188,6 +189,27 @@ def _run(args, rpc_response):
         return runner.invoke(cli, ["--socket", "/fake.sock"] + args)
 
 
+def test_rpc_timeout_shows_clean_error():
+    """A timeout waiting for the daemon produces a clean error, not a traceback."""
+    runner = CliRunner()
+    mock_writer = MagicMock()
+    mock_writer.drain = AsyncMock()
+    mock_writer.close = MagicMock()
+    mock_reader = MagicMock()
+
+    async def fake_open_conn(*a, **kw):
+        return mock_reader, mock_writer
+
+    with patch("asyncio.open_unix_connection", fake_open_conn), \
+         patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "status"])
+
+    assert result.exit_code != 0
+    combined = result.output + (result.stderr or "")
+    assert "timed out" in combined.lower()
+    assert "Traceback" not in combined
+
+
 # ------ status ------
 
 def test_status_no_nodes():
@@ -317,6 +339,23 @@ def test_node_not_found():
     assert "not found" in result.output
 
 
+def test_node_activity_newest_at_bottom():
+    """Node recent activity must show oldest entry first, newest last."""
+    result = _run(["node", "aabb"], {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8,
+        "name": "Tower", "label": "site-a", "group": None,
+        "state": "configured", "last_seen": None, "last_connected": None,
+        "auth_required": False, "auth_cached": False,
+        "facts": {}, "settings": [],
+        "logs": [
+            {"level": "INFO", "timestamp": "2026-05-19T12:00:00", "message": "second event"},
+            {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "first event"},
+        ],
+    }})
+    assert result.exit_code == 0
+    assert result.output.index("first event") < result.output.index("second event")
+
+
 def test_node_shows_settings_drift_flag():
     result = _run(["node", "aabb"], {"ok": True, "data": {
         "pubkey": "aabbccdd" * 8,
@@ -427,6 +466,18 @@ def test_logs_shows_entries():
     assert result.exit_code == 0
     assert "synced ok" in result.output
     assert "INFO" in result.output
+
+
+def test_logs_newest_at_bottom():
+    """Daemon returns newest-first; CLI must reverse so newest appears last."""
+    result = _run(["logs"], {"ok": True, "data": [
+        {"node_pubkey": "aabbccdd" * 8, "level": "INFO",
+         "timestamp": "2026-05-19T12:00:00", "message": "second event"},
+        {"node_pubkey": "aabbccdd" * 8, "level": "INFO",
+         "timestamp": "2026-05-19T10:00:00", "message": "first event"},
+    ]})
+    assert result.exit_code == 0
+    assert result.output.index("first event") < result.output.index("second event")
 
 
 # ------ contacts ------

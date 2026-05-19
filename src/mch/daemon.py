@@ -108,11 +108,13 @@ async def _dispatch(
         bad_state = [n for n in nodes if n.state in _bad_states]
         db_pubkeys = {n.pubkey for n in nodes}
         ghosts = [nc for nc in config.nodes if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)]
+        _has_default_password = "default" in config.secrets
         open_nodes = [
             n for n in nodes
             if n.state == NodeState.CONFIGURED
             and not n.auth_required
             and not n.auth_cached
+            and not _has_default_password
             and not any(n.pubkey.startswith(p) for p in config.secrets)
         ]
         rows = []
@@ -160,7 +162,10 @@ async def _dispatch(
                 "last_connected": node.last_connected.isoformat() if node.last_connected else None,
                 "auth_required": node.auth_required,
                 "auth_cached": node.auth_cached,
-                "passwd_known": any(node.pubkey.startswith(p) for p in config.secrets),
+                "passwd_known": (
+                    "default" in config.secrets
+                    or any(node.pubkey.startswith(p) for p in config.secrets)
+                ),
                 "facts": facts,
                 "settings": [
                     {
@@ -273,12 +278,14 @@ async def _dispatch(
             if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)
         ]
         # nodes that synced successfully with no ACL protection
+        _has_default_password = "default" in config.secrets
         open_nodes = [
             {"pubkey": n.pubkey, "label": n.label, "name": n.name}
             for n in nodes
             if n.state == NodeState.CONFIGURED
             and not n.auth_required
             and not n.auth_cached
+            and not _has_default_password
             and not any(n.pubkey.startswith(p) for p in config.secrets)
         ]
         return {"ok": True, "data": {"drifted": drifted, "bad_state": bad_state, "ghosts": ghosts, "open_nodes": open_nodes}}
