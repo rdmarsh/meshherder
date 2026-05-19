@@ -84,6 +84,55 @@ async def test_node_dispatch_passwd_known_false_when_no_secret(db, wq, config):
     assert resp["data"]["passwd_known"] is False
 
 
+async def test_node_dispatch_passwd_known_true_when_default_secret(db, wq, config):
+    """passwd_known is True when a fleet-wide default password is configured."""
+    node = await _seed_node_with_facts(db)
+    config.secrets = {"default": "fleetpassword"}
+
+    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["passwd_known"] is True
+
+
+async def test_issues_dispatch_no_open_node_when_default_password(db, wq, config):
+    """issues open_nodes excludes nodes when a fleet-wide default password is configured."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Fleet Node",
+        label="fleet",
+        state=NodeState.CONFIGURED,
+        auth_required=False,
+        auth_cached=False,
+    )
+    await db.upsert_node(node)
+    config.secrets = {"default": "fleetpassword"}
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["open_nodes"] == []
+
+
+async def test_status_dispatch_no_open_node_count_when_default_password(db, wq, config):
+    """status issues count does not include nodes covered by the default password."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Fleet Node",
+        label="fleet",
+        state=NodeState.CONFIGURED,
+        auth_required=False,
+        auth_cached=False,
+    )
+    await db.upsert_node(node)
+    config.secrets = {"default": "fleetpassword"}
+
+    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["issues"] == 0
+
+
 async def test_node_dispatch_full_pubkey_returns_facts(db, wq, config):
     """node command with full pubkey should also return facts."""
     node = await _seed_node_with_facts(db)

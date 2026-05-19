@@ -991,6 +991,25 @@ async def test_open_node_warning_logged_when_no_acl(db, caplog):
     assert "no ACL" in caplog.text
 
 
+async def test_open_node_warning_written_to_db_logs(db):
+    """Open-node warning is written to the DB logs table (visible in mch logs / mch node)."""
+    node_cfg = _node(pubkey="aabbcc", label="Open Node")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {}
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+    await wq.run_cycle()
+
+    logs = await db.get_logs()  # all logs
+    warning_entries = [e for e in logs if "no ACL" in e["message"]]
+    assert warning_entries, "open-node warning was not written to the DB logs table"
+    assert warning_entries[0]["level"] == "WARNING"
+
+
 async def test_no_open_node_warning_when_passwd_configured(db, caplog):
     """No open-node warning when a password is configured in secrets."""
     node_cfg = _node(pubkey="aabbcc", label="Secured Node")
@@ -1007,3 +1026,78 @@ async def test_no_open_node_warning_when_passwd_configured(db, caplog):
         await wq.run_cycle()
 
     assert "no ACL" not in caplog.text
+
+
+async def test_no_open_node_warning_when_default_password_configured(db, caplog):
+    """No open-node warning when a fleet-wide default password is set."""
+    node_cfg = _node(pubkey="aabbcc", label="Fleet Node")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"default": "fleetpassword"}  # no per-node entry
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    with caplog.at_level(logging.WARNING, logger="mch.queue"):
+        await wq.run_cycle()
+
+    assert "no ACL" not in caplog.text
+
+
+async def test_relogin_uses_default_password_when_no_per_node_entry(db):
+    """_send_authed falls back to the default password when no per-node entry exists."""
+    node_cfg = _node(
+        pubkey="aabbcc", label="FleetNode",
+        settings={"name": SettingConfig(desired="FleetNode", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"default": "fleetpassword"}  # no per-node entry
+
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="FleetNode", auth_cached=True))
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.login = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="no permission"),  # permission error
+        CommandResult(success=True, text="FleetNode"),      # retry get name
+        CommandResult(success=True, text="ok"),             # set name
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    gw.login.assert_awaited_once_with(contact, "fleetpassword")
+    assert results[0].reachable is True
+
+
+async def test_relogin_prefers_per_node_password_over_default(db):
+    """_send_authed uses the per-node password when both per-node and default are set."""
+    node_cfg = _node(
+        pubkey="aabbcc", label="SpecialNode",
+        settings={"name": SettingConfig(desired="SpecialNode", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"aabbcc": "nodespecific", "default": "fleetpassword"}
+
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="SpecialNode", auth_cached=True))
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.login = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="no permission"),
+        CommandResult(success=True, text="SpecialNode"),
+        CommandResult(success=True, text="ok"),
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    gw.login.assert_awaited_once_with(contact, "nodespecific")

@@ -536,11 +536,18 @@ class WorkQueue:
             node.state = NodeState.PARTIAL
         else:
             node.state = NodeState.CONFIGURED
-            passwd_configured = any(node.pubkey.startswith(p) for p in self._config.secrets)
+            passwd_configured = (
+                "default" in self._config.secrets
+                or any(node.pubkey.startswith(p) for p in self._config.secrets)
+            )
             if not node.auth_required and not node.auth_cached and not passwd_configured:
                 log.warning(
                     "node %s (%s) has no ACL protection — anyone on the mesh can send commands",
                     node.label or node.name, node.pubkey[:8],
+                )
+                await self._db.write_log(
+                    node.pubkey, "WARNING",
+                    "no ACL protection — anyone on the mesh can send commands",
                 )
         await self._db.upsert_node(node)
 
@@ -579,7 +586,14 @@ class WorkQueue:
             node.auth_cached = False
             await self._db.upsert_node(node)
 
-            password = self._config.secrets.get(node_cfg.pubkey_prefix)
+            password = (
+                next(
+                    (pwd for prefix, pwd in self._config.secrets.items()
+                     if prefix != "default" and node_cfg.pubkey_prefix.startswith(prefix)),
+                    None,
+                )
+                or self._config.secrets.get("default")
+            )
             if not password:
                 raise _ReloginFailed("permission denied — no password configured")
 

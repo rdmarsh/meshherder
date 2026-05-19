@@ -152,13 +152,18 @@ def _parse_setting(raw: dict) -> SettingConfig:
 
 
 def _parse_radio(raw) -> RadioConfig | None:
-    """Parse a via/radio value: either a mapping or a "freq,bw,sf,cr" string."""
+    """Parse a via/radio value: either a mapping or a "freq,bw,sf,cr" string.
+
+    Frequencies are rounded to 3 decimal places (1 kHz resolution) so that
+    firmware float noise (e.g. 915.7999877 for a set value of 915.800) does
+    not cause spurious drift comparisons.
+    """
     if raw is None:
         return None
     if isinstance(raw, str):
         freq, bw, sf, cr = raw.split(",")
-        return RadioConfig(freq=float(freq), bw=float(bw), sf=int(sf), cr=int(cr))
-    return RadioConfig(**raw)
+        return RadioConfig(freq=round(float(freq), 3), bw=float(bw), sf=int(sf), cr=int(cr))
+    return RadioConfig(freq=round(float(raw["freq"]), 3), **{k: v for k, v in raw.items() if k != "freq"})
 
 
 def _parse_node(raw: dict) -> NodeConfig:
