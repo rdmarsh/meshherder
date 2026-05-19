@@ -406,12 +406,12 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command()
-@click.argument("pubkey", required=False)
+@click.argument("query", required=False)
 @click.pass_context
-def hint(ctx: click.Context, pubkey: str | None) -> None:
+def hint(ctx: click.Context, query: str | None) -> None:
     """Show suggested settings based on each node's neighbour count.
 
-    PUBKEY: pubkey prefix or label (case-insensitive). Omit to show all nodes.
+    QUERY: pubkey prefix, label substring, or name substring. Omit to show all nodes.
 
     Prints the matching profile (e.g. rooftop, tower), suggested txdelay
     and universal settings with one-line explanations, and a ready-to-paste
@@ -420,14 +420,19 @@ def hint(ctx: click.Context, pubkey: str | None) -> None:
     Requires 'neighbors' in the facts: list in config.yaml and at least
     one completed sync cycle to populate the neighbour count.
     """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "hint", "pubkey": pubkey})
-    data = _check(resp)
+    resp = _rpc(ctx.obj["socket"], {"cmd": "hint"})
+    all_data = _check(resp)
+    data = _filter_nodes(all_data, query)
 
-    if not data:
+    if not all_data:
         click.echo("no nodes in database")
         return
 
-    if pubkey:
+    if not data:
+        click.echo(f"no nodes matching '{query}'")
+        return
+
+    if len(data) == 1:
         _hint_detail(data[0])
     else:
         _hint_table(data)
@@ -459,7 +464,7 @@ def _hint_detail(n: dict) -> None:
     click.echo("")
 
     if count is None:
-        click.echo("(no neighbour data - add 'neighbors' to facts: in config.yaml and run mch sync)")
+        click.echo("(no neighbour data - add 'neighbors' to facts: in config.yaml and run mch sync to start collecting it)")
         click.echo("")
     else:
         click.echo(f"neighbours: {count}")
@@ -487,7 +492,7 @@ def _hint_detail(n: dict) -> None:
         click.echo(f"  {key:<{key_w}}  {val:<{val_w}}  {desc}")
 
     click.echo("")
-    click.echo("Paste into config.yaml settings: block for this node:")
+    click.echo("To apply, paste into this node's settings: block in config.yaml:")
     for key, val, _ in settings:
         click.echo(f"      {key}:")
         click.echo(f'        desired: "{val}"')

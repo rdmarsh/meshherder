@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-mcherd is a daemon for managing fleets of MeshCore repeater nodes — think Ansible/Salt but over the mesh itself. A locally attached node (USB serial) — called the **gateway** — connects mcherd to the mesh. mcherd sends remote CLI commands across the mesh to bring administered nodes into a declared desired state, then leaves them alone. ("Companion node" is meshcore_py's internal term for this; mcherd calls it the gateway everywhere.)
+mch (Mesh Config Herder) is a tool for managing fleets of MeshCore repeater nodes — think Ansible/Salt but over the mesh itself. The daemon is `mchd`; the control CLI is `mch`. A locally attached node (USB serial) — called the **gateway** — connects mchd to the mesh. mchd sends remote CLI commands across the mesh to bring administered nodes into a declared desired state, then leaves them alone. ("Companion node" is meshcore_py's internal term for this; mchd calls it the gateway everywhere.)
 
 Target audience: operators with dozens of nodes who need consistent, verifiable configuration without logging into each one individually.
 
@@ -37,7 +37,7 @@ ruff check .
 mypy src/
 
 # Run daemon (dev)
-mcherd --config config.yaml
+mchd --config config.yaml
 
 # Control CLI
 mch status
@@ -55,8 +55,8 @@ Sync code to `luna` and use `/dev/meshcore0` as the serial device. The managemen
 ## Architecture
 
 ```
-mcherd (daemon)                    mch (CLI)
-    ↕ Unix socket (/run/mcherd.sock)  ↕
+mchd (daemon)                      mch (CLI)
+    ↕ Unix socket (/run/mch/mchd.sock)  ↕
     ↕
 meshcore_py (async serial, /dev/meshcore0)
     ↕
@@ -67,7 +67,7 @@ Managed repeater nodes
 
 ### Component responsibilities
 
-**`mcherd` daemon**
+**`mchd` daemon**
 - Holds the single `meshcore_py` connection to the gateway node.
 - Runs a rate-limited work queue: one node operation at a time, configurable delay between ops.
 - On startup: reads favourited contacts from the gateway node via `get_contacts()`, seeds any new ones into the database.
@@ -75,7 +75,7 @@ Managed repeater nodes
 - Writes to the SQLite database (actual state, history, logs).
 
 **`mch` CLI**
-- Thin client: sends commands to `mcherd` over the Unix socket and prints the response.
+- Thin client: sends commands to `mchd` over the Unix socket and prints the response.
 - `mch status` — daemon health and queue depth.
 - `mch start` / `mch stop` — lifecycle (for use outside systemd; systemd uses `systemctl`).
 - `mch nodes` — tabular view of all nodes with last-seen, config status, sync state.
@@ -88,7 +88,7 @@ Managed repeater nodes
 
 ### Data layer
 
-**SQLite** (`mcherd.db`) — actual state and history:
+**SQLite** (`/var/lib/mch/mch.db`) — actual state and history:
 - `nodes` table: pubkey (PK), name, last_seen, last_connected, auth_required, auth_cached, config_state, deployment_state.
 - `commands` table: node_pubkey, command, queued_at, run_at, response, success.
 - `logs` table: node_pubkey, timestamp, level, message.
@@ -119,7 +119,7 @@ nodes:
 
 ### Initialisation from gateway favourites
 
-On first run (or `mch discover`), mcherd calls `get_contacts()` on the gateway node, filters for favourited repeaters, and inserts any unknown pubkeys into the `nodes` table. This bootstraps the inventory without manual entry.
+On first run (or `mch discover`), mchd calls `get_contacts()` on the gateway node, filters for favourited repeaters, and inserts any unknown pubkeys into the `nodes` table. This bootstraps the inventory without manual entry.
 
 ### meshcore_py patterns
 
@@ -172,7 +172,7 @@ Full reference: https://docs.meshcore.io/cli_commands
 
 ## systemd
 
-Install the service unit to `/etc/systemd/system/mcherd.service`. The `mch start/stop` commands are aliases for `systemctl start/stop mcherd` when running under systemd; the daemon detects this from the environment.
+Install the service unit to `/etc/systemd/system/mchd.service`. The `mch start/stop` commands are aliases for `systemctl start/stop mchd` when running under systemd; the daemon detects this from the environment.
 
 ## Future scope (not in current design)
 
