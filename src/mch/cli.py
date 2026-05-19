@@ -30,7 +30,7 @@ def _wpad(s: str, width: int) -> str:
     return s + " " * max(0, width - _wlen(s))
 
 
-async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
+async def _request(socket_path: str, cmd: dict[str, Any], timeout: float = 30) -> dict[str, Any]:
     try:
         reader, writer = await asyncio.open_unix_connection(socket_path)
     except (FileNotFoundError, ConnectionRefusedError):
@@ -40,13 +40,13 @@ async def _request(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
 
     writer.write((json.dumps(cmd) + "\n").encode())
     await writer.drain()
-    raw = await asyncio.wait_for(reader.readline(), timeout=30)
+    raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
     writer.close()
     return json.loads(raw)
 
 
-def _rpc(socket_path: str, cmd: dict[str, Any]) -> dict[str, Any]:
-    return asyncio.run(_request(socket_path, cmd))
+def _rpc(socket_path: str, cmd: dict[str, Any], timeout: float = 30) -> dict[str, Any]:
+    return asyncio.run(_request(socket_path, cmd, timeout=timeout))
 
 
 def _check(resp: dict[str, Any]) -> Any:
@@ -216,7 +216,10 @@ def sync(ctx: click.Context, node: str | None) -> None:
     payload: dict = {"cmd": "sync"}
     if node:
         payload["prefix"] = node
-    resp = _rpc(ctx.obj["socket"], payload)
+        # inline single-node sync can take many per-operation timeouts (30s each)
+        resp = _rpc(ctx.obj["socket"], payload, timeout=300)
+    else:
+        resp = _rpc(ctx.obj["socket"], payload)
     data = _check(resp)
     click.echo(data)
 
