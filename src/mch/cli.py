@@ -131,15 +131,16 @@ def nodes(ctx: click.Context, query: str | None) -> None:
             return "-"
         return raw.split("-")[0]  # "v1.15.0-dee3e26..." → "v1.15.0"
 
-    group_w = max(len("GROUP"),   max((len(n.get("group") or "-")         for n in data), default=0))
-    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-")       for n in data), default=0))
-    name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])                    for n in data), default=0))
-    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "-")      for n in data), default=0))
-    ver_w   = max(len("VER"),     max((len(_short_ver(n.get("ver")))       for n in data), default=0))
+    state_w = max(len("STATE"),   max((len(n["state"])                        for n in data), default=0))
+    group_w = max(len("GROUP"),   max((len(n.get("group") or "-")            for n in data), default=0))
+    label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-")          for n in data), default=0))
+    name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])                       for n in data), default=0))
+    nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "-")         for n in data), default=0))
+    ver_w   = max(len("VER"),     max((len(_short_ver(n.get("ver")))          for n in data), default=0))
 
-    row = "  {:<10}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
-    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "VER", "LAST SEEN", "PUBKEY", gw=group_w, nw=nbrs_w, vw=ver_w))
-    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---", "---------", "------", gw=group_w, nw=nbrs_w, vw=ver_w))
+    row = "  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
+    click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "VER", "LAST SEEN", "PUBKEY", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
+    click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---", "---------", "------", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
     for n in data:
         last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
         group = (n.get("group") or "-")
@@ -152,7 +153,7 @@ def nodes(ctx: click.Context, query: str | None) -> None:
             _wpad(n["name"], name_w),
             nbrs, ver,
             last, n["pubkey"][:16] + "…",
-            gw=group_w, nw=nbrs_w, vw=ver_w,
+            sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
 
 
