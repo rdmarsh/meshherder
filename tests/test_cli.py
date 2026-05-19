@@ -191,7 +191,7 @@ def _run(args, rpc_response):
 # ------ status ------
 
 def test_status_no_nodes():
-    result = _run(["status"], {"ok": True, "data": {"nodes": [], "drifted_settings": 0}})
+    result = _run(["status"], {"ok": True, "data": {"nodes": [], "issues": 0}})
     assert result.exit_code == 0
     assert "nodes: 0" in result.output
 
@@ -199,8 +199,9 @@ def test_status_no_nodes():
 def test_status_lists_nodes():
     result = _run(["status"], {"ok": True, "data": {
         "nodes": [{"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "site-a",
-                   "state": "configured", "last_seen": None}],
-        "drifted_settings": 0,
+                   "group": None, "state": "configured", "last_seen": None,
+                   "last_connected": None, "neighbors": None, "ver": None}],
+        "issues": 0,
     }})
     assert result.exit_code == 0
     assert "configured" in result.output
@@ -220,35 +221,47 @@ def test_status_filtered():
     result = _run(["status", "tower"], {"ok": True, "data": {
         "nodes": [
             {"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "tower",
-             "state": "configured", "last_seen": None},
+             "group": None, "state": "configured", "last_seen": None,
+             "last_connected": None, "neighbors": None, "ver": None},
             {"pubkey": "11223344" * 8, "name": "Valley", "label": "valley",
-             "state": "configured", "last_seen": None},
+             "group": None, "state": "configured", "last_seen": None,
+             "last_connected": None, "neighbors": None, "ver": None},
             {"pubkey": "55667788" * 8, "name": "Ridge", "label": "ridge",
-             "state": "configured", "last_seen": None},
+             "group": None, "state": "configured", "last_seen": None,
+             "last_connected": None, "neighbors": None, "ver": None},
         ],
-        "drifted_settings": 0,
+        "issues": 0,
     }})
     assert "filtered from 3" in result.output
 
 
-# ------ nodes ------
-
-def test_nodes_no_nodes():
-    result = _run(["nodes"], {"ok": True, "data": []})
-    assert result.exit_code == 0
-    assert "no nodes" in result.output
-
-
-def test_nodes_lists_node():
-    result = _run(["nodes"], {"ok": True, "data": [
-        {"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "site-a",
-         "group": "repeaters", "state": "configured", "last_seen": None,
-         "last_connected": None, "neighbors": "5", "ver": "v1.14.1"},
-    ]})
-    assert result.exit_code == 0
-    assert "Tower" in result.output
+def test_status_shows_label_and_group_columns():
+    result = _run(["status"], {"ok": True, "data": {
+        "nodes": [{"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "site-a",
+                   "group": "repeaters", "state": "configured", "last_seen": None,
+                   "last_connected": None, "neighbors": "5", "ver": "v1.14.1"}],
+        "issues": 0,
+    }})
+    assert "LABEL" in result.output
+    assert "GROUP" in result.output
     assert "site-a" in result.output
-    assert "v1.14.1" in result.output
+    assert "repeaters" in result.output
+
+
+def test_status_shows_issue_footer_when_issues_nonzero():
+    result = _run(["status"], {"ok": True, "data": {
+        "nodes": [],
+        "issues": 2,
+    }})
+    assert "mch issues" in result.output
+
+
+def test_status_no_footer_when_no_issues():
+    result = _run(["status"], {"ok": True, "data": {
+        "nodes": [],
+        "issues": 0,
+    }})
+    assert "mch issues" not in result.output
 
 
 # ------ node ------

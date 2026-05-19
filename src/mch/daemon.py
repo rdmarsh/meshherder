@@ -108,25 +108,6 @@ async def _dispatch(
         bad_state = [n for n in nodes if n.state in _bad_states]
         db_pubkeys = {n.pubkey for n in nodes}
         ghosts = [nc for nc in config.nodes if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)]
-        return {
-            "ok": True,
-            "data": {
-                "nodes": [
-                    {
-                        "pubkey": n.pubkey,
-                        "name": n.name,
-                        "label": n.label,
-                        "state": n.state.value,
-                        "last_seen": n.last_seen.isoformat() if n.last_seen else None,
-                    }
-                    for n in nodes
-                ],
-                "issues": len(drifted) + len(bad_state) + len(ghosts),
-            },
-        }
-
-    if cmd == "nodes":
-        nodes = await db.get_all_nodes()
         rows = []
         for n in nodes:
             facts = await db.get_facts(n.pubkey)
@@ -141,7 +122,13 @@ async def _dispatch(
                 "neighbors": facts.get("neighbors"),
                 "ver": facts.get("ver"),
             })
-        return {"ok": True, "data": rows}
+        return {
+            "ok": True,
+            "data": {
+                "nodes": rows,
+                "issues": len(drifted) + len(bad_state) + len(ghosts),
+            },
+        }
 
     if cmd == "node":
         pubkey = req.get("pubkey", "")
