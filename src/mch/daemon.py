@@ -211,7 +211,7 @@ async def _dispatch(
             ],
         }
 
-    if cmd == "recommend":
+    if cmd == "hint":
         from mch.recommend import get_profile, load_profiles
         from pathlib import Path as _Path
         profiles_file = _Path(config.profiles_file) if config.profiles_file else None

@@ -352,25 +352,25 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# recommend
+# hint
 # ---------------------------------------------------------------------------
 
 @cli.command()
 @click.argument("pubkey", required=False)
 @click.pass_context
-def recommend(ctx: click.Context, pubkey: str | None) -> None:
-    """Show recommended settings based on each node's neighbour count.
+def hint(ctx: click.Context, pubkey: str | None) -> None:
+    """Show suggested settings based on each node's neighbour count.
 
     PUBKEY: pubkey prefix or label (case-insensitive). Omit to show all nodes.
 
-    Prints the matching profile (e.g. rooftop, tower), recommended txdelay
+    Prints the matching profile (e.g. rooftop, tower), suggested txdelay
     and universal settings with one-line explanations, and a ready-to-paste
     config.yaml settings: block.
 
     Requires 'neighbors' in the facts: list in config.yaml and at least
     one completed sync cycle to populate the neighbour count.
     """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "recommend", "pubkey": pubkey})
+    resp = _rpc(ctx.obj["socket"], {"cmd": "hint", "pubkey": pubkey})
     data = _check(resp)
 
     if not data:
@@ -378,12 +378,12 @@ def recommend(ctx: click.Context, pubkey: str | None) -> None:
         return
 
     if pubkey:
-        _recommend_detail(data[0])
+        _hint_detail(data[0])
     else:
-        _recommend_table(data)
+        _hint_table(data)
 
 
-def _recommend_table(data: list) -> None:
+def _hint_table(data: list) -> None:
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in data), default=0))
 
     row = "  {}  {:<4}  {:<7}  {}"
@@ -400,7 +400,7 @@ def _recommend_table(data: list) -> None:
         ))
 
 
-def _recommend_detail(n: dict) -> None:
+def _hint_detail(n: dict) -> None:
     count = n["neighbour_count"]
     profile = n["profile"]
 
@@ -432,7 +432,7 @@ def _recommend_detail(n: dict) -> None:
     key_w = max(len(s[0]) for s in settings)
     val_w = max(len(s[1]) for s in settings)
 
-    click.echo("Recommended settings:")
+    click.echo("Suggested settings:")
     for key, val, desc in settings:
         click.echo(f"  {key:<{key_w}}  {val:<{val_w}}  {desc}")
 

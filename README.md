@@ -289,8 +289,8 @@ snippet, add it to config, and restart mchd. If the node needs a login password,
 ```
 mch nodes                   # fleet view: state, firmware version, neighbour count, last seen
 mch node <label|prefix>     # detail for one node: facts, settings, recent activity
-mch recommend               # suggested txdelay for every node based on neighbour count
-mch recommend <label|prefix> # full recommendations + paste-ready config block
+mch hint                    # suggested txdelay for every node based on neighbour count
+mch hint <label|prefix>     # full suggestions + paste-ready config block
 mch contacts                # nodes visible to the gateway but not yet in config
 ```
 
@@ -321,8 +321,8 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 mch status                    Daemon health and fleet summary
 mch nodes                     All managed nodes: state, firmware version, neighbour count, last seen
 mch node <label|prefix>       Detail for one node: facts, settings, recent activity
-mch recommend                 Suggested txdelay for all nodes based on neighbour count
-mch recommend <label|prefix>  Full recommendations + paste-ready config block for one node
+mch hint                      Suggested txdelay for all nodes based on neighbour count
+mch hint <label|prefix>       Full suggestions + paste-ready config block for one node
 mch drift                     Settings currently drifted from desired across the fleet
 mch logs                      Recent per-node activity across all nodes
 mch logs <prefix>             Activity for one node

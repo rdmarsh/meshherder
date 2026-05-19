@@ -94,13 +94,13 @@ async def test_node_dispatch_label_match_case_insensitive(db, wq, config):
     assert resp["data"]["pubkey"] == node.pubkey
 
 
-async def test_recommend_dispatch_label_match(db, wq, config):
-    """recommend command should match by label when pubkey prefix lookup fails."""
+async def test_hint_dispatch_label_match(db, wq, config):
+    """hint command should match by label when pubkey prefix lookup fails."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower Node", label="QH Test", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="5"))
 
-    resp = await _dispatch({"cmd": "recommend", "pubkey": "QH Test"}, wq, db, config)
+    resp = await _dispatch({"cmd": "hint", "pubkey": "QH Test"}, wq, db, config)
     assert resp["ok"] is True
     assert len(resp["data"]) == 1
     assert resp["data"][0]["label"] == "QH Test"
