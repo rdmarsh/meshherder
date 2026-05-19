@@ -193,7 +193,7 @@ def _run(args, rpc_response):
 def test_status_no_nodes():
     result = _run(["status"], {"ok": True, "data": {"nodes": [], "issues": 0}})
     assert result.exit_code == 0
-    assert "nodes: 0" in result.output
+    assert "0 nodes" in result.output
 
 
 def test_status_lists_nodes():
@@ -213,11 +213,11 @@ def test_status_shows_issues_count():
         "nodes": [],
         "issues": 3,
     }})
-    assert "issues: 3" in result.output
+    assert "3 issues" in result.output
 
 
 def test_status_filtered():
-    # _rpc returns all 3 nodes; client-side filter reduces to 1; "filtered from 3" appears
+    # _rpc returns all 3 nodes; client-side filter reduces to 1; footer shows "1 of 3 nodes"
     result = _run(["status", "tower"], {"ok": True, "data": {
         "nodes": [
             {"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "tower",
@@ -232,7 +232,7 @@ def test_status_filtered():
         ],
         "issues": 0,
     }})
-    assert "filtered from 3" in result.output
+    assert "1 of 3 nodes" in result.output
 
 
 def test_status_shows_label_and_group_columns():
