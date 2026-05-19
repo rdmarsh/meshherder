@@ -62,6 +62,28 @@ async def test_node_dispatch_prefix_returns_facts(db, wq, config):
     assert data["facts"] == {"ver": "v1.14.1", "board": "TestBoard"}
 
 
+async def test_node_dispatch_passwd_known_when_in_secrets(db, wq, config):
+    """passwd_known is True when secrets has an entry matching the node's pubkey."""
+    node = await _seed_node_with_facts(db)
+    config.secrets = {node.pubkey[:8]: "hunter2"}
+
+    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["passwd_known"] is True
+
+
+async def test_node_dispatch_passwd_known_false_when_no_secret(db, wq, config):
+    """passwd_known is False when no secrets entry matches the node's pubkey."""
+    node = await _seed_node_with_facts(db)
+    config.secrets = {}
+
+    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["passwd_known"] is False
+
+
 async def test_node_dispatch_full_pubkey_returns_facts(db, wq, config):
     """node command with full pubkey should also return facts."""
     node = await _seed_node_with_facts(db)

@@ -232,7 +232,7 @@ def test_status_filtered():
         ],
         "issues": 0,
     }})
-    assert "1 of 3 nodes" in result.output
+    assert "1 of 3 nodes shown" in result.output
 
 
 def test_status_shows_label_and_group_columns():
@@ -264,6 +264,27 @@ def test_status_no_footer_when_no_issues():
     assert "mch issues" not in result.output
 
 
+def test_status_singular_issue_grammar():
+    result = _run(["status"], {"ok": True, "data": {"nodes": [], "issues": 1}})
+    assert "1 issue " in result.output
+    assert "1 issues" not in result.output
+
+
+def test_status_filtered_footer_says_shown():
+    result = _run(["status", "tower"], {"ok": True, "data": {
+        "nodes": [
+            {"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "tower",
+             "group": None, "state": "configured", "last_seen": None,
+             "last_connected": None, "neighbors": None, "ver": None},
+            {"pubkey": "11223344" * 8, "name": "Valley", "label": "valley",
+             "group": None, "state": "configured", "last_seen": None,
+             "last_connected": None, "neighbors": None, "ver": None},
+        ],
+        "issues": 0,
+    }})
+    assert "1 of 2 nodes shown" in result.output
+
+
 # ------ node ------
 
 def test_node_detail_view():
@@ -277,6 +298,7 @@ def test_node_detail_view():
         "last_connected": None,
         "auth_required": False,
         "auth_cached": True,
+        "passwd_known": True,
         "facts": {"ver": "v1.14.1", "board": "T-Beam"},
         "settings": [],
         "logs": [],
@@ -285,6 +307,8 @@ def test_node_detail_view():
     assert "Tower" in result.output
     assert "site-a" in result.output
     assert "v1.14.1" in result.output
+    assert "acl:" in result.output
+    assert "passwd:" in result.output
 
 
 def test_node_not_found():
@@ -349,6 +373,7 @@ def test_issues_shows_bad_state_section():
     assert "problem states" in result.output
     assert "configuring" in result.output
     assert "wip 07" in result.output
+    assert "aabbccdd" in result.output
 
 
 def test_issues_shows_ghosts_section():
