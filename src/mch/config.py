@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+log = logging.getLogger(__name__)
 
 from mch.models import SettingPolicy
 
@@ -17,6 +20,15 @@ class GatewayConfig:
     baud: int = 115200
     name: str | None = None  # if set, mchd applies this name to the gateway on startup
     radio: "RadioConfig | None" = None  # if set, gateway is forced to this freq on startup and restored to it after every hop
+    advert_on_start: str = "never"  # "never" | "zerohop" — send advert after daemon restart
+
+    def __post_init__(self) -> None:
+        _VALID = {"never", "zerohop"}
+        if self.advert_on_start not in _VALID:
+            raise ValueError(
+                f"gateway.advert_on_start must be one of {sorted(_VALID)!r},"
+                f" got {self.advert_on_start!r}"
+            )
 
 
 @dataclass
@@ -125,10 +137,7 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     if secrets_path is None:
         secrets_path = Path(raw.get("secrets_file", config_path.parent / "secrets.yaml"))
 
-    if secrets_path.exists():
-        _check_permissions(secrets_path)
-        secrets_raw = yaml.safe_load(secrets_path.read_text()) or {}
-        cfg.secrets = secrets_raw.get("nodes", {})
+    cfg.secrets = _load_secrets(secrets_path)
 
     return cfg
 
@@ -191,6 +200,24 @@ def _parse_group(raw: dict) -> GroupConfig:
         settings=settings,
         setting_overrides=overrides,
     )
+
+
+def _load_secrets(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    _check_permissions(path)
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"secrets file is not valid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"secrets file must be a YAML mapping, got {type(raw).__name__}"
+        )
+    nodes = raw.get("nodes", {})
+    if not isinstance(nodes, dict):
+        raise ValueError("secrets.nodes must be a mapping of pubkey_prefix: password")
+    return {str(k): str(v) for k, v in nodes.items()}
 
 
 def _check_permissions(path: Path) -> None:

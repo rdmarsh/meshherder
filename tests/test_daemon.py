@@ -336,7 +336,7 @@ async def test_logs_dispatch_filtered_by_pubkey_prefix(db, wq, config):
 
 async def test_status_dispatch_returns_node_list_and_issue_count(db, wq, config):
     """status command returns node list and a count of issues."""
-    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED, auth_cached=True)
     await db.upsert_node(node)
 
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
@@ -406,8 +406,8 @@ async def test_status_dispatch_includes_group_and_facts(db, wq, config):
 # ------------------------------------------------------------------
 
 async def test_issues_dispatch_no_issues(db, wq, config):
-    """issues returns three empty sections when everything is clean."""
-    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    """issues returns empty sections when everything is clean."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED, auth_cached=True)
     await db.upsert_node(node)
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
@@ -416,6 +416,7 @@ async def test_issues_dispatch_no_issues(db, wq, config):
     assert resp["data"]["drifted"] == []
     assert resp["data"]["bad_state"] == []
     assert resp["data"]["ghosts"] == []
+    assert resp["data"]["open_nodes"] == []
 
 
 async def test_issues_dispatch_returns_drifted_settings(db, wq, config):
@@ -472,6 +473,73 @@ async def test_issues_dispatch_returns_ghosts(db, wq, config):
     assert resp["data"]["ghosts"][0]["label"] == "wrong"
 
 
+async def test_dispatch_unknown_command_returns_error(db, wq, config):
+    resp = await _dispatch({"cmd": "nonexistent"}, wq, db, config)
+    assert resp["ok"] is False
+    assert "unknown command" in resp["error"]
+
+
+# ------------------------------------------------------------------
+# exec command
+# ------------------------------------------------------------------
+
+async def test_exec_dispatch_blocked_command_returns_error(db, wq, config):
+    """exec with a blocked command (erase) returns an error without touching the gateway."""
+    resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "erase"}, wq, db, config)
+    assert resp["ok"] is False
+    assert "blocked" in resp["error"]
+
+
+async def test_exec_dispatch_unknown_node_returns_error(db, wq, config):
+    """exec with an unknown node returns an error."""
+    resp = await _dispatch({"cmd": "exec", "pubkey": "deadbeef", "command": "ver"}, wq, db, config)
+    assert resp["ok"] is False
+    assert "not found" in resp["error"]
+
+
+async def test_exec_dispatch_no_contact_returns_error(db, wq, config):
+    """exec returns error when node is in DB but not in gateway contacts."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    wq._contacts = []  # no contacts
+
+    resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "ver"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "contact" in resp["error"]
+
+
+async def test_exec_dispatch_free_command_returns_text(db, wq, config):
+    """exec with a free command returns the command's text response."""
+    from mch.gateway import CommandResult
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    contact = {"public_key": node.pubkey, "adv_name": "Tower", "type": 2}
+    wq._contacts = [contact]
+    wq._gateway = MagicMock()
+    wq._gateway.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
+
+    resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "ver"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"] == "v1.14.1"
+
+
+async def test_exec_dispatch_fire_and_forget_timeout_returns_ok(db, wq, config):
+    """exec reboot (fire-and-forget): timeout treated as success."""
+    from mch.gateway import CommandResult
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    contact = {"public_key": node.pubkey, "adv_name": "Tower", "type": 2}
+    wq._contacts = [contact]
+    wq._gateway = MagicMock()
+    wq._gateway.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+
+    resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "reboot"}, wq, db, config)
+
+    assert resp["ok"] is True
+
+
 async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):
     """A config node whose prefix matches a DB node is not a ghost."""
     from mch.config import NodeConfig
@@ -482,3 +550,103 @@ async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
     assert resp["data"]["ghosts"] == []
+
+
+# ------------------------------------------------------------------
+# open-node detection
+# ------------------------------------------------------------------
+
+async def test_issues_dispatch_open_nodes_when_no_acl(db, wq, config):
+    """issues open_nodes section lists nodes that synced with no ACL protection."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Open Node",
+        label="open",
+        state=NodeState.CONFIGURED,
+        auth_required=False,
+        auth_cached=False,
+    )
+    await db.upsert_node(node)
+    config.secrets = {}
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert len(resp["data"]["open_nodes"]) == 1
+    assert resp["data"]["open_nodes"][0]["pubkey"] == node.pubkey
+
+
+async def test_issues_dispatch_no_open_node_when_passwd_configured(db, wq, config):
+    """issues open_nodes excludes nodes that have a password in secrets."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Secured Node",
+        label="secured",
+        state=NodeState.CONFIGURED,
+        auth_required=False,
+        auth_cached=False,
+    )
+    await db.upsert_node(node)
+    config.secrets = {node.pubkey[:8]: "hunter2"}
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["open_nodes"] == []
+
+
+async def test_issues_dispatch_no_open_node_when_auth_cached(db, wq, config):
+    """issues open_nodes excludes nodes where auth_cached=True (ACL login worked)."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Protected",
+        label="prot",
+        state=NodeState.CONFIGURED,
+        auth_required=False,
+        auth_cached=True,
+    )
+    await db.upsert_node(node)
+    config.secrets = {}
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["open_nodes"] == []
+
+
+async def test_issues_dispatch_no_open_node_when_auth_required(db, wq, config):
+    """issues open_nodes excludes nodes where auth_required=True."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Protected",
+        label="prot",
+        state=NodeState.CONFIGURED,
+        auth_required=True,
+        auth_cached=False,
+    )
+    await db.upsert_node(node)
+    config.secrets = {}
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["open_nodes"] == []
+
+
+async def test_status_dispatch_counts_open_nodes_in_issues(db, wq, config):
+    """status issues count includes open nodes (no ACL protection)."""
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Open Node",
+        label="open",
+        state=NodeState.CONFIGURED,
+        auth_required=False,
+        auth_cached=False,
+    )
+    await db.upsert_node(node)
+    config.secrets = {}
+
+    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["issues"] >= 1

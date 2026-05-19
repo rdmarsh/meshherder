@@ -307,7 +307,7 @@ def test_node_detail_view():
     assert "Tower" in result.output
     assert "site-a" in result.output
     assert "v1.14.1" in result.output
-    assert "acl:" in result.output
+    assert "authed:" in result.output
     assert "passwd:" in result.output
 
 
@@ -342,7 +342,7 @@ def test_node_shows_settings_drift_flag():
 
 # ------ issues ------
 
-_ISSUES_EMPTY = {"ok": True, "data": {"drifted": [], "bad_state": [], "ghosts": []}}
+_ISSUES_EMPTY = {"ok": True, "data": {"drifted": [], "bad_state": [], "ghosts": [], "open_nodes": []}}
 
 
 def test_issues_no_issues():
@@ -355,7 +355,7 @@ def test_issues_shows_drifted_section():
     data = {"drifted": [{"node_pubkey": "aabbccdd" * 8, "label": "site-a",
                           "key": "owner.info", "desired": "Managed by mch",
                           "observed": "wrong", "policy": "enforce"}],
-            "bad_state": [], "ghosts": []}
+            "bad_state": [], "ghosts": [], "open_nodes": []}
     result = _run(["issues"], {"ok": True, "data": data})
     assert result.exit_code == 0
     assert "drifted settings" in result.output
@@ -367,7 +367,7 @@ def test_issues_shows_bad_state_section():
     data = {"drifted": [],
             "bad_state": [{"pubkey": "aabbccdd" * 8, "label": "wip 07",
                             "name": "wip 07", "state": "configuring", "last_seen": None}],
-            "ghosts": []}
+            "ghosts": [], "open_nodes": []}
     result = _run(["issues"], {"ok": True, "data": data})
     assert result.exit_code == 0
     assert "problem states" in result.output
@@ -378,12 +378,22 @@ def test_issues_shows_bad_state_section():
 
 def test_issues_shows_ghosts_section():
     data = {"drifted": [], "bad_state": [],
-            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "wrong"}]}
+            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "wrong"}], "open_nodes": []}
     result = _run(["issues"], {"ok": True, "data": data})
     assert result.exit_code == 0
     assert "ghost" in result.output
     assert "deadbeef" in result.output
     assert "wrong" in result.output
+
+
+def test_issues_shows_open_nodes_section():
+    data = {"drifted": [], "bad_state": [], "ghosts": [],
+            "open_nodes": [{"pubkey": "aabbccdd" * 8, "label": "wip 06", "name": "wip 06"}]}
+    result = _run(["issues"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert "open node" in result.output
+    assert "wip 06" in result.output
+    assert "aabbccdd" in result.output
 
 
 def test_issues_filtered_by_query():
@@ -392,11 +402,13 @@ def test_issues_filtered_by_query():
                           "policy": "enforce"}],
             "bad_state": [{"pubkey": "11223344" * 8, "label": "site-b",
                             "name": "B", "state": "offline", "last_seen": None}],
-            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "ghost-node"}]}
+            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "ghost-node"}],
+            "open_nodes": [{"pubkey": "99aabbcc" * 8, "label": "site-c", "name": "C"}]}
     result = _run(["issues", "site-a"], {"ok": True, "data": data})
     assert "site-a" in result.output
     assert "site-b" not in result.output
     assert "deadbeef" not in result.output
+    assert "site-c" not in result.output
 
 
 # ------ logs ------
@@ -491,3 +503,93 @@ def test_hint_no_nodes():
     result = _run(["hint"], {"ok": True, "data": []})
     assert result.exit_code == 0
     assert "no nodes" in result.output
+
+
+# ------ exec ------
+
+_NODE_RESP = {"ok": True, "data": {
+    "pubkey": "aabbccdd" * 8,
+    "name": "Tower",
+    "label": "site-a",
+    "state": "configured",
+    "authed": True,
+    "auth_required": False,
+    "passwd_known": False,
+    "facts": {},
+    "settings": [],
+    "logs": [],
+    "last_seen": None,
+    "last_connected": None,
+    "group": None,
+}}
+
+
+def test_exec_blocked_command_refuses():
+    """exec with a blocked command (erase) exits non-zero without calling daemon."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "exec", "site-a", "erase"])
+    mock_rpc.assert_not_called()
+    assert result.exit_code != 0
+    assert "blocked" in result.output.lower() or "blocked" in (result.stderr or "").lower()
+
+
+def test_exec_free_command_shows_output():
+    """exec with a free command (ver) calls daemon and prints the response."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[_NODE_RESP, {"ok": True, "data": "v1.14.1"}]):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "exec", "site-a", "ver"])
+    assert result.exit_code == 0
+    assert "v1.14.1" in result.output
+
+
+def test_exec_confirm_with_yes_skips_prompt():
+    """exec with --yes on a confirm command (reboot) runs without prompting."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[
+        _NODE_RESP,
+        {"ok": True, "data": "(sent - no response expected)"},
+    ]):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "exec", "site-a", "reboot", "--yes"])
+    assert result.exit_code == 0
+
+
+def test_exec_confirm_prompts_and_accepts_correct_prefix():
+    """exec on a confirm command prompts for pubkey prefix; correct prefix runs the command."""
+    pubkey = "aabbccdd" * 8
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[
+        _NODE_RESP,
+        {"ok": True, "data": "(sent - no response expected)"},
+    ]):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "exec", "site-a", "reboot"],
+            input=pubkey[:8] + "\n",
+        )
+    assert result.exit_code == 0
+
+
+def test_exec_confirm_wrong_prefix_cancels():
+    """exec on a confirm command with wrong pubkey prefix cancels without running."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc", return_value=_NODE_RESP) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "exec", "site-a", "reboot"],
+            input="wrongprefix\n",
+        )
+    # exec RPC should NOT have been called (only node lookup was)
+    assert mock_rpc.call_count == 1
+    assert result.exit_code != 0
+
+
+def test_exec_daemon_error_exits_nonzero():
+    """exec exits non-zero when the daemon returns an error."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[
+        _NODE_RESP,
+        {"ok": False, "error": "no gateway contact for aabbccdd"},
+    ]):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "exec", "site-a", "ver"])
+    assert result.exit_code != 0

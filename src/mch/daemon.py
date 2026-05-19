@@ -108,6 +108,13 @@ async def _dispatch(
         bad_state = [n for n in nodes if n.state in _bad_states]
         db_pubkeys = {n.pubkey for n in nodes}
         ghosts = [nc for nc in config.nodes if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)]
+        open_nodes = [
+            n for n in nodes
+            if n.state == NodeState.CONFIGURED
+            and not n.auth_required
+            and not n.auth_cached
+            and not any(n.pubkey.startswith(p) for p in config.secrets)
+        ]
         rows = []
         for n in nodes:
             facts = await db.get_facts(n.pubkey)
@@ -126,7 +133,7 @@ async def _dispatch(
             "ok": True,
             "data": {
                 "nodes": rows,
-                "issues": len(drifted) + len(bad_state) + len(ghosts),
+                "issues": len(drifted) + len(bad_state) + len(ghosts) + len(open_nodes),
             },
         }
 
@@ -184,6 +191,34 @@ async def _dispatch(
         asyncio.create_task(wq.run_cycle())
         return {"ok": True, "data": "sync started"}
 
+    if cmd == "exec":
+        _BLOCKED = {"erase", "start ota", "set prv.key", "password", "setperm", "set guest.password"}
+        _FIRE_AND_FORGET = {"reboot", "clkreboot"}
+        pubkey = req.get("pubkey", "")
+        command = (req.get("command") or "").strip()
+        cmd_root = command.split()[0].lower() if command else ""
+        if cmd_root in _BLOCKED:
+            return {"ok": False, "error": f"{cmd_root!r} is blocked - use config operations"}
+        try:
+            node = await _resolve_node(pubkey, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"node {pubkey!r} not found"}
+        contact = next(
+            (c for c in wq._contacts if c.get("public_key", "")[:12] == node.pubkey[:12]),
+            None,
+        )
+        if not contact:
+            return {"ok": False, "error": f"no gateway contact for {node.pubkey[:12]}"}
+        faf = cmd_root in _FIRE_AND_FORGET
+        result = await wq._gateway.send_command(contact, command, timeout=60)
+        if faf and not result.success:
+            return {"ok": True, "data": "(sent - no response expected)"}
+        if not result.success:
+            return {"ok": False, "error": result.error or "no response"}
+        return {"ok": True, "data": result.text or "(ok)"}
+
     if cmd == "contacts":
         from mch.queue import get_unfiled_contacts
         gateway = wq._gateway
@@ -237,7 +272,16 @@ async def _dispatch(
             for nc in config.nodes
             if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)
         ]
-        return {"ok": True, "data": {"drifted": drifted, "bad_state": bad_state, "ghosts": ghosts}}
+        # nodes that synced successfully with no ACL protection
+        open_nodes = [
+            {"pubkey": n.pubkey, "label": n.label, "name": n.name}
+            for n in nodes
+            if n.state == NodeState.CONFIGURED
+            and not n.auth_required
+            and not n.auth_cached
+            and not any(n.pubkey.startswith(p) for p in config.secrets)
+        ]
+        return {"ok": True, "data": {"drifted": drifted, "bad_state": bad_state, "ghosts": ghosts, "open_nodes": open_nodes}}
 
     if cmd == "hint":
         from mch.recommend import get_profile, load_profiles
@@ -314,6 +358,10 @@ class Daemon:
             await self._db.write_log(None, "ERROR", f"gateway connection failed: {exc}")
             await self._db.close()
             raise SystemExit(1)
+
+        if config.gateway.advert_on_start == "zerohop":
+            log.info("sending startup advert.zerohop")
+            await self._gateway.advert(zerohop=True)
 
         # messenger: DM control + channel announcements
         msg_cfg = config.messenger

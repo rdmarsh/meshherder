@@ -381,6 +381,16 @@ class Gateway:
             return False
         return True
 
+    async def advert(self, zerohop: bool = True) -> None:
+        """Send an advertisement from the local gateway node.
+
+        zerohop=True  → advert.zerohop (flood=False) — reaches immediate neighbors only.
+        zerohop=False → full flood advert.
+        """
+        mc = self._require_connected()
+        log.info("sending advert (zerohop=%s)", zerohop)
+        await mc.commands.send_advert(flood=not zerohop)
+
     async def set_contact_favourite(self, contact: dict[str, Any]) -> bool:
         """Set the favourite flag (bit 0) on a gateway contact. Returns True on success."""
         mc = self._require_connected()
