@@ -274,7 +274,7 @@ nodes:
 
 3. Copy the snippets you want into your config files, fill in any passwords, then restart mchd:
    `sudo systemctl restart mchd`
-4. Run `mch nodes` to confirm the node is now known, then `mch sync <prefix>` to sync it
+4. Run `mch status` to confirm the node is now known, then `mch sync <prefix>` to sync it
    immediately without waiting for the scheduler.
 
 ### Building a node on the bench
@@ -287,7 +287,7 @@ snippet, add it to config, and restart mchd. If the node needs a login password,
 ### Day-to-day checks
 
 ```
-mch nodes                   # fleet view: state, firmware version, neighbour count, last seen
+mch status                  # fleet view: state, label, group, firmware, neighbours, last seen
 mch node <label|prefix>     # detail for one node: facts, settings, recent activity
 mch hint                    # suggested txdelay for every node based on neighbour count
 mch hint <label|prefix>     # full suggestions + paste-ready config block
@@ -318,12 +318,12 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 ## CLI reference
 
 ```
-mch status                    Daemon health and fleet summary
-mch nodes                     All managed nodes: state, firmware version, neighbour count, last seen
+mch status                    Fleet overview: state, label, group, firmware, neighbours, last seen
+mch status <label|prefix>     Same, filtered to matching nodes
 mch node <label|prefix>       Detail for one node: facts, settings, recent activity
+mch issues                    All current issues: drifted settings, problem states, config ghosts
 mch hint                      Suggested txdelay for all nodes based on neighbour count
 mch hint <label|prefix>       Full suggestions + paste-ready config block for one node
-mch drift                     Settings currently drifted from desired across the fleet
 mch logs                      Recent per-node activity across all nodes
 mch logs <prefix>             Activity for one node
 mch contacts                  Repeater nodes visible to the gateway not yet in config
@@ -345,7 +345,7 @@ mch sync aabbccdd    # sync the node whose pubkey starts with aabbccdd; CLI wait
 `mch sync` (no argument) starts a full sweep of every node in the background — the CLI returns
 "sync started" immediately and mchd works through the list in config order, pausing
 `inter_node_delay_seconds` between each node, exactly as a scheduled cycle would. With many nodes
-and a long delay this can take a while; check `mch nodes` to watch progress.
+and a long delay this can take a while; check `mch status` to watch progress.
 
 ## Logs
 
