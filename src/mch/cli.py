@@ -368,9 +368,9 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
     if not data:
         if query:
-            click.echo(f"no contacts matching '{query}'")
+            click.echo(f"no contacts matching '{query}' outside your config.yaml")
         else:
-            click.echo("no unfiled repeater contacts found")
+            click.echo("no repeater contacts found outside your config.yaml")
         return
 
     if query:
