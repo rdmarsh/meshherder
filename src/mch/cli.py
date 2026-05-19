@@ -81,20 +81,28 @@ def cli(ctx: click.Context, socket: str) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command()
+@click.argument("query", required=False, default=None)
 @click.pass_context
-def status(ctx: click.Context) -> None:
+def status(ctx: click.Context, query: str | None) -> None:
     """Show daemon and fleet status."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "status"})
     data = _check(resp)
 
-    nodes = data.get("nodes", [])
+    all_nodes = data.get("nodes", [])
+    nodes = _filter_nodes(all_nodes, query)
     drifted = data.get("drifted_settings", 0)
 
-    click.echo(f"nodes: {len(nodes)}  drifted settings: {drifted}")
+    node_summary = f"nodes: {len(nodes)}"
+    if query and len(nodes) != len(all_nodes):
+        node_summary += f" (filtered from {len(all_nodes)})"
+    click.echo(f"{node_summary}  drifted settings: {drifted}")
     click.echo("")
 
     if not nodes:
-        click.echo("  (no nodes in database yet)")
+        if query:
+            click.echo(f"  (no nodes matching '{query}')")
+        else:
+            click.echo("  (no nodes in database yet)")
         return
 
     state_w = max(len("STATE"), max((len(n["state"])        for n in nodes), default=0))
