@@ -383,18 +383,27 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         pubkey = c.get("public_key", "")
         prefix = pubkey[:8]
         name = c.get("adv_name", "") or "unknown"
-        sep = "─" * max(0, 60 - len(name))
 
+        # pubkey line is always 79 chars — use that as the fixed row width
+        width = len("# full pubkey: ") + len(pubkey)  # always 79
+        sep = "─" * max(0, width - len("# ── ") - len(name) - 1)
+
+        # compute shared column so inline # comments align across both paste blocks
+        col = max(len("    group:"), len(f"  {prefix}: \"\"")) + 4
+        group_pad   = " " * (col - len("    group:"))
+        secrets_pad = " " * (col - len(f"  {prefix}: \"\""))
+
+        click.echo("#" * width)
         click.echo(f"# ── {name} {sep}")
         click.echo(f"# full pubkey: {pubkey}\n")
 
         click.echo("# config.yaml — append to the 'nodes:' section:")
         click.echo(f"  - pubkey_prefix: {prefix}")
         click.echo(f'    label: "{name}"')
-        click.echo(f"    group:           # assign to a group, or remove this line\n")
+        click.echo(f"    group:{group_pad}# assign to a group, or remove this line\n")
 
         click.echo("# secrets.yaml — append to the 'nodes:' section:")
-        click.echo(f"  {prefix}: \"\"     # add password if required, or leave blank\n")
+        click.echo(f"  {prefix}: \"\"{secrets_pad}# add password if required, or leave blank\n")
 
 
 # ---------------------------------------------------------------------------
