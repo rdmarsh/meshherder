@@ -4,6 +4,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mch.config import RadioConfig, load
 
@@ -87,3 +88,68 @@ def test_gateway_radio_still_works(tmp_path):
     """)
     cfg = load(p)
     assert cfg.gateway.radio == RadioConfig(freq=915.075, bw=125, sf=9, cr=5)
+
+
+# ------------------------------------------------------------------
+# Feature 3: gateway.advert_on_start
+# ------------------------------------------------------------------
+
+def test_gateway_advert_on_start_defaults_to_never(tmp_path):
+    """gateway.advert_on_start defaults to 'never' when not specified."""
+    p = _write_config(tmp_path, "gateway: {}")
+    cfg = load(p)
+    assert cfg.gateway.advert_on_start == "never"
+
+
+def test_gateway_advert_on_start_zerohop(tmp_path):
+    """gateway.advert_on_start: zerohop is accepted."""
+    p = _write_config(tmp_path, """\
+        gateway:
+          advert_on_start: zerohop
+    """)
+    cfg = load(p)
+    assert cfg.gateway.advert_on_start == "zerohop"
+
+
+def test_gateway_advert_on_start_invalid_raises(tmp_path):
+    """gateway.advert_on_start with an invalid value raises ValueError."""
+    p = _write_config(tmp_path, """\
+        gateway:
+          advert_on_start: always
+    """)
+    with pytest.raises(ValueError, match="advert_on_start"):
+        load(p)
+
+
+# ------------------------------------------------------------------
+# Feature 4: secrets file validation
+# ------------------------------------------------------------------
+
+def test_corrupt_secrets_raises_value_error(tmp_path):
+    """Corrupt secrets YAML raises ValueError with a clear message."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text(": bad [yaml\n")
+    secrets.chmod(0o600)
+    with pytest.raises(ValueError, match="not valid YAML"):
+        load(p, secrets_path=secrets)
+
+
+def test_secrets_not_a_mapping_raises_value_error(tmp_path):
+    """Secrets file that is a YAML list (not mapping) raises ValueError."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("- just a list\n")
+    secrets.chmod(0o600)
+    with pytest.raises(ValueError, match="mapping"):
+        load(p, secrets_path=secrets)
+
+
+def test_secrets_nodes_not_a_mapping_raises_value_error(tmp_path):
+    """secrets.nodes that is not a mapping raises ValueError."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  - pubkey1\n  - pubkey2\n")
+    secrets.chmod(0o600)
+    with pytest.raises(ValueError, match="mapping"):
+        load(p, secrets_path=secrets)

@@ -29,6 +29,12 @@ Think Ansible for your nodes, running continuously in the background.
   it waits `inter_node_delay_seconds` before starting the next (skipped if there is only one node
   in the run). Each node is visited at most once per `sync_interval_days`, spread randomly across
   the window.
+- **Open-node detection** — mchd warns when a node syncs with no ACL protection (no password
+  configured, no login cached). Flagged in the daemon log and in `mch issues` so you know which
+  nodes anyone on the mesh can freely command.
+- **`mch exec`** — run one-off MeshCore CLI commands against any managed node without adding them
+  to config. Destructive commands (reboot, clkreboot) require confirmation; irreversible commands
+  (erase, set prv.key) are blocked.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
 
 ## Requirements
@@ -321,7 +327,7 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 mch status                    Fleet overview: state, label, group, firmware, neighbours, last seen
 mch status <label|prefix>     Same, filtered to matching nodes
 mch node <label|prefix>       Detail for one node: facts, settings, recent activity
-mch issues                    All current issues: drifted settings, problem states, config ghosts
+mch issues                    All current issues: drifted settings, problem states, ghosts, open nodes
 mch hint                      Suggested txdelay for all nodes based on neighbour count
 mch hint <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes
@@ -329,6 +335,7 @@ mch logs <prefix>             Activity for one node
 mch contacts                  Repeater nodes visible to the gateway not yet in config
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node immediately; CLI waits for the result
+mch exec <node> <command>     Run a raw MeshCore CLI command on a node (e.g. ver, stats-radio)
 mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch stop                      Stop mchd via systemd
 mch restart                   Restart mchd via systemd

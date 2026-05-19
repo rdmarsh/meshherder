@@ -229,3 +229,19 @@ async def test_login_failure():
 
     ok = await gw.login(contact, "wrongpassword")
     assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# advert
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_advert_zerohop_calls_send_advert_not_flood():
+    """advert(zerohop=True) calls mc.commands.send_advert(flood=False)."""
+    fake_mc = MagicMock()
+    gw = make_connected_gateway(fake_mc)
+    fake_mc.commands.send_advert = AsyncMock(return_value=make_event(EventType.OK, {}))
+
+    await gw.advert(zerohop=True)
+
+    fake_mc.commands.send_advert.assert_awaited_once_with(flood=False)

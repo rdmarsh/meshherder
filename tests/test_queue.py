@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -966,3 +967,43 @@ async def test_seed_from_config_non_rep_contact_ignored(db):
 
     assert len(await db.get_all_nodes()) == 0
     gw.set_contact_favourite.assert_not_awaited()
+
+
+# ------------------------------------------------------------------
+# open-node warning
+# ------------------------------------------------------------------
+
+async def test_open_node_warning_logged_when_no_acl(db, caplog):
+    """A WARNING is logged when a node syncs successfully with no ACL protection."""
+    node_cfg = _node(pubkey="aabbcc", label="Open Node")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {}  # no password for this node
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    with caplog.at_level(logging.WARNING, logger="mch.queue"):
+        await wq.run_cycle()
+
+    assert "no ACL" in caplog.text
+
+
+async def test_no_open_node_warning_when_passwd_configured(db, caplog):
+    """No open-node warning when a password is configured in secrets."""
+    node_cfg = _node(pubkey="aabbcc", label="Secured Node")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    cfg.secrets = {"aabbcc": "hunter2"}
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    with caplog.at_level(logging.WARNING, logger="mch.queue"):
+        await wq.run_cycle()
+
+    assert "no ACL" not in caplog.text

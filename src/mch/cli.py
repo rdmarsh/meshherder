@@ -164,7 +164,7 @@ def node(ctx: click.Context, pubkey: str) -> None:
     click.echo(f"last seen:   {_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ts(data.get('last_connected'))}")
     click.echo(f"pubkey:      {data['pubkey']}")
-    click.echo(f"acl:         {'yes' if data.get('auth_cached') else 'no'}")
+    click.echo(f"authed:      {'yes' if data.get('auth_cached') else 'no'}")
     click.echo(f"passwd:      {'yes' if data.get('passwd_known') else 'no'}")
 
     facts = data.get("facts", {})
@@ -240,8 +240,9 @@ def issues(ctx: click.Context, query: str | None) -> None:
     drifted = _filter_drift(data.get("drifted", []), query)
     bad_state = _filter_nodes(data.get("bad_state", []), query)
     ghosts = _filter_ghosts(data.get("ghosts", []), query)
+    open_nodes = _filter_nodes(data.get("open_nodes", []), query)
 
-    if not drifted and not bad_state and not ghosts:
+    if not drifted and not bad_state and not ghosts and not open_nodes:
         click.echo("no issues detected")
         return
 
@@ -280,6 +281,18 @@ def issues(ctx: click.Context, query: str | None) -> None:
         click.echo(fmt.format("------", _wpad("-----", label_w)))
         for g in ghosts:
             click.echo(fmt.format(g["pubkey_prefix"][:8], g.get("label") or "-"))
+        click.echo("")
+
+    if open_nodes:
+        click.echo("open nodes (no ACL - anyone on the mesh can send commands):")
+        name_w = max(_wlen("NODE"), max((_wlen(n.get("label") or n["name"]) for n in open_nodes), default=0))
+        fmt = "  {}  {}"
+        click.echo(fmt.format(_wpad("NODE", name_w), "PUBKEY"))
+        click.echo(fmt.format(_wpad("----", name_w), "------"))
+        for n in open_nodes:
+            label = n.get("label") or n["name"]
+            pubkey = n.get("pubkey", "")[:16] + "…" if n.get("pubkey") else "-"
+            click.echo(fmt.format(_wpad(label, name_w), pubkey))
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +520,56 @@ def _hint_detail(n: dict) -> None:
         click.echo(f"      {key}:")
         click.echo(f'        desired: "{val}"')
         click.echo(f"        policy: enforce")
+
+
+# ---------------------------------------------------------------------------
+# exec
+# ---------------------------------------------------------------------------
+
+_EXEC_BLOCKED = frozenset({"erase", "start ota", "set prv.key", "password", "setperm", "set guest.password"})
+_EXEC_CONFIRM = frozenset({"reboot", "clkreboot", "clear stats", "log erase"})
+
+
+@cli.command(name="exec")
+@click.argument("node")
+@click.argument("command", nargs=-1, required=True)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt for destructive commands")
+@click.pass_context
+def exec_cmd(ctx: click.Context, node: str, command: tuple, yes: bool) -> None:
+    """Run a raw MeshCore CLI command on a node.
+
+    NODE: pubkey prefix, label substring, or name substring.
+    COMMAND: MeshCore CLI command (e.g. ver, stats-radio, reboot).
+
+    Destructive commands (reboot, clkreboot, etc.) require confirmation unless --yes is passed.
+    Irreversible commands (erase, set prv.key, etc.) are blocked entirely.
+    """
+    cmd_str = " ".join(command)
+    cmd_root = cmd_str.split()[0].lower() if cmd_str else ""
+
+    if cmd_root in _EXEC_BLOCKED:
+        click.echo(f"error: '{cmd_root}' is blocked in mch exec - use config operations instead", err=True)
+        raise SystemExit(1)
+
+    # resolve node to get pubkey for confirmation display
+    node_resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": node})
+    if not node_resp.get("ok"):
+        click.echo(f"error: {node_resp.get('error')}", err=True)
+        raise SystemExit(1)
+    data = node_resp["data"]
+    pubkey = data["pubkey"]
+    label = data.get("label") or data["name"]
+
+    if cmd_root in _EXEC_CONFIRM and not yes:
+        click.echo(f"  {cmd_str}  {label}  ({pubkey[:8]})")
+        typed = click.prompt("type pubkey prefix to confirm").strip()
+        if not pubkey.startswith(typed):
+            click.echo("cancelled", err=True)
+            raise SystemExit(1)
+
+    resp = _rpc(ctx.obj["socket"], {"cmd": "exec", "pubkey": pubkey, "command": cmd_str}, timeout=60)
+    data = _check(resp)
+    click.echo(data)
 
 
 # ---------------------------------------------------------------------------

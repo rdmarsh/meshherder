@@ -37,12 +37,17 @@ gateway:
   # community channels to find out what your local mesh is using.
   radio:
     freq: 915.075   # MHz - must match the mesh
-    bw: 125         # kHz bandwidth (common values: 62.5, 125, 250, 500, and others)
+    bw: 125         # kHz bandwidth (common values: 62.5, 125, 250)
                     # must match the mesh
     sf: 9           # spreading factor (7-12); lower is faster, higher reaches further
                     # must match the mesh
     cr: 5           # coding rate (5=4/5, 6=4/6, 7=4/7, 8=4/8); higher adds more
                     # redundancy at the cost of airtime; can differ from other nodes
+
+  # Send an advertisement on daemon restart so neighbors re-discover the gateway.
+  # "never" (default): no advert sent.
+  # "zerohop": send advert.zerohop on startup - reaches only immediate neighbors.
+  # advert_on_start: never
 
 scheduler:
   # Each node is synced roughly once per this many days, spread randomly across
