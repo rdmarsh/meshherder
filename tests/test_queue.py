@@ -717,7 +717,7 @@ async def test_node_on_different_freq_hops_radio(db):
     """A node with a radio config causes the gateway to hop before processing and restore after."""
     from mch.config import RadioConfig
     node_cfg = _node(pubkey="aabbcc", label="TestNode",
-                     radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5))
+                     via=RadioConfig(freq=915.075, bw=125, sf=9, cr=5))
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
 
@@ -752,7 +752,7 @@ async def test_radio_restored_on_relogin_failure(db):
     from mch.config import RadioConfig
     node_cfg = _node(
         pubkey="aabbcc", label="TestNode",
-        radio=RadioConfig(freq=915.075, bw=125, sf=9, cr=5),
+        via=RadioConfig(freq=915.075, bw=125, sf=9, cr=5),
         settings={"name": SettingConfig(desired="X", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])

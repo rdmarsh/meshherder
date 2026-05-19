@@ -58,7 +58,7 @@ class NodeConfig:
     default_policy: SettingPolicy | None = None
     settings: dict[str, SettingConfig] = field(default_factory=dict)
     operations: list[OperationConfig] = field(default_factory=list)
-    radio: RadioConfig | None = None  # if set, gateway hops to this freq to manage the node
+    via: RadioConfig | None = None  # if set, gateway hops to this freq to manage the node
 
 
 @dataclass
@@ -101,8 +101,7 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     raw = yaml.safe_load(config_path.read_text())
 
     gw_raw = raw.get("gateway", {})
-    gw_radio_raw = gw_raw.pop("radio", None)
-    gw_radio = RadioConfig(**gw_radio_raw) if gw_radio_raw else None
+    gw_radio = _parse_radio(gw_raw.pop("radio", None))
     sched_raw = raw.get("scheduler", {})
 
     msg_raw = raw.get("messenger", {})
@@ -143,6 +142,16 @@ def _parse_setting(raw: dict) -> SettingConfig:
     )
 
 
+def _parse_radio(raw) -> RadioConfig | None:
+    """Parse a via/radio value: either a mapping or a "freq,bw,sf,cr" string."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        freq, bw, sf, cr = raw.split(",")
+        return RadioConfig(freq=float(freq), bw=float(bw), sf=int(sf), cr=int(cr))
+    return RadioConfig(**raw)
+
+
 def _parse_node(raw: dict) -> NodeConfig:
     policy = raw.get("default_policy")
     settings = {
@@ -153,8 +162,7 @@ def _parse_node(raw: dict) -> NodeConfig:
         OperationConfig(**op) if isinstance(op, dict) else OperationConfig(command=op)
         for op in raw.get("operations", [])
     ]
-    radio_raw = raw.get("radio")
-    radio = RadioConfig(**radio_raw) if radio_raw else None
+    via = _parse_radio(raw.get("via"))
 
     return NodeConfig(
         pubkey_prefix=raw["pubkey_prefix"],
@@ -163,7 +171,7 @@ def _parse_node(raw: dict) -> NodeConfig:
         default_policy=SettingPolicy(policy) if policy else None,
         settings=settings,
         operations=operations,
-        radio=radio,
+        via=via,
     )
 
 
