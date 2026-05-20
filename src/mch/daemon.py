@@ -355,14 +355,11 @@ class Daemon:
 
         self._db = Database(Path(config.db_path))
         await self._db.open()
-        await self._db.write_log(None, "INFO", "mchd starting")
-
         self._gateway = Gateway(config.gateway)
         try:
             await self._gateway.connect()
         except GatewayError as exc:
             log.error("gateway connection failed: %s", exc)
-            await self._db.write_log(None, "ERROR", f"gateway connection failed: {exc}")
             await self._db.close()
             raise SystemExit(1)
 
@@ -420,7 +417,6 @@ class Daemon:
         if self._gateway:
             await self._gateway.disconnect()
         if self._db:
-            await self._db.write_log(None, "INFO", "mchd stopped")
             await self._db.close()
 
 
