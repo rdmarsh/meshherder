@@ -604,7 +604,7 @@ def _run_commission_wizard(socket: str) -> None:
     # Search first — no point asking questions if there's no node to commission.
     gateway_radio = None
     while True:
-        click.echo("Searching for unmanaged nodes on factory frequency (869.618 MHz)...")
+        click.echo("Searching for unmanaged nodes on default factory frequency (869.618 MHz)...")
         resp = _rpc(socket, {"cmd": "commission", "mode": "scan"}, timeout=30)
         if not resp.get("ok"):
             click.echo(f"\nSearch failed: {resp.get('error', 'unknown error')}")
@@ -659,74 +659,154 @@ def _run_commission_wizard(socket: str) -> None:
         click.echo("  please enter n, r, or q")
 
 
+def _prompt_radio_freq(default: str = "") -> str:
+    """Prompt for a LoRa frequency in MHz; re-prompt until valid."""
+    while True:
+        val = click.prompt("Frequency (MHz)", default=default).strip()
+        try:
+            if 400.0 <= float(val) <= 928.0:
+                return val
+        except ValueError:
+            pass
+        click.echo("  enter a frequency between 400 and 928 MHz, e.g. 915.075")
+
+
+def _prompt_radio_bw(default: str = "") -> str:
+    """Prompt for LoRa bandwidth (kHz); re-prompt until valid."""
+    while True:
+        val = click.prompt("Bandwidth (kHz)", default=default).strip()
+        try:
+            if float(val) in (62.5, 125.0, 250.0, 500.0):
+                return val
+        except ValueError:
+            pass
+        click.echo("  bandwidth must be one of: 62.5, 125, 250, 500")
+
+
+def _prompt_radio_sf(default: str = "") -> str:
+    """Prompt for spreading factor (7-12); re-prompt until valid."""
+    while True:
+        val = click.prompt("Spreading factor (7-12)", default=default).strip()
+        try:
+            if 7 <= int(val) <= 12:
+                return val
+        except ValueError:
+            pass
+        click.echo("  spreading factor must be an integer 7-12")
+
+
+def _prompt_radio_cr(default: str = "") -> str:
+    """Prompt for coding rate (5-8); re-prompt until valid."""
+    while True:
+        val = click.prompt("Coding rate (5-8)", default=default).strip()
+        try:
+            if 5 <= int(val) <= 8:
+                return val
+        except ValueError:
+            pass
+        click.echo("  coding rate must be an integer 5-8")
+
+
 def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> None:
     """Collect params for a new node, confirm, send RPC with retry, display result."""
     click.echo("")
     click.echo("New node commissioning")
     click.echo("")
 
-    label = click.prompt("Site label").strip()
-    group = click.prompt("Group (optional, press Enter to skip)", default="").strip() or None
-    name = click.prompt("Mesh name", default=label).strip()
+    # Parse gateway_radio "freq,bw,sf,cr" into per-field defaults.
+    gw_parts = (gateway_radio or "").split(",")
+    def _gw(i: int) -> str:
+        return gw_parts[i].strip() if len(gw_parts) > i else ""
 
-    if gateway_radio:
-        target_freq = click.prompt("Target frequency (freq,bw,sf,cr)", default=gateway_radio).strip()
-    else:
-        target_freq = click.prompt("Target frequency (freq,bw,sf,cr)").strip()
+    # Saved values — used as defaults when the outer edit loop iterates.
+    label = ""
+    group = ""
+    name = ""
+    freq = _gw(0)
+    bw = _gw(1)
+    sf = _gw(2)
+    cr = _gw(3)
+    admin_password = "password"
+    guest_password = ""
 
-    # Ask twice for admin password; skip confirmation when empty.
-    while True:
-        admin_password = click.prompt(
-            "Admin password (Enter to skip)", default="", hide_input=True
-        ).strip()
-        if not admin_password:
-            break
-        confirm = click.prompt("Confirm admin password", hide_input=True)
-        if admin_password == confirm:
-            break
-        click.echo("Passwords do not match.")
+    while True:  # outer: re-enter values loop
+        if label:
+            label = click.prompt("Site label", default=label).strip()
+        else:
+            label = click.prompt("Site label").strip()
+        group = click.prompt("Group (optional, press Enter to skip)", default=group or "").strip() or None
+        name_default = name or label
+        # Re-prompt name until within 31 bytes.
+        while True:
+            name = click.prompt("Mesh name", default=name_default).strip()
+            encoded = name.encode("utf-8")
+            if len(encoded) <= 31:
+                break
+            truncated = encoded[:31].decode("utf-8", errors="ignore")
+            click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
+            name_default = truncated
 
-    guest_password = click.prompt(
-        "Guest password (Enter to skip)", default="", hide_input=True
-    ).strip() or None
+        freq = _prompt_radio_freq(freq)
+        bw = _prompt_radio_bw(bw)
+        sf = _prompt_radio_sf(sf)
+        cr = _prompt_radio_cr(cr)
+        target_freq = f"{freq},{bw},{sf},{cr}"
 
-    click.echo("")
-    click.echo("  label:    " + label)
-    click.echo("  group:    " + (group or "-"))
-    click.echo("  name:     " + name)
-    click.echo("  freq:     " + target_freq)
-    click.echo("  password: " + ("(set)" if admin_password else "(none)"))
-    click.echo("")
+        admin_password = click.prompt("Admin password", default=admin_password).strip()
+        guest_password = (
+            click.prompt("Guest password (Enter to skip)", default=guest_password or "").strip() or ""
+        )
 
-    if not click.confirm("Proceed with commissioning?", default=False):
-        click.echo("cancelled")
-        return
+        click.echo("")
+        click.echo("  label:    " + label)
+        click.echo("  group:    " + (group or "-"))
+        click.echo("  name:     " + name)
+        click.echo("  freq:     " + target_freq)
+        click.echo("  password: " + admin_password)
+        if guest_password:
+            click.echo("  guest pw: " + guest_password)
+        click.echo("")
 
-    click.echo("")
-
-    while True:
-        click.echo("Commissioning node...")
-        resp = _rpc(socket, {
-            "cmd": "commission",
-            "mode": "new",
-            "label": label,
-            "group": group,
-            "name": name,
-            "target_freq": target_freq,
-            "admin_password": admin_password,
-            "guest_password": guest_password,
-        }, timeout=60)
-
-        if resp.get("ok"):
-            break
-
-        click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
-        click.echo("Check the node is powered on, in range, and with an antenna.")
-        choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
-        if choice == "q":
+        action = click.prompt("[y]es  [e]dit  [q]uit", default="y").strip().lower()
+        if action == "q":
             click.echo("cancelled")
             return
-        click.echo("Retrying...")
+        if action == "e":
+            continue
+
+        # Inner: commission retry loop.
+        commission_ok = False
+        while True:
+            click.echo("Commissioning node...")
+            resp = _rpc(socket, {
+                "cmd": "commission",
+                "mode": "new",
+                "label": label,
+                "group": group,
+                "name": name,
+                "target_freq": target_freq,
+                "admin_password": admin_password,
+                "guest_password": guest_password or None,
+            }, timeout=60)
+
+            if resp.get("ok"):
+                commission_ok = True
+                break
+
+            click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
+            click.echo("Check the node is powered on, in range, and with an antenna.")
+            choice = click.prompt(
+                "[Enter] retry  [e]dit  [q]uit", default=""
+            ).strip().lower()
+            if choice == "q":
+                click.echo("cancelled")
+                return
+            if choice == "e":
+                break  # back to outer loop (re-enter values)
+            click.echo("Retrying...")
+
+        if commission_ok:
+            break  # exit outer loop
 
     d = resp["data"]
     factory_prefix = d.get("factory_prefix", "?")
@@ -792,7 +872,7 @@ def _commission_replace_wizard(socket: str) -> None:
 
     click.echo("")
 
-    while True:
+    while True:  # commission retry loop
         click.echo("Commissioning node...")
         resp = _rpc(socket, {
             "cmd": "commission",
@@ -805,7 +885,7 @@ def _commission_replace_wizard(socket: str) -> None:
 
         click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
         click.echo("Check the node is powered on, in range, and with an antenna.")
-        choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
+        choice = click.prompt("[Enter] retry  [q]uit", default="").strip().lower()
         if choice == "q":
             click.echo("cancelled")
             return

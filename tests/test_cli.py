@@ -677,18 +677,21 @@ def test_commission_new_happy_path():
             "Test Site",  # label
             "",           # group (skip)
             "",           # name (default to label)
-            "",           # target freq (accept gateway default)
-            "",           # admin password (empty — no confirm needed)
+            "",           # freq (accept gateway default 915.075)
+            "",           # bw (accept 125)
+            "",           # sf (accept 9)
+            "",           # cr (accept 5)
+            "",           # admin password (accept default 'password')
             "",           # guest password (skip)
             "y",          # confirm
         ))
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     assert "deadbeef" in result.output  # prv_key shown
     assert "a695e2be" in result.output  # factory prefix shown
 
 
 def test_commission_new_cancel_aborts():
-    """Answering 'n' at the confirm prompt aborts without calling the commission RPC."""
+    """Answering 'q' at the confirm prompt aborts without calling the commission RPC."""
     runner = CliRunner()
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
@@ -696,18 +699,21 @@ def test_commission_new_cancel_aborts():
             "Test Site",  # label
             "",           # group
             "",           # name
-            "",           # freq (accept default)
-            "",           # admin password (empty)
+            "",           # freq
+            "",           # bw
+            "",           # sf
+            "",           # cr
+            "",           # admin password (default 'password')
             "",           # guest password
-            "n",          # cancel at confirm
+            "q",          # cancel at confirm
         ))
     assert mock_rpc.call_count == 1  # only the scan call, no commission call
     assert result.exit_code == 0
     assert "cancelled" in result.output.lower()
 
 
-def test_commission_new_password_mismatch_reprompts():
-    """Mismatched admin password re-prompts until they match."""
+def test_commission_new_admin_password_defaults_to_password():
+    """Admin password defaults to 'password' when user presses Enter."""
     runner = CliRunner()
     success_resp = {"ok": True, "data": {
         "factory_prefix": "a695e2be",
@@ -717,26 +723,18 @@ def test_commission_new_password_mismatch_reprompts():
         "group": None,
         "target_freq": "915.075,125,9,5",
     }}
-    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]):
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
-            "n",          # mode
-            "Test Site",  # label
-            "",           # group
-            "",           # name
-            "",           # freq
-            "pass1",      # admin password
-            "wrong",      # confirm (mismatch)
-            "pass1",      # retry admin password
-            "pass1",      # confirm (match)
-            "",           # guest password
-            "y",          # confirm
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
+        runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "n", "Test Site", "", "", "", "", "", "", "", "", "y",
         ))
-    assert result.exit_code == 0
-    assert "do not match" in result.output.lower()
+    # Second call is the commission RPC — admin_password should be 'password'
+    commission_call = mock_rpc.call_args_list[1]
+    req = commission_call[0][1]
+    assert req["admin_password"] == "password"
 
 
 def test_commission_new_daemon_error_shows_retry_prompt():
-    """When commission RPC fails, error is shown and retry/cancel prompt is offered."""
+    """When commission RPC fails, error is shown and [e]dit/[q]uit options are offered."""
     runner = CliRunner()
     error_resp = {"ok": False, "error": "commission failed at 'password x': ERR_CODE_NOT_FOUND"}
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, error_resp]):
@@ -746,13 +744,55 @@ def test_commission_new_daemon_error_shows_retry_prompt():
             "",           # group
             "",           # name
             "",           # freq
-            "",           # admin password (empty)
+            "",           # bw
+            "",           # sf
+            "",           # cr
+            "",           # admin password (default)
             "",           # guest password
             "y",          # confirm
             "q",          # quit at retry prompt
         ))
     assert "ERR_CODE_NOT_FOUND" in result.output
     assert result.exit_code == 0  # graceful exit via retry prompt
+
+
+def test_commission_new_edit_at_summary_re_enters_values():
+    """Entering 'e' at the summary confirm re-enters the wizard keeping prior values as defaults."""
+    runner = CliRunner()
+    success_resp = {"ok": True, "data": {
+        "factory_prefix": "a695e2be",
+        "prv_key": "deadbeef" * 8,
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": None,
+        "target_freq": "915.075,125,9,5",
+    }}
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "n",          # mode: new
+            "Test Site",  # label (first pass)
+            "",           # group
+            "",           # name
+            "",           # freq
+            "",           # bw
+            "",           # sf
+            "",           # cr
+            "",           # admin password
+            "",           # guest password
+            "e",          # edit — re-enter values
+            "",           # label (second pass — accept default "Test Site")
+            "",           # group
+            "",           # name
+            "",           # freq
+            "",           # bw
+            "",           # sf
+            "",           # cr
+            "",           # admin password
+            "",           # guest password
+            "y",          # confirm (second pass)
+        ))
+    assert result.exit_code == 0, result.output
+    assert mock_rpc.call_count == 2  # scan + commission (only one commission attempt)
 
 
 def test_commission_quit_at_mode_prompt():
