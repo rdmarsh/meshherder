@@ -191,7 +191,7 @@ def _parse_node(raw: dict) -> NodeConfig:
     via = _parse_radio(raw.get("via"))
 
     return NodeConfig(
-        pubkey_prefix=raw["pubkey_prefix"],
+        pubkey_prefix=str(raw["pubkey_prefix"]),
         group=raw.get("group"),
         label=raw.get("label", ""),
         default_policy=SettingPolicy(policy) if policy else None,
