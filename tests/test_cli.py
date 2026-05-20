@@ -673,9 +673,8 @@ def test_commission_new_happy_path():
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
             "n",          # mode: new (after scan)
-            "Test Site",  # label
+            "Test Site",  # name
             "",           # group (skip)
-            "",           # name (default to label)
             "",           # admin password (accept default 'password')
             "",           # guest password (skip)
             "",           # radio (accept gateway defaults)
@@ -691,9 +690,8 @@ def test_commission_new_cancel_aborts():
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
             "n",          # mode: new
-            "Test Site",  # label
+            "Test Site",  # name
             "",           # group
-            "",           # name
             "",           # admin password (default 'password')
             "",           # guest password
             "",           # radio (accept gateway defaults)
@@ -716,8 +714,8 @@ def test_commission_new_admin_password_defaults_to_password():
     }}
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
-            "n", "Test Site", "", "", "", "", "", "y",
-            # label, group, name, admin_pw, guest_pw, radio, confirm
+            "n", "Test Site", "", "", "", "", "y",
+            # name, group, admin_pw, guest_pw, radio, confirm
         ))
     # Second call is the commission RPC — admin_password should be 'password'
     commission_call = mock_rpc.call_args_list[1]
@@ -732,9 +730,8 @@ def test_commission_new_daemon_error_shows_retry_prompt():
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, error_resp]):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
             "n",          # mode
-            "Test Site",  # label
+            "Test Site",  # name
             "",           # group
-            "",           # name
             "",           # admin password (default)
             "",           # guest password
             "",           # radio (accept gateway defaults)
@@ -758,16 +755,14 @@ def test_commission_new_edit_at_summary_re_enters_values():
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
             "n",          # mode: new
-            "Test Site",  # label (first pass)
+            "Test Site",  # name (first pass)
             "",           # group
-            "",           # name
             "",           # admin password
             "",           # guest password
             "",           # radio (accept gateway defaults)
             "e",          # edit — re-enter values
-            "",           # label (second pass — accept default "Test Site")
+            "",           # name (second pass — accept default "Test Site")
             "",           # group
-            "",           # name
             "",           # admin password
             "",           # guest password
             "",           # radio (accept gateway defaults)
