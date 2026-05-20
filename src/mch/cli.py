@@ -716,8 +716,9 @@ def _prompt_radio_all(freq: str, bw: str, sf: str, cr: str, gateway_radio: str |
         current = f"{freq},{bw},{sf},{cr}"
         gw_display = gateway_radio
         accept = click.prompt(
-            f"Radio settings (Enter to accept {gw_display}, or 'c' to change)",
+            f"Radio settings ('c' to change) [{gw_display}]",
             default="",
+            prompt_suffix=": ",
         ).strip().lower()
         if accept != "c":
             # Accept gateway defaults — return them directly.
@@ -726,7 +727,7 @@ def _prompt_radio_all(freq: str, bw: str, sf: str, cr: str, gateway_radio: str |
                 return parts[i].strip() if len(parts) > i else ""
             return _gw(0), _gw(1), _gw(2), _gw(3)
 
-    click.echo("  Enter each radio parameter (press Enter to accept the default):")
+    click.echo("")
     freq = _prompt_radio_freq(freq)
     bw = _prompt_radio_bw(bw)
     sf = _prompt_radio_sf(sf)
