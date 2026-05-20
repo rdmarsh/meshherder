@@ -676,11 +676,11 @@ def _prompt_radio_bw(default: str = "") -> str:
     while True:
         val = click.prompt("Bandwidth (kHz)", default=default).strip()
         try:
-            if float(val) in (62.5, 125.0, 250.0, 500.0):
+            if float(val) in (7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0):
                 return val
         except ValueError:
             pass
-        click.echo("  bandwidth must be one of: 62.5, 125, 250, 500")
+        click.echo("  bandwidth must be one of: 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500")
 
 
 def _prompt_radio_sf(default: str = "") -> str:
@@ -738,7 +738,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
         name_default = name or label
         # Re-prompt name until within 31 bytes.
         while True:
-            name = click.prompt("Mesh name", default=name_default).strip()
+            name = click.prompt("Node name", default=name_default).strip()
             encoded = name.encode("utf-8")
             if len(encoded) <= 31:
                 break

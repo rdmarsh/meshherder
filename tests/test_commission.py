@@ -35,7 +35,6 @@ def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
     gw.add_commission_contact = AsyncMock(
         side_effect=lambda ni: {"public_key": ni["pubkey"], "adv_name": ""}
     )
-    gw.login = AsyncMock(return_value=True)
     gw.info = {"radio_freq": 915.075, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5}
     return gw
 
@@ -864,99 +863,6 @@ async def test_commission_new_restores_home_radio_after_commissioning():
     }, wq, db, cfg)
 
     gw.restore_radio.assert_called_once_with(915.075, 125.0, 9, 5)
-
-
-# ---------------------------------------------------------------------------
-# handle_commission — factory login before commands
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_commission_new_logins_with_empty_password_first():
-    """'new' mode tries login with empty password first (factory-fresh, no password set)."""
-    from mch.commission import handle_commission
-
-    pubkey = "a1" * 32
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
-    wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config()
-
-    await handle_commission({
-        "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
-    }, wq, db, cfg)
-
-    first_call = gw.login.call_args_list[0]
-    _, first_pwd = first_call[0]
-    assert first_pwd == ""
-
-
-@pytest.mark.asyncio
-async def test_commission_new_tries_factory_password_if_empty_fails():
-    """'new' mode tries 'password' if empty-password login fails."""
-    from mch.commission import handle_commission
-
-    pubkey = "a1" * 32
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
-    gw.login = AsyncMock(side_effect=[False, True])  # "" fails, "password" succeeds
-    wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config()
-
-    resp = await handle_commission({
-        "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
-    }, wq, db, cfg)
-
-    assert resp["ok"] is True
-    assert gw.login.call_count == 2
-    _, second_pwd = gw.login.call_args_list[1][0]
-    assert second_pwd == "password"
-
-
-@pytest.mark.asyncio
-async def test_commission_new_proceeds_if_both_logins_fail():
-    """'new' mode proceeds with commands even if both login attempts fail."""
-    from mch.commission import handle_commission
-
-    pubkey = "a1" * 32
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
-    gw.login = AsyncMock(return_value=False)
-    wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config()
-
-    resp = await handle_commission({
-        "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
-    }, wq, db, cfg)
-
-    # Commission proceeds — send_command is still called
-    assert gw.send_command.called
-
-
-@pytest.mark.asyncio
-async def test_commission_replace_logins_with_empty_password_first():
-    """'replace' mode also tries empty password first."""
-    from mch.commission import handle_commission
-
-    pubkey = "cc" * 32
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
-    wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config(
-        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
-        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
-    )
-
-    await handle_commission({
-        "cmd": "commission", "mode": "replace",
-        "pubkey_prefix": "aabbccdd",
-    }, wq, db, cfg)
-
-    first_call = gw.login.call_args_list[0]
-    _, first_pwd = first_call[0]
-    assert first_pwd == ""
 
 
 @pytest.mark.asyncio
