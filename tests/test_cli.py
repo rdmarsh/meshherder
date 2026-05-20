@@ -676,12 +676,9 @@ def test_commission_new_happy_path():
             "Test Site",  # label
             "",           # group (skip)
             "",           # name (default to label)
-            "",           # freq (accept gateway default 915.075)
-            "",           # bw (accept 125)
-            "",           # sf (accept 9)
-            "",           # cr (accept 5)
             "",           # admin password (accept default 'password')
             "",           # guest password (skip)
+            "",           # radio (accept gateway defaults)
             "y",          # confirm
         ))
     assert result.exit_code == 0, result.output
@@ -697,12 +694,9 @@ def test_commission_new_cancel_aborts():
             "Test Site",  # label
             "",           # group
             "",           # name
-            "",           # freq
-            "",           # bw
-            "",           # sf
-            "",           # cr
             "",           # admin password (default 'password')
             "",           # guest password
+            "",           # radio (accept gateway defaults)
             "q",          # cancel at confirm
         ))
     assert mock_rpc.call_count == 1  # only the scan call, no commission call
@@ -722,7 +716,8 @@ def test_commission_new_admin_password_defaults_to_password():
     }}
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
-            "n", "Test Site", "", "", "", "", "", "", "", "", "y",
+            "n", "Test Site", "", "", "", "", "", "y",
+            # label, group, name, admin_pw, guest_pw, radio, confirm
         ))
     # Second call is the commission RPC — admin_password should be 'password'
     commission_call = mock_rpc.call_args_list[1]
@@ -740,12 +735,9 @@ def test_commission_new_daemon_error_shows_retry_prompt():
             "Test Site",  # label
             "",           # group
             "",           # name
-            "",           # freq
-            "",           # bw
-            "",           # sf
-            "",           # cr
             "",           # admin password (default)
             "",           # guest password
+            "",           # radio (accept gateway defaults)
             "y",          # confirm
             "q",          # quit at retry prompt
         ))
@@ -769,22 +761,16 @@ def test_commission_new_edit_at_summary_re_enters_values():
             "Test Site",  # label (first pass)
             "",           # group
             "",           # name
-            "",           # freq
-            "",           # bw
-            "",           # sf
-            "",           # cr
             "",           # admin password
             "",           # guest password
+            "",           # radio (accept gateway defaults)
             "e",          # edit — re-enter values
             "",           # label (second pass — accept default "Test Site")
             "",           # group
             "",           # name
-            "",           # freq
-            "",           # bw
-            "",           # sf
-            "",           # cr
             "",           # admin password
             "",           # guest password
+            "",           # radio (accept gateway defaults)
             "y",          # confirm (second pass)
         ))
     assert result.exit_code == 0, result.output

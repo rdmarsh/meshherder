@@ -707,6 +707,33 @@ def _prompt_radio_cr(default: str = "") -> str:
         click.echo("  coding rate must be an integer 5-8")
 
 
+def _prompt_radio_all(freq: str, bw: str, sf: str, cr: str, gateway_radio: str | None) -> tuple[str, str, str, str]:
+    """
+    Prompt for radio settings. If gateway_radio is set and current values match it,
+    offer a single Enter-to-accept shortcut before falling through to individual prompts.
+    """
+    if gateway_radio:
+        current = f"{freq},{bw},{sf},{cr}"
+        gw_display = gateway_radio
+        accept = click.prompt(
+            f"Radio settings (Enter to accept {gw_display}, or 'c' to change)",
+            default="",
+        ).strip().lower()
+        if accept != "c":
+            # Accept gateway defaults — return them directly.
+            parts = gateway_radio.split(",")
+            def _gw(i: int) -> str:
+                return parts[i].strip() if len(parts) > i else ""
+            return _gw(0), _gw(1), _gw(2), _gw(3)
+
+    click.echo("  Enter each radio parameter (press Enter to accept the default):")
+    freq = _prompt_radio_freq(freq)
+    bw = _prompt_radio_bw(bw)
+    sf = _prompt_radio_sf(sf)
+    cr = _prompt_radio_cr(cr)
+    return freq, bw, sf, cr
+
+
 def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> None:
     """Collect params for a new node, confirm, send RPC with retry, display result."""
     click.echo("")
@@ -722,19 +749,20 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
     label = ""
     group = ""
     name = ""
+    admin_password = "password"
+    guest_password = ""
     freq = _gw(0)
     bw = _gw(1)
     sf = _gw(2)
     cr = _gw(3)
-    admin_password = "password"
-    guest_password = ""
 
     while True:  # outer: re-enter values loop
+        # --- identity ---
         if label:
             label = click.prompt("Node label", default=label).strip()
         else:
             label = click.prompt("Node label").strip()
-        group = click.prompt("Group (optional, press Enter to skip)", default=group or "").strip() or None
+        group = click.prompt("Group (Enter to skip)", default=group or "").strip() or None
         name_default = name or label
         # Re-prompt name until within 31 bytes.
         while True:
@@ -746,28 +774,29 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
             click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
             name_default = truncated
 
-        freq = _prompt_radio_freq(freq)
-        bw = _prompt_radio_bw(bw)
-        sf = _prompt_radio_sf(sf)
-        cr = _prompt_radio_cr(cr)
-        target_freq = f"{freq},{bw},{sf},{cr}"
-
+        # --- security ---
+        click.echo("")
         admin_password = click.prompt("Admin password", default=admin_password).strip()
         guest_password = (
             click.prompt("Guest password (Enter to skip)", default=guest_password or "").strip() or ""
         )
 
+        # --- radio ---
+        click.echo("")
+        freq, bw, sf, cr = _prompt_radio_all(freq, bw, sf, cr, gateway_radio)
+        target_freq = f"{freq},{bw},{sf},{cr}"
+
         click.echo("")
         click.echo("  label:    " + label)
         click.echo("  group:    " + (group or "-"))
         click.echo("  name:     " + name)
-        click.echo("  freq:     " + target_freq)
         click.echo("  password: " + admin_password)
         if guest_password:
             click.echo("  guest pw: " + guest_password)
+        click.echo("  radio:    " + target_freq)
         click.echo("")
 
-        action = click.prompt("[y]es  [e]dit  [q]uit", default="y").strip().lower()
+        action = click.prompt("Proceed? [y]es  [e]dit  [q]uit", default="y").strip().lower()
         if action == "q":
             click.echo("cancelled")
             return
