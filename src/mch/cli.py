@@ -788,13 +788,14 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
             truncated = encoded[:31].decode("utf-8", errors="ignore")
             click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
             name_default = truncated
-        group = click.prompt("Group label", default=group or "", show_default=False).strip() or None
+        raw_group = click.prompt("Group label", default=group or "-").strip()
+        group = None if raw_group == "-" else raw_group
 
         # --- security ---
         click.echo("")
         admin_password = click.prompt("Admin password", default=admin_password).strip()
-        raw_guest = click.prompt("Guest password", default=guest_password or "skip").strip()
-        guest_password = "" if raw_guest.lower() == "skip" else raw_guest
+        raw_guest = click.prompt("Guest password", default=guest_password or "-").strip()
+        guest_password = "" if raw_guest == "-" else raw_guest
 
         # --- radio ---
         click.echo("")
@@ -806,8 +807,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
         click.echo("  name:     " + name)
         click.echo("  group:    " + (group or "-"))
         click.echo("  password: " + admin_password)
-        if guest_password:
-            click.echo("  guest pw: " + guest_password)
+        click.echo("  guest pw: " + (guest_password or "-"))
         click.echo("  radio:    " + target_freq)
         click.echo("")
 
