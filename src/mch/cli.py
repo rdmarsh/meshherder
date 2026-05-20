@@ -608,7 +608,7 @@ def _run_commission_wizard(socket: str) -> None:
         resp = _rpc(socket, {"cmd": "commission", "mode": "scan"}, timeout=30)
         if not resp.get("ok"):
             click.echo(f"\nSearch failed: {resp.get('error', 'unknown error')}")
-            choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
+            choice = click.prompt("Press Enter to retry or q to cancel", default="", show_default=False).strip().lower()
             if choice == "q":
                 return
             continue
@@ -618,7 +618,7 @@ def _run_commission_wizard(socket: str) -> None:
 
         if len(nodes) == 0:
             click.echo("\nNo unmanaged nodes found. Is it powered on and in range with an antenna?")
-            choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
+            choice = click.prompt("Press Enter to retry or q to cancel", default="", show_default=False).strip().lower()
             if choice == "q":
                 return
             continue
@@ -629,7 +629,7 @@ def _run_commission_wizard(socket: str) -> None:
                 click.echo(f"  {n['pubkey'][:12]}")
             click.echo("")
             choice = click.prompt(
-                "Power off all but one, then press Enter to retry or q to cancel", default=""
+                "Power off all but one, then press Enter to retry or q to cancel", default="", show_default=False
             ).strip().lower()
             if choice == "q":
                 return
@@ -913,7 +913,7 @@ def _commission_replace_wizard(socket: str) -> None:
 
         click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
         click.echo("Check the node is powered on, in range, and with an antenna.")
-        choice = click.prompt("[Enter] retry  [q]uit", default="").strip().lower()
+        choice = click.prompt("[Enter] retry  [q]uit", default="", show_default=False).strip().lower()
         if choice == "q":
             click.echo("cancelled")
             return
