@@ -149,6 +149,19 @@ async def handle_commission(
             # DISCOVER_RESPONSE does not add the node to the gateway's contact store.
             # add_commission_contact() inserts it with flood routing so send_command() succeeds.
             contact = await gateway.add_commission_contact(node_info)
+
+            # Factory nodes require authentication before accepting CLI commands.
+            # Factory default password is 'password'.
+            login_ok = await gateway.login(contact, "password")
+            if not login_ok:
+                return {
+                    "ok": False,
+                    "error": (
+                        "could not authenticate to factory node — "
+                        "ensure the node is factory-fresh (default password 'password') and retry"
+                    ),
+                }
+
             if mode == "new":
                 return await _commission_new(req, gateway, config, contact)
             else:
@@ -185,7 +198,8 @@ async def _commission_new(
     """
     import secrets as _secrets
 
-    admin_password = req.get("admin_password", "")
+    # Always set an admin password; fall back to 'password' if not provided.
+    admin_password = req.get("admin_password") or "password"
     guest_password = req.get("guest_password")
     name = req.get("name") or req.get("label") or ""
     label = req.get("label") or ""
@@ -203,8 +217,7 @@ async def _commission_new(
     # prv.key is set before reboot; it changes identity after restart.
     # reboot is fire-and-forget — the node may auto-reboot from prv.key.
     cmds: list[tuple[str, bool]] = []
-    if admin_password:
-        cmds.append((f"password {admin_password}", False))
+    cmds.append((f"password {admin_password}", False))
     if guest_password:
         cmds.append((f"set guest.password {guest_password}", False))
     if name:
