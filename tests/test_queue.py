@@ -13,6 +13,7 @@ from mch.config import (
     GatewayConfig,
     GroupConfig,
     NodeConfig,
+    NodeSecrets,
     OperationConfig,
     SchedulerConfig,
     SettingConfig,
@@ -250,7 +251,7 @@ async def test_permission_error_login_failure_marks_offline(db):
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": "badpass"}
+    cfg.secrets = {"aabbcc": NodeSecrets(password="badpass")}
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.set_contact_favourite = AsyncMock(return_value=True)
@@ -268,7 +269,7 @@ async def test_no_permission_error_means_no_login(db):
     node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": "hunter2"}
+    cfg.secrets = {"aabbcc": NodeSecrets(password="hunter2")}
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.set_contact_favourite = AsyncMock(return_value=True)
@@ -288,7 +289,7 @@ async def test_permission_error_triggers_relogin_and_retry(db):
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": "hunter2"}
+    cfg.secrets = {"aabbcc": NodeSecrets(password="hunter2")}
 
     # pre-seed with auth_cached=True so initial login is skipped
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode", auth_cached=True))
@@ -320,7 +321,7 @@ async def test_permission_error_relogin_fails_marks_node_offline(db):
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": "hunter2"}
+    cfg.secrets = {"aabbcc": NodeSecrets(password="hunter2")}
 
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode", auth_cached=True))
 
@@ -758,7 +759,7 @@ async def test_radio_restored_on_relogin_failure(db):
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": "pw"}
+    cfg.secrets = {"aabbcc": NodeSecrets(password="pw")}
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.set_contact_favourite = AsyncMock(return_value=True)
@@ -1015,7 +1016,7 @@ async def test_no_open_node_warning_when_passwd_configured(db, caplog):
     node_cfg = _node(pubkey="aabbcc", label="Secured Node")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": "hunter2"}
+    cfg.secrets = {"aabbcc": NodeSecrets(password="hunter2")}
 
     contact = _contact("aabbccdd1122")
     gw = _make_gateway(contacts=[contact])
@@ -1033,7 +1034,7 @@ async def test_no_open_node_warning_when_default_password_configured(db, caplog)
     node_cfg = _node(pubkey="aabbcc", label="Fleet Node")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"default": "fleetpassword"}  # no per-node entry
+    cfg.secrets = {"default": NodeSecrets(password="fleetpassword")}  # no per-node entry
 
     contact = _contact("aabbccdd1122")
     gw = _make_gateway(contacts=[contact])
@@ -1054,7 +1055,7 @@ async def test_relogin_uses_default_password_when_no_per_node_entry(db):
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"default": "fleetpassword"}  # no per-node entry
+    cfg.secrets = {"default": NodeSecrets(password="fleetpassword")}  # no per-node entry
 
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="FleetNode", auth_cached=True))
 
@@ -1083,7 +1084,7 @@ async def test_relogin_prefers_per_node_password_over_default(db):
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": "nodespecific", "default": "fleetpassword"}
+    cfg.secrets = {"aabbcc": NodeSecrets(password="nodespecific"), "default": NodeSecrets(password="fleetpassword")}
 
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="SpecialNode", auth_cached=True))
 

@@ -644,3 +644,123 @@ def test_exec_daemon_error_exits_nonzero():
     ]):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "exec", "site-a", "ver"])
     assert result.exit_code != 0
+
+
+# ------ commission ------
+
+_COMMISSION_NODES_RESP = {"ok": True, "data": {
+    "nodes": [
+        {"pubkey_prefix": "aabbccdd", "label": "Site A", "prv_key": True},
+        {"pubkey_prefix": "11223344", "label": "Site B", "prv_key": True},
+    ],
+}}
+
+
+def _commission_input(*lines: str) -> str:
+    return "\n".join(lines) + "\n"
+
+
+def test_commission_new_happy_path():
+    """Happy path: 'new' mode collects inputs, confirms, calls daemon, shows prv_key."""
+    runner = CliRunner()
+    success_resp = {"ok": True, "data": {
+        "factory_prefix": "a695e2be",
+        "prv_key": "deadbeef" * 8,
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": None,
+        "target_freq": "915.075,125,9,5",
+    }}
+    with patch("mch.cli._rpc", return_value=success_resp):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "n",               # mode: new
+            "Test Site",       # label
+            "",                # group (skip)
+            "",                # name (default to label)
+            "915.075,125,9,5", # target freq
+            "adminpass",       # admin password
+            "",                # guest password (skip)
+            "y",               # confirm
+        ))
+    assert result.exit_code == 0
+    assert "deadbeef" in result.output  # prv_key shown
+    assert "a695e2be" in result.output  # factory prefix shown
+
+
+def test_commission_new_cancel_aborts():
+    """Answering 'n' at the confirm prompt aborts without calling the daemon."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "n",               # mode: new
+            "Test Site",       # label
+            "",                # group
+            "",                # name
+            "915.075,125,9,5", # freq
+            "adminpass",       # password
+            "",                # guest password
+            "n",               # cancel
+        ))
+    mock_rpc.assert_not_called()
+    assert result.exit_code == 0
+    assert "cancelled" in result.output.lower()
+
+
+def test_commission_new_daemon_error_shown():
+    """When daemon returns an error, it is displayed."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc", return_value={"ok": False, "error": "no unmanaged nodes found"}):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "n",
+            "Test Site",
+            "",
+            "",
+            "915.075,125,9,5",
+            "adminpass",
+            "",
+            "y",
+        ))
+    assert result.exit_code != 0
+    assert "no unmanaged nodes found" in result.output
+
+
+def test_commission_quit_at_mode_prompt():
+    """Entering 'q' at the mode prompt exits cleanly."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
+    mock_rpc.assert_not_called()
+    assert result.exit_code == 0
+
+
+def test_commission_replace_no_replaceable_nodes():
+    """'replace' mode with no config nodes having prv_key exits with informative message."""
+    runner = CliRunner()
+    list_resp = {"ok": True, "data": {"replaceable": []}}
+    with patch("mch.cli._rpc", return_value=list_resp):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "r",
+        ))
+    assert result.exit_code != 0
+    assert "prv_key" in result.output or "no node" in result.output.lower()
+
+
+def test_commission_replace_happy_path():
+    """Happy path: 'replace' mode lists nodes, operator selects one, daemon confirms."""
+    runner = CliRunner()
+    list_resp = {"ok": True, "data": {"replaceable": [
+        {"pubkey_prefix": "aabbccdd", "label": "Site A"},
+        {"pubkey_prefix": "11223344", "label": "Site B"},
+    ]}}
+    commission_resp = {"ok": True, "data": {
+        "pubkey_prefix": "aabbccdd",
+        "label": "Site A",
+    }}
+    with patch("mch.cli._rpc", side_effect=[list_resp, commission_resp]):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "r",    # replace
+            "1",    # select node 1
+            "y",    # confirm
+        ))
+    assert result.exit_code == 0
+    assert "Site A" in result.output or "aabbccdd" in result.output

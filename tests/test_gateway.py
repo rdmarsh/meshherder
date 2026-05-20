@@ -245,3 +245,196 @@ async def test_advert_zerohop_calls_send_advert_not_flood():
     await gw.advert(zerohop=True)
 
     fake_mc.commands.send_advert.assert_awaited_once_with(flood=False)
+
+
+# ---------------------------------------------------------------------------
+# discover
+# ---------------------------------------------------------------------------
+
+FACTORY_FREQ = (869.618, 62.5, 8, 5)
+HOME_RADIO = {"radio_freq": 915.0, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5}
+
+
+def make_discover_mc():
+    """Return a fake MeshCore wired up for discover() tests."""
+    fake_mc = MagicMock()
+    fake_mc.commands.set_radio = AsyncMock(return_value=make_event(EventType.OK, {}))
+    fake_mc.commands.send_node_discover_req = AsyncMock(return_value=make_event(EventType.OK, {}))
+    return fake_mc
+
+
+def capture_subscribe(fake_mc):
+    """
+    Replace fake_mc.dispatcher.subscribe with a version that captures the callback
+    and returns a mock subscription.
+
+    Returns (holder, mock_sub, ready):
+      - holder: list; the discover callback is appended when subscribe is called.
+      - mock_sub: the MagicMock subscription object (has .unsubscribe()).
+      - ready: asyncio.Event set when subscribe is called (use to synchronise fire tasks).
+    """
+    holder: list = []
+    ready = asyncio.Event()
+    mock_sub = MagicMock()
+
+    def _subscribe(event_type, callback, **_kw):
+        holder.append(callback)
+        ready.set()
+        return mock_sub
+
+    fake_mc.dispatcher.subscribe = _subscribe
+    return holder, mock_sub, ready
+
+
+def make_discover_payload(pubkey_hex: str = "a695e2be23f2" + "0" * 52) -> dict:
+    return {
+        "pubkey": pubkey_hex,
+        "node_type": 2,  # REP
+        "SNR_in": 14.0,
+        "tag": "00000000",
+    }
+
+
+@pytest.mark.asyncio
+async def test_discover_hops_to_factory_freq_and_restores():
+    """discover() hops to factory freq then restores home freq."""
+    fake_mc = make_discover_mc()
+    gw = make_connected_gateway(fake_mc)
+    gw.info = {**HOME_RADIO, "name": "TestGW"}
+    capture_subscribe(fake_mc)  # return values unused here
+
+    await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.01)
+
+    calls = fake_mc.commands.set_radio.await_args_list
+    assert len(calls) == 2
+    # first call: hop to factory freq
+    assert calls[0].args == FACTORY_FREQ
+    # second call: restore home freq
+    assert calls[1].args == (
+        HOME_RADIO["radio_freq"], HOME_RADIO["radio_bw"],
+        HOME_RADIO["radio_sf"], HOME_RADIO["radio_cr"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_discover_subscribes_before_sending_request():
+    """discover() subscribes to DISCOVER_RESPONSE before calling send_node_discover_req."""
+    from meshcore.events import EventType as ET
+    fake_mc = make_discover_mc()
+    gw = make_connected_gateway(fake_mc)
+    gw.info = {**HOME_RADIO, "name": "TestGW"}
+
+    call_order: list[str] = []
+    mock_sub = MagicMock()
+
+    def _subscribe(event_type, callback, **_kw):
+        assert event_type == ET.DISCOVER_RESPONSE
+        call_order.append("subscribe")
+        return mock_sub
+
+    original_send = fake_mc.commands.send_node_discover_req
+
+    async def _send(*args, **kwargs):
+        call_order.append("send")
+        return await original_send(*args, **kwargs)
+
+    fake_mc.dispatcher.subscribe = _subscribe
+    fake_mc.commands.send_node_discover_req = _send
+
+    await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.01)
+
+    assert call_order == ["subscribe", "send"]
+
+
+@pytest.mark.asyncio
+async def test_discover_sends_req_with_all_types_filter():
+    """discover() calls send_node_discover_req(filter=0x0F)."""
+    fake_mc = make_discover_mc()
+    gw = make_connected_gateway(fake_mc)
+    gw.info = {**HOME_RADIO, "name": "TestGW"}
+    capture_subscribe(fake_mc)  # return values unused here
+
+    await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.01)
+
+    fake_mc.commands.send_node_discover_req.assert_awaited_once_with(filter=0x0F)
+
+
+@pytest.mark.asyncio
+async def test_discover_returns_discovered_nodes():
+    """discover() returns nodes collected via DISCOVER_RESPONSE during dwell."""
+    fake_mc = make_discover_mc()
+    gw = make_connected_gateway(fake_mc)
+    gw.info = {**HOME_RADIO, "name": "TestGW"}
+    holder, _, ready = capture_subscribe(fake_mc)
+
+    payload = make_discover_payload()
+
+    async def fire_event():
+        await ready.wait()  # wait until subscribe() has been called
+        holder[0](make_event(EventType.DISCOVER_RESPONSE, payload))
+
+    asyncio.create_task(fire_event())
+
+    results = await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.05)
+
+    assert len(results) == 1
+    assert results[0]["pubkey"] == payload["pubkey"]
+    assert results[0]["node_type"] == 2
+
+
+@pytest.mark.asyncio
+async def test_discover_collects_multiple_nodes():
+    """discover() can return multiple nodes if more than one responds."""
+    fake_mc = make_discover_mc()
+    gw = make_connected_gateway(fake_mc)
+    gw.info = {**HOME_RADIO, "name": "TestGW"}
+    holder, _, ready = capture_subscribe(fake_mc)
+
+    payload_a = make_discover_payload("aaaa" + "0" * 60)
+    payload_b = make_discover_payload("bbbb" + "0" * 60)
+
+    async def fire_events():
+        await ready.wait()  # wait until subscribe() has been called
+        cb = holder[0]
+        cb(make_event(EventType.DISCOVER_RESPONSE, payload_a))
+        cb(make_event(EventType.DISCOVER_RESPONSE, payload_b))
+
+    asyncio.create_task(fire_events())
+
+    results = await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.05)
+
+    assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_discover_unsubscribes_after_dwell():
+    """discover() always calls sub.unsubscribe() after the dwell period."""
+    fake_mc = make_discover_mc()
+    gw = make_connected_gateway(fake_mc)
+    gw.info = {**HOME_RADIO, "name": "TestGW"}
+    _, mock_sub, _ = capture_subscribe(fake_mc)
+
+    await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.01)
+
+    mock_sub.unsubscribe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_discover_restores_radio_on_send_error():
+    """discover() restores radio even if send_node_discover_req raises."""
+    fake_mc = make_discover_mc()
+    gw = make_connected_gateway(fake_mc)
+    gw.info = {**HOME_RADIO, "name": "TestGW"}
+    capture_subscribe(fake_mc)  # return values unused here
+    fake_mc.commands.send_node_discover_req = AsyncMock(side_effect=RuntimeError("radio exploded"))
+
+    with pytest.raises(RuntimeError):
+        await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.01)
+
+    # restore_radio must still have been called
+    calls = fake_mc.commands.set_radio.await_args_list
+    assert any(
+        c.args == (HOME_RADIO["radio_freq"], HOME_RADIO["radio_bw"],
+                   HOME_RADIO["radio_sf"], HOME_RADIO["radio_cr"])
+        for c in calls
+    )

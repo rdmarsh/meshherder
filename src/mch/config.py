@@ -15,6 +15,13 @@ from mch.models import SettingPolicy
 
 
 @dataclass
+class NodeSecrets:
+    password: str | None = None
+    guest_password: str | None = None
+    prv_key: str | None = None
+
+
+@dataclass
 class GatewayConfig:
     device: str = "/dev/meshcore0"
     baud: int = 115200
@@ -102,11 +109,14 @@ class Config:
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
     db_path: str = "/var/lib/mch/mch.db"
     socket_path: str = "/run/mch/mchd.sock"
-    secrets: dict[str, str] = field(default_factory=dict)  # pubkey_prefix -> password
+    secrets: dict[str, NodeSecrets] = field(default_factory=dict)  # pubkey_prefix -> NodeSecrets
     # profiles_url: fetch profiles.yaml from this URL on startup (cached 24h)
     profiles_url: str | None = None
     # profiles_file: use this local file instead of the bundled default
     profiles_file: str | None = None
+    # set by load() so commission and other write-back operations know where to write
+    config_path: Path | None = field(default=None, repr=False)
+    secrets_path: Path | None = field(default=None, repr=False)
 
 
 def load(config_path: Path, secrets_path: Path | None = None) -> Config:
@@ -138,6 +148,8 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
         secrets_path = Path(raw.get("secrets_file", config_path.parent / "secrets.yaml"))
 
     cfg.secrets = _load_secrets(secrets_path)
+    cfg.config_path = config_path
+    cfg.secrets_path = secrets_path
 
     return cfg
 
@@ -207,7 +219,7 @@ def _parse_group(raw: dict) -> GroupConfig:
     )
 
 
-def _load_secrets(path: Path) -> dict[str, str]:
+def _load_secrets(path: Path) -> dict[str, NodeSecrets]:
     if not path.exists():
         return {}
     _check_permissions(path)
@@ -222,7 +234,22 @@ def _load_secrets(path: Path) -> dict[str, str]:
     nodes = raw.get("nodes", {})
     if not isinstance(nodes, dict):
         raise ValueError("secrets.nodes must be a mapping of pubkey_prefix: password")
-    return {str(k): str(v) for k, v in nodes.items()}
+    result: dict[str, NodeSecrets] = {}
+    for k, v in nodes.items():
+        if isinstance(v, str):
+            # old flat format: migrate to NodeSecrets
+            result[str(k)] = NodeSecrets(password=v)
+        elif isinstance(v, dict):
+            result[str(k)] = NodeSecrets(
+                password=v.get("password"),
+                guest_password=v.get("guest_password"),
+                prv_key=v.get("prv_key"),
+            )
+        else:
+            raise ValueError(
+                f"secrets.nodes.{k} must be a string (password) or mapping, got {type(v).__name__}"
+            )
+    return result
 
 
 def _check_permissions(path: Path) -> None:

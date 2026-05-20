@@ -334,6 +334,10 @@ async def _dispatch(
             })
         return {"ok": True, "data": result}
 
+    if cmd == "commission":
+        from mch.commission import handle_commission
+        return await handle_commission(req, wq, db, config)
+
     return {"ok": False, "error": f"unknown command: {cmd!r}"}
 
 
