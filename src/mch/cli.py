@@ -861,12 +861,18 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
     click.echo("")
     click.echo("Node commissioned successfully.")
     click.echo("")
-    click.echo(f"Node pubkey prefix: {pubkey_prefix}")
-    click.echo(f"Password saved to secrets.yaml under: {pubkey_prefix}")
+    click.echo("Add to config.yaml under nodes:")
     click.echo("")
-    click.echo("config.yaml updated. Next steps:")
-    click.echo("  1. Wait 30-60s for the node to reboot on the target frequency")
-    click.echo("  2. Run: mch sync")
+    click.echo(d.get("config_snippet", ""))
+    click.echo("")
+    click.echo("Add to secrets.yaml under nodes:")
+    click.echo("")
+    click.echo(d.get("secrets_snippet", ""))
+    click.echo("")
+    click.echo("Next steps:")
+    click.echo("  1. Add both entries to your config files")
+    click.echo("  2. Wait 30-60s for the node to reboot on the target frequency")
+    click.echo(f"  3. Run: mch sync {pubkey_prefix}")
 
 
 def _commission_replace_wizard(socket: str) -> None:

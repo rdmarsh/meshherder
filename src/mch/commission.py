@@ -14,14 +14,9 @@ ensuring gateway.discover() is called with the right dwell time.
 from __future__ import annotations
 
 import logging
-import os
-from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 
-import yaml
-
-from mch.config import Config, NodeSecrets
+from mch.config import Config
 from mch.gateway import Gateway
 
 if TYPE_CHECKING:
@@ -232,7 +227,7 @@ async def _commission_new(
     _cmd_labels = {
         f"password {admin_password}": "setting password",
         f"set guest.password {guest_password}": "setting guest password",
-        f"set name {name}": f"setting name",
+        f"set name {name}": "setting name",
         f"set radio {target_freq_str}": "setting radio (node will reboot)",
         "reboot": "rebooting",
     }
@@ -243,28 +238,8 @@ async def _commission_new(
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
-    if config.config_path:
-        if progress is not None:
-            await progress("writing config.yaml...")
-        _append_node_config(
-            config_path=config.config_path,
-            pubkey_prefix=pubkey_prefix,
-            label=label,
-            group=group,
-            target_freq_str=target_freq_str,
-        )
-
-    if config.secrets_path:
-        if progress is not None:
-            await progress("writing secrets.yaml...")
-        _update_secrets(
-            secrets_path=config.secrets_path,
-            pubkey_prefix=pubkey_prefix,
-            ns=NodeSecrets(
-                password=admin_password or None,
-                guest_password=guest_password,
-            ),
-        )
+    config_snippet = _build_config_snippet(pubkey_prefix, label, group, target_freq_str)
+    secrets_snippet = _build_secrets_snippet(pubkey_prefix, admin_password, guest_password)
 
     log.info("commissioned new node %s label=%r", pubkey_prefix, label or name)
     return {
@@ -275,6 +250,8 @@ async def _commission_new(
             "name": name,
             "group": group,
             "target_freq": target_freq_str,
+            "config_snippet": config_snippet,
+            "secrets_snippet": secrets_snippet,
         },
     }
 
@@ -338,65 +315,35 @@ async def _commission_replace(
 
 
 # ---------------------------------------------------------------------------
-# file write helpers (used by _commission_new and tests)
+# paste snippet builders — output displayed to operator for manual copy-paste
 # ---------------------------------------------------------------------------
 
-def _append_node_config(
-    config_path: Path,
+def _build_config_snippet(
     pubkey_prefix: str,
     label: str,
     group: str | None,
     target_freq_str: str | None,
-) -> None:
-    """Atomically append a new node entry to config.yaml, preserving existing content and comments."""
-    existing = config_path.read_text() if config_path.exists() else ""
-
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    lines = [f"  # added by mch commission {stamp}"]
-    lines.append(f"  - pubkey_prefix: {pubkey_prefix}")
+) -> str:
+    """Return a ready-to-paste config.yaml node entry (indented for under nodes:)."""
+    lines = [f"  - pubkey_prefix: {pubkey_prefix}"]
     if label:
         lines.append(f"    label: {label}")
     if group:
         lines.append(f"    group: {group}")
     if target_freq_str:
         lines.append(f"    via: {target_freq_str}")
-
-    entry = "\n".join(lines) + "\n"
-
-    text = existing.rstrip("\n")
-    if any(line.startswith("nodes:") for line in text.splitlines()):
-        text += "\n\n" + entry
-    else:
-        text += "\nnodes:\n" + entry
-
-    tmp = config_path.with_name(config_path.name + ".tmp")
-    tmp.write_text(text)
-    tmp.replace(config_path)
-    log.info("wrote config entry for %s to %s", pubkey_prefix, config_path)
+    return "\n".join(lines)
 
 
-def _update_secrets(
-    secrets_path: Path,
+def _build_secrets_snippet(
     pubkey_prefix: str,
-    ns: NodeSecrets,
-) -> None:
-    """Atomically update secrets.yaml with a new or updated node entry (mode 0o600)."""
-    raw: dict = {}
-    if secrets_path.exists():
-        raw = yaml.safe_load(secrets_path.read_text()) or {}
-    nodes = raw.setdefault("nodes", {})
-
-    entry: dict[str, Any] = {}
-    if ns.password:
-        entry["password"] = ns.password
-    if ns.guest_password:
-        entry["guest_password"] = ns.guest_password
-    if ns.prv_key:
-        entry["prv_key"] = ns.prv_key
-    nodes[pubkey_prefix] = entry
-
-    tmp = secrets_path.with_name(secrets_path.name + ".tmp")
-    tmp.write_text(yaml.dump(raw, default_flow_style=False))
-    os.chmod(tmp, 0o600)
-    tmp.replace(secrets_path)
-    log.info("wrote secrets entry for %s to %s", pubkey_prefix, secrets_path)
+    password: str | None,
+    guest_password: str | None,
+) -> str:
+    """Return a ready-to-paste secrets.yaml node entry (indented for under nodes:)."""
+    lines = [f"  {pubkey_prefix}:"]
+    if password:
+        lines.append(f"    password: {password}")
+    if guest_password:
+        lines.append(f"    guest_password: {guest_password}")
+    return "\n".join(lines)

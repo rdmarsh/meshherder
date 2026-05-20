@@ -37,8 +37,8 @@ Think Ansible for your nodes, running continuously in the background.
   (erase, set prv.key) are blocked.
 - **`mch commission`** — guided wizard to commission a fresh or replacement MeshCore node. Pauses
   the sync queue, hops to the factory default frequency, discovers the node, pushes password/name/
-  and radio config, then writes the node's entry into `config.yaml` and saves the password to
-  `secrets.yaml`. No need to stop mchd.
+  and radio config, then prints ready-to-paste snippets for `config.yaml` and `secrets.yaml`.
+  No need to stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
 
 ## Requirements
@@ -87,8 +87,8 @@ sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
 # Grant serial port access
 sudo usermod -aG dialout mch
 
-# Config directory — owned by mch so the daemon can write secrets.yaml during commissioning
-sudo install -d -o mch -g mch -m 750 /usr/local/etc/mch
+# Config directory
+sudo install -d -o root -g mch -m 750 /usr/local/etc/mch
 
 # Config and secrets
 sudo install -o mch -g mch -m 640 examples/config.example.yaml /usr/local/etc/mch/config.yaml
@@ -312,8 +312,8 @@ stopping mchd. The wizard supports two modes:
 3. Enter the label, group, mesh-visible name, target frequency, and admin password.
 4. The daemon discovers the node, sets the password, name, and radio, then reboots the node.
    The factory pubkey is the permanent identity — it does not change after reboot.
-5. `mch commission` writes the node entry into `config.yaml` and saves the password to `secrets.yaml`
-   automatically — no manual editing needed.
+5. `mch commission` prints ready-to-paste snippets for both `config.yaml` and `secrets.yaml`.
+   Copy them into your config files.
 6. Wait ~30 seconds for the node to reboot on the target frequency, then run `mch sync`.
 
 **Replacement node** — restoring a known identity onto new hardware:

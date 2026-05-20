@@ -1,13 +1,11 @@
-"""Tests for mch.commission — discover-and-filter, commissioning sequences, file writes."""
+"""Tests for mch.commission — discover-and-filter, commissioning sequences, paste snippets."""
 
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import yaml
 
 from mch.config import Config, GatewayConfig, NodeConfig, NodeSecrets, RadioConfig
 from mch.gateway import CommandResult
@@ -337,25 +335,19 @@ async def test_commission_new_returns_pubkey_prefix():
 
 
 # ---------------------------------------------------------------------------
-# handle_commission — file writing
+# handle_commission — paste snippets
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_commission_new_writes_config_entry(tmp_path):
-    """'new' mode appends a node entry to config.yaml with a dated comment."""
+async def test_commission_new_returns_config_snippet():
+    """'new' mode returns a config.yaml snippet with pubkey_prefix, label, group, and via."""
     from mch.commission import handle_commission
-
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("gateway: {}\n")
-    secrets_path = tmp_path / "secrets.yaml"
 
     pubkey = "a695e2be" + "0" * 56
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
     db = make_db()
     cfg = make_config()
-    cfg.config_path = config_path
-    cfg.secrets_path = secrets_path
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
@@ -365,34 +357,24 @@ async def test_commission_new_writes_config_entry(tmp_path):
         "target_freq": "915.075,125,9,5",
     }, wq, db, cfg)
 
-    text = config_path.read_text()
-    data = yaml.safe_load(text)
-    assert len(data["nodes"]) == 1
-    node = data["nodes"][0]
-    assert node["pubkey_prefix"] == resp["data"]["pubkey_prefix"]
-    assert node["label"] == "Test Node"
-    assert node["group"] == "testgroup"
-    assert node["via"] == "915.075,125,9,5"
-    # comment with datestamp should appear above the entry
-    assert "# added by mch commission" in text
+    assert resp["ok"]
+    snippet = resp["data"]["config_snippet"]
+    assert "pubkey_prefix: a695e2be" in snippet
+    assert "label: Test Node" in snippet
+    assert "group: testgroup" in snippet
+    assert "via: 915.075,125,9,5" in snippet
 
 
 @pytest.mark.asyncio
-async def test_commission_new_writes_password_to_secrets(tmp_path):
-    """'new' mode saves admin password to secrets.yaml under pubkey_prefix; does not write prv_key."""
+async def test_commission_new_returns_secrets_snippet():
+    """'new' mode returns a secrets.yaml snippet with password; no prv_key."""
     from mch.commission import handle_commission
-
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("gateway: {}\n")
-    secrets_path = tmp_path / "secrets.yaml"
 
     pubkey = "a695e2be" + "0" * 56
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
     db = make_db()
     cfg = make_config()
-    cfg.config_path = config_path
-    cfg.secrets_path = secrets_path
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
@@ -401,11 +383,11 @@ async def test_commission_new_writes_password_to_secrets(tmp_path):
         "target_freq": "915.075,125,9,5",
     }, wq, db, cfg)
 
-    secrets = yaml.safe_load(secrets_path.read_text())
-    pubkey_prefix = resp["data"]["pubkey_prefix"]
-    entry = secrets["nodes"][pubkey_prefix]
-    assert entry["password"] == "testpass"
-    assert "prv_key" not in entry
+    assert resp["ok"]
+    snippet = resp["data"]["secrets_snippet"]
+    assert "a695e2be:" in snippet
+    assert "password: testpass" in snippet
+    assert "prv_key" not in snippet
 
 
 # ---------------------------------------------------------------------------
@@ -584,119 +566,6 @@ def test_workqueue_resume_sets_event():
     wq.pause()
     wq.resume()
     assert wq._paused.is_set()
-
-
-# ---------------------------------------------------------------------------
-# file write helpers
-# ---------------------------------------------------------------------------
-
-def test_append_node_config_creates_nodes_list(tmp_path):
-    """_append_node_config adds a node entry to a config with no nodes list."""
-    from mch.commission import _append_node_config
-
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("gateway: {}\n")
-
-    _append_node_config(
-        config_path=config_path,
-        pubkey_prefix="a695e2be",
-        label="Test Site",
-        group="testgroup",
-        target_freq_str="915.075,125,9,5",
-    )
-
-    written = yaml.safe_load(config_path.read_text())
-    assert len(written["nodes"]) == 1
-    node = written["nodes"][0]
-    assert node["pubkey_prefix"] == "a695e2be"
-    assert node["label"] == "Test Site"
-    assert node["group"] == "testgroup"
-    assert node["via"] == "915.075,125,9,5"
-
-
-def test_append_node_config_preserves_existing_nodes(tmp_path):
-    """_append_node_config appends without removing existing node entries."""
-    from mch.commission import _append_node_config
-
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("nodes:\n  - pubkey_prefix: existing\n    label: Existing\n")
-
-    _append_node_config(
-        config_path=config_path,
-        pubkey_prefix="newnode",
-        label="New Node",
-        group=None,
-        target_freq_str=None,
-    )
-
-    written = yaml.safe_load(config_path.read_text())
-    prefixes = [n["pubkey_prefix"] for n in written["nodes"]]
-    assert "existing" in prefixes
-    assert "newnode" in prefixes
-
-
-def test_update_secrets_creates_file_if_missing(tmp_path):
-    """_update_secrets creates secrets.yaml if it doesn't exist yet."""
-    from mch.commission import _update_secrets
-
-    secrets_path = tmp_path / "secrets.yaml"
-    _update_secrets(
-        secrets_path=secrets_path,
-        pubkey_prefix="a695e2be",
-        ns=NodeSecrets(password="testpass"),
-    )
-
-    written = yaml.safe_load(secrets_path.read_text())
-    assert written["nodes"]["a695e2be"]["password"] == "testpass"
-
-
-def test_update_secrets_preserves_existing_entries(tmp_path):
-    """_update_secrets does not remove existing node entries."""
-    from mch.commission import _update_secrets
-
-    secrets_path = tmp_path / "secrets.yaml"
-    secrets_path.write_text("nodes:\n  existing: existingpass\n")
-
-    _update_secrets(
-        secrets_path=secrets_path,
-        pubkey_prefix="newprefix",
-        ns=NodeSecrets(password="newpass"),
-    )
-
-    written = yaml.safe_load(secrets_path.read_text())
-    assert "existing" in written["nodes"]
-    assert "newprefix" in written["nodes"]
-
-
-def test_update_secrets_writes_prv_key(tmp_path):
-    """_update_secrets includes prv_key when set."""
-    from mch.commission import _update_secrets
-
-    secrets_path = tmp_path / "secrets.yaml"
-    _update_secrets(
-        secrets_path=secrets_path,
-        pubkey_prefix="aa",
-        ns=NodeSecrets(password="pw", prv_key="deadbeef" * 8),
-    )
-
-    written = yaml.safe_load(secrets_path.read_text())
-    assert written["nodes"]["aa"]["prv_key"] == "deadbeef" * 8
-
-
-def test_update_secrets_file_is_mode_600(tmp_path):
-    """_update_secrets sets secrets.yaml to mode 0o600."""
-    import os
-    from mch.commission import _update_secrets
-
-    secrets_path = tmp_path / "secrets.yaml"
-    _update_secrets(
-        secrets_path=secrets_path,
-        pubkey_prefix="aa",
-        ns=NodeSecrets(password="pw"),
-    )
-
-    mode = oct(os.stat(secrets_path).st_mode)[-3:]
-    assert mode == "600"
 
 
 # ---------------------------------------------------------------------------
