@@ -365,7 +365,7 @@ def _append_node_config(
 
     text = existing.rstrip("\n")
     if any(line.startswith("nodes:") for line in text.splitlines()):
-        text += "\n" + entry
+        text += "\n\n" + entry
     else:
         text += "\nnodes:\n" + entry
 
