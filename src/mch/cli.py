@@ -809,23 +809,25 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
             break  # exit outer loop
 
     d = resp["data"]
-    factory_prefix = d.get("factory_prefix", "?")
-    prv_key = d.get("prv_key", "")
+    pubkey_prefix = d.get("pubkey_prefix", "?")
 
     click.echo("")
     click.echo("Node commissioned successfully.")
     click.echo("")
-    click.echo("Private key (32 bytes) - save this before the node reboots:")
-    click.echo(f"  {prv_key}")
-    click.echo("")
-    click.echo(f"Saved to secrets.yaml under temporary prefix: {factory_prefix}")
+    click.echo(f"Node pubkey prefix: {pubkey_prefix}")
+    click.echo(f"Password saved to secrets.yaml under: {pubkey_prefix}")
     click.echo("")
     click.echo("Next steps:")
-    click.echo("  1. Wait 30-60s for the node to reboot with its new identity")
-    click.echo("  2. Run: mch contacts")
-    click.echo("  3. Note the new pubkey_prefix for this node")
-    click.echo("  4. Add a config.yaml entry (mch contacts shows a ready-to-paste snippet)")
-    click.echo(f"  5. In secrets.yaml: rename '{factory_prefix}' to the new prefix")
+    click.echo("  1. Wait 30-60s for the node to reboot on the target frequency")
+    click.echo("  2. Add a config.yaml entry:")
+    click.echo(f"       - pubkey_prefix: {pubkey_prefix}")
+    if d.get("label"):
+        click.echo(f"         label: {d['label']}")
+    if d.get("group"):
+        click.echo(f"         group: {d['group']}")
+    if d.get("target_freq"):
+        click.echo(f"         via: {d['target_freq']}")
+    click.echo("  3. Run: mch sync")
 
 
 def _commission_replace_wizard(socket: str) -> None:

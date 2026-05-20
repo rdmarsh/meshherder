@@ -295,26 +295,6 @@ async def test_commission_new_sends_guest_password():
 
 
 @pytest.mark.asyncio
-async def test_commission_new_sends_prv_key():
-    """'new' mode sends 'set prv.key <hex>' command."""
-    from mch.commission import handle_commission
-
-    pubkey = "a1" * 32
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
-    wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config()
-
-    await handle_commission({
-        "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
-    }, wq, db, cfg)
-
-    sent = [call.args[1] for call in gw.send_command.call_args_list]
-    assert any(c.startswith("set prv.key ") for c in sent)
-
-
-@pytest.mark.asyncio
 async def test_commission_new_sends_reboot_last():
     """'new' mode always sends reboot as the final command."""
     from mch.commission import handle_commission
@@ -336,30 +316,8 @@ async def test_commission_new_sends_reboot_last():
 
 
 @pytest.mark.asyncio
-async def test_commission_new_sends_radio_before_prv_key():
-    """'new' mode sends set prv.key before set radio: radio triggers reboot so key must be persisted first."""
-    from mch.commission import handle_commission
-
-    pubkey = "a1" * 32
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
-    wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config()
-
-    await handle_commission({
-        "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
-    }, wq, db, cfg)
-
-    sent = [call.args[1] for call in gw.send_command.call_args_list]
-    radio_idx = next(i for i, c in enumerate(sent) if c.startswith("set radio"))
-    prv_idx = next(i for i, c in enumerate(sent) if c.startswith("set prv.key"))
-    assert prv_idx < radio_idx
-
-
-@pytest.mark.asyncio
-async def test_commission_new_returns_factory_prefix_and_prv_key():
-    """'new' mode returns factory_prefix and prv_key in response data."""
+async def test_commission_new_returns_pubkey_prefix():
+    """'new' mode returns pubkey_prefix (first 8 hex chars of factory pubkey) in response data."""
     from mch.commission import handle_commission
 
     pubkey = "a695e2be23f2" + "0" * 52
@@ -374,8 +332,8 @@ async def test_commission_new_returns_factory_prefix_and_prv_key():
     }, wq, db, cfg)
 
     assert resp["ok"] is True
-    assert resp["data"]["factory_prefix"] == pubkey[:8]
-    assert len(resp["data"]["prv_key"]) == 64  # 32 bytes → 64 hex chars
+    assert resp["data"]["pubkey_prefix"] == pubkey[:8]
+    assert "prv_key" not in resp["data"]
 
 
 # ---------------------------------------------------------------------------
@@ -411,8 +369,8 @@ async def test_commission_new_does_not_write_config(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_commission_new_writes_prv_key_to_secrets(tmp_path):
-    """'new' mode saves generated prv_key to secrets.yaml under factory prefix."""
+async def test_commission_new_writes_password_to_secrets(tmp_path):
+    """'new' mode saves admin password to secrets.yaml under pubkey_prefix; does not write prv_key."""
     from mch.commission import handle_commission
 
     config_path = tmp_path / "config.yaml"
@@ -435,10 +393,10 @@ async def test_commission_new_writes_prv_key_to_secrets(tmp_path):
     }, wq, db, cfg)
 
     secrets = yaml.safe_load(secrets_path.read_text())
-    factory_prefix = resp["data"]["factory_prefix"]
-    entry = secrets["nodes"][factory_prefix]
-    assert entry["prv_key"] == resp["data"]["prv_key"]
+    pubkey_prefix = resp["data"]["pubkey_prefix"]
+    entry = secrets["nodes"][pubkey_prefix]
     assert entry["password"] == "testpass"
+    assert "prv_key" not in entry
 
 
 # ---------------------------------------------------------------------------

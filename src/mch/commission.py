@@ -188,15 +188,12 @@ async def _commission_new(
     """
     Commission a brand-new node.
 
-    Generates a fresh 32-byte private key, sets it on the node (which changes
-    the node's mesh identity after reboot), and saves the key to secrets.yaml
-    under the factory pubkey prefix as a temporary placeholder.
+    Sets password, name, and radio on the node, then triggers a reboot.
+    The factory pubkey is the permanent identity — no key change needed.
 
-    The operator must rename the secrets.yaml entry to the node's new pubkey
-    prefix after it reboots, and add a config.yaml entry using mch contacts.
+    Saves the admin password to secrets.yaml under the factory pubkey prefix
+    so the daemon can authenticate on subsequent syncs.
     """
-    import secrets as _secrets
-
     # Always set an admin password; fall back to 'password' if not provided.
     admin_password = req.get("admin_password") or "password"
     guest_password = req.get("guest_password")
@@ -206,24 +203,17 @@ async def _commission_new(
     target_freq_str = req.get("target_freq")
 
     pubkey = contact["public_key"]
-    factory_prefix = pubkey[:8]
-
-    prv_key_bytes = _secrets.token_bytes(32)
-    prv_key_hex = prv_key_bytes.hex()
+    pubkey_prefix = pubkey[:8]
 
     # Commands in order: (command, fire_and_forget)
-    # prv.key must come before radio: 'set radio' triggers an immediate node reboot.
-    # If radio is sent first, the node reboots before it can receive set prv.key.
-    # With prv.key first: key is persisted, then 'set radio' triggers the reboot,
-    # and the node comes up with both the new identity and the target frequency.
-    # reboot is fire-and-forget as a fallback if set radio didn't already trigger one.
+    # 'set radio' triggers an immediate node reboot, so it goes last.
+    # The explicit 'reboot' is a fallback if set radio didn't trigger one.
     cmds: list[tuple[str, bool]] = []
     cmds.append((f"password {admin_password}", False))
     if guest_password:
         cmds.append((f"set guest.password {guest_password}", False))
     if name:
         cmds.append((f"set name {name}", False))
-    cmds.append((f"set prv.key {prv_key_hex}", False))
     if target_freq_str:
         cmds.append((f"set radio {target_freq_str}", True))  # triggers reboot; faf
     cmds.append(("reboot", True))
@@ -233,25 +223,22 @@ async def _commission_new(
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
-    # Save prv_key to secrets.yaml under the factory prefix (temporary — operator
-    # must rename this entry to the node's new pubkey prefix after it reboots).
+    # Save the admin password to secrets.yaml under the permanent pubkey prefix.
     if config.secrets_path:
         _update_secrets(
             secrets_path=config.secrets_path,
-            pubkey_prefix=factory_prefix,
+            pubkey_prefix=pubkey_prefix,
             ns=NodeSecrets(
                 password=admin_password or None,
                 guest_password=guest_password,
-                prv_key=prv_key_hex,
             ),
         )
 
-    log.info("commissioned new node (factory: %s) label=%r", factory_prefix, label or name)
+    log.info("commissioned new node %s label=%r", pubkey_prefix, label or name)
     return {
         "ok": True,
         "data": {
-            "factory_prefix": factory_prefix,
-            "prv_key": prv_key_hex,
+            "pubkey_prefix": pubkey_prefix,
             "label": label,
             "name": name,
             "group": group,
@@ -286,6 +273,8 @@ async def _commission_replace(
     if not ns or not ns.prv_key:
         return {"ok": False, "error": f"no prv_key in secrets for {pubkey_prefix!r}"}
 
+    # set prv.key works over the mesh (Serial Only = No per firmware docs).
+    # It requires a reboot to take effect — set radio triggers that reboot.
     cmds: list[tuple[str, bool]] = []
     cmds.append((f"set prv.key {ns.prv_key}", False))
     if ns.password:
@@ -294,11 +283,11 @@ async def _commission_replace(
         cmds.append((f"set guest.password {ns.guest_password}", False))
     if node_cfg.via:
         v = node_cfg.via
-        cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", False))
+        cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", True))  # triggers reboot; faf
     cmds.append(("reboot", True))
 
     for cmd, faf in cmds:
-        result = await gateway.send_command(contact, cmd, await_response=False)
+        result = await gateway.send_command(contact, cmd, timeout=30.0)
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
