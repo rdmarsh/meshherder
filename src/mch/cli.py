@@ -824,6 +824,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
         commission_ok = False
         while True:
             click.echo("Commissioning node...")
+            click.echo("")
             resp = _rpc(socket, {
                 "cmd": "commission",
                 "mode": "new",
