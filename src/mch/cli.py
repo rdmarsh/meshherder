@@ -777,14 +777,13 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
             truncated = encoded[:31].decode("utf-8", errors="ignore")
             click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
             name_default = truncated
-        group = click.prompt("Group (Enter to skip)", default=group or "").strip() or None
+        group = click.prompt("Group label", default=group or "", show_default=False).strip() or None
 
         # --- security ---
         click.echo("")
         admin_password = click.prompt("Admin password", default=admin_password).strip()
-        guest_password = (
-            click.prompt("Guest password (Enter to skip)", default=guest_password or "").strip() or ""
-        )
+        raw_guest = click.prompt("Guest password", default=guest_password or "skip").strip()
+        guest_password = "" if raw_guest.lower() == "skip" else raw_guest
 
         # --- radio ---
         click.echo("")
