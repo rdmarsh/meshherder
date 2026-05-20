@@ -150,17 +150,16 @@ async def handle_commission(
             # add_commission_contact() inserts it with flood routing so send_command() succeeds.
             contact = await gateway.add_commission_contact(node_info)
 
-            # Factory nodes require authentication before accepting CLI commands.
-            # Factory default password is 'password'.
-            login_ok = await gateway.login(contact, "password")
-            if not login_ok:
-                return {
-                    "ok": False,
-                    "error": (
-                        "could not authenticate to factory node — "
-                        "ensure the node is factory-fresh (default password 'password') and retry"
-                    ),
-                }
+            # Factory nodes require login before accepting CLI commands.
+            # Try empty password first (truly fresh, no password set), then 'password'
+            # (common factory default). If both fail, proceed — some firmware accepts
+            # commands without login when no password is set.
+            if not await gateway.login(contact, ""):
+                if not await gateway.login(contact, "password"):
+                    log.warning(
+                        "commission: login with both '' and 'password' failed — "
+                        "proceeding anyway; commands will fail if node requires auth"
+                    )
 
             if mode == "new":
                 return await _commission_new(req, gateway, config, contact)

@@ -871,8 +871,8 @@ async def test_commission_new_restores_home_radio_after_commissioning():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_commission_new_logins_with_factory_password():
-    """'new' mode logs in with factory default 'password' before sending commands."""
+async def test_commission_new_logins_with_empty_password_first():
+    """'new' mode tries login with empty password first (factory-fresh, no password set)."""
     from mch.commission import handle_commission
 
     pubkey = "a1" * 32
@@ -886,14 +886,37 @@ async def test_commission_new_logins_with_factory_password():
         "name": "TestNode", "target_freq": "915.075,125,9,5",
     }, wq, db, cfg)
 
-    gw.login.assert_called_once()
-    _, pwd = gw.login.call_args[0]
-    assert pwd == "password"
+    first_call = gw.login.call_args_list[0]
+    _, first_pwd = first_call[0]
+    assert first_pwd == ""
 
 
 @pytest.mark.asyncio
-async def test_commission_new_login_failure_returns_error():
-    """'new' mode returns error immediately if login fails."""
+async def test_commission_new_tries_factory_password_if_empty_fails():
+    """'new' mode tries 'password' if empty-password login fails."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = AsyncMock(side_effect=[False, True])  # "" fails, "password" succeeds
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "name": "TestNode", "target_freq": "915.075,125,9,5",
+    }, wq, db, cfg)
+
+    assert resp["ok"] is True
+    assert gw.login.call_count == 2
+    _, second_pwd = gw.login.call_args_list[1][0]
+    assert second_pwd == "password"
+
+
+@pytest.mark.asyncio
+async def test_commission_new_proceeds_if_both_logins_fail():
+    """'new' mode proceeds with commands even if both login attempts fail."""
     from mch.commission import handle_commission
 
     pubkey = "a1" * 32
@@ -908,14 +931,13 @@ async def test_commission_new_login_failure_returns_error():
         "name": "TestNode", "target_freq": "915.075,125,9,5",
     }, wq, db, cfg)
 
-    assert resp["ok"] is False
-    assert "authenticate" in resp["error"]
-    gw.send_command.assert_not_called()
+    # Commission proceeds — send_command is still called
+    assert gw.send_command.called
 
 
 @pytest.mark.asyncio
-async def test_commission_replace_logins_with_factory_password():
-    """'replace' mode logs in with factory default 'password' before sending commands."""
+async def test_commission_replace_logins_with_empty_password_first():
+    """'replace' mode also tries empty password first."""
     from mch.commission import handle_commission
 
     pubkey = "cc" * 32
@@ -932,34 +954,9 @@ async def test_commission_replace_logins_with_factory_password():
         "pubkey_prefix": "aabbccdd",
     }, wq, db, cfg)
 
-    gw.login.assert_called_once()
-    _, pwd = gw.login.call_args[0]
-    assert pwd == "password"
-
-
-@pytest.mark.asyncio
-async def test_commission_replace_login_failure_returns_error():
-    """'replace' mode returns error immediately if login fails."""
-    from mch.commission import handle_commission
-
-    pubkey = "cc" * 32
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
-    gw.login = AsyncMock(return_value=False)
-    wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config(
-        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
-        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
-    )
-
-    resp = await handle_commission({
-        "cmd": "commission", "mode": "replace",
-        "pubkey_prefix": "aabbccdd",
-    }, wq, db, cfg)
-
-    assert resp["ok"] is False
-    assert "authenticate" in resp["error"]
-    gw.send_command.assert_not_called()
+    first_call = gw.login.call_args_list[0]
+    _, first_pwd = first_call[0]
+    assert first_pwd == ""
 
 
 @pytest.mark.asyncio
