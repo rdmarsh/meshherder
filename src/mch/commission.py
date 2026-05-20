@@ -13,10 +13,16 @@ ensuring gateway.discover() is called with the right dwell time.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+# Factory-fresh nodes route command responses via flood, but cannot route the
+# reply back to the gateway (no routing table entry). Wait briefly between
+# commands so the node can process each one; don't wait for responses.
+_CMD_DELAY = 1.5  # seconds between commissioning commands
 
 import yaml
 
@@ -219,9 +225,12 @@ async def _commission_new(
     cmds.append(("reboot", True))
 
     for cmd, faf in cmds:
-        result = await gateway.send_command(contact, cmd, timeout=30.0)
+        # await_response=False: factory nodes flood-route commands but cannot route
+        # responses back (no gateway entry in routing table). Send and move on.
+        result = await gateway.send_command(contact, cmd, await_response=False)
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
+        await asyncio.sleep(_CMD_DELAY)
 
     # Save prv_key to secrets.yaml under the factory prefix (temporary — operator
     # must rename this entry to the node's new pubkey prefix after it reboots).
@@ -288,9 +297,10 @@ async def _commission_replace(
     cmds.append(("reboot", True))
 
     for cmd, faf in cmds:
-        result = await gateway.send_command(contact, cmd, timeout=30.0)
+        result = await gateway.send_command(contact, cmd, await_response=False)
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
+        await asyncio.sleep(_CMD_DELAY)
 
     log.info("replaced node identity for %s (%s)", pubkey_prefix, node_cfg.label or "")
     return {
