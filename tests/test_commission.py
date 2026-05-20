@@ -341,13 +341,12 @@ async def test_commission_new_returns_pubkey_prefix():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_commission_new_does_not_write_config(tmp_path):
-    """'new' mode does not write config.yaml (pubkey unknown until after reboot)."""
+async def test_commission_new_writes_config_entry(tmp_path):
+    """'new' mode appends a node entry to config.yaml with a dated comment."""
     from mch.commission import handle_commission
 
     config_path = tmp_path / "config.yaml"
-    original = "gateway: {}\n"
-    config_path.write_text(original)
+    config_path.write_text("gateway: {}\n")
     secrets_path = tmp_path / "secrets.yaml"
 
     pubkey = "a695e2be" + "0" * 56
@@ -358,14 +357,24 @@ async def test_commission_new_does_not_write_config(tmp_path):
     cfg.config_path = config_path
     cfg.secrets_path = secrets_path
 
-    await handle_commission({
+    resp = await handle_commission({
         "cmd": "commission", "mode": "new",
         "label": "Test Node",
+        "group": "testgroup",
         "name": "Test Node",
         "target_freq": "915.075,125,9,5",
     }, wq, db, cfg)
 
-    assert config_path.read_text() == original
+    text = config_path.read_text()
+    data = yaml.safe_load(text)
+    assert len(data["nodes"]) == 1
+    node = data["nodes"][0]
+    assert node["pubkey_prefix"] == resp["data"]["pubkey_prefix"]
+    assert node["label"] == "Test Node"
+    assert node["group"] == "testgroup"
+    assert node["via"] == "915.075,125,9,5"
+    # comment with datestamp should appear above the entry
+    assert "# added by mch commission" in text
 
 
 @pytest.mark.asyncio

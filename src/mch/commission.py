@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -223,7 +224,15 @@ async def _commission_new(
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
-    # Save the admin password to secrets.yaml under the permanent pubkey prefix.
+    if config.config_path:
+        _append_node_config(
+            config_path=config.config_path,
+            pubkey_prefix=pubkey_prefix,
+            label=label,
+            group=group,
+            target_freq_str=target_freq_str,
+        )
+
     if config.secrets_path:
         _update_secrets(
             secrets_path=config.secrets_path,
@@ -312,22 +321,29 @@ def _append_node_config(
     group: str | None,
     target_freq_str: str | None,
 ) -> None:
-    """Atomically append a new node entry to config.yaml."""
-    raw = yaml.safe_load(config_path.read_text()) or {}
-    nodes = raw.setdefault("nodes", [])
+    """Atomically append a new node entry to config.yaml, preserving existing content and comments."""
+    existing = config_path.read_text() if config_path.exists() else ""
 
-    entry: dict[str, Any] = {"pubkey_prefix": pubkey_prefix}
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [f"  # added by mch commission {stamp}"]
+    lines.append(f"  - pubkey_prefix: {pubkey_prefix}")
     if label:
-        entry["label"] = label
+        lines.append(f"    label: {label}")
     if group:
-        entry["group"] = group
+        lines.append(f"    group: {group}")
     if target_freq_str:
-        entry["via"] = target_freq_str
+        lines.append(f"    via: {target_freq_str}")
 
-    nodes.append(entry)
+    entry = "\n".join(lines) + "\n"
+
+    text = existing.rstrip("\n")
+    if any(line.startswith("nodes:") for line in text.splitlines()):
+        text += "\n" + entry
+    else:
+        text += "\nnodes:\n" + entry
 
     tmp = config_path.with_name(config_path.name + ".tmp")
-    tmp.write_text(yaml.dump(raw, default_flow_style=False))
+    tmp.write_text(text)
     tmp.replace(config_path)
     log.info("wrote config entry for %s to %s", pubkey_prefix, config_path)
 
