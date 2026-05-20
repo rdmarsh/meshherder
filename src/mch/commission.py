@@ -17,7 +17,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 
 import yaml
 
@@ -77,6 +77,7 @@ async def handle_commission(
     wq: "WorkQueue",
     db: "Database",
     config: Config,
+    progress: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> dict[str, Any]:
     """
     Handle the 'commission' RPC request.
@@ -97,6 +98,10 @@ async def handle_commission(
             if nc.pubkey_prefix in config.secrets and config.secrets[nc.pubkey_prefix].prv_key
         ]
         return {"ok": True, "data": {"replaceable": replaceable}}
+
+    async def _prog(msg: str) -> None:
+        if progress is not None:
+            await progress(msg)
 
     gateway = wq._gateway
 
@@ -126,6 +131,7 @@ async def handle_commission(
             gateway.info.get("radio_cr"),
         )
 
+        await _prog("switching to factory frequency...")
         unknown = await discover_unmanaged(gateway, db, config)
 
         if len(unknown) == 0:
@@ -143,6 +149,7 @@ async def handle_commission(
             }
 
         node_info = unknown[0]
+        await _prog(f"found node {node_info['pubkey'][:12]}")
 
         # discover() restored home freq; re-hop to factory so commissioning commands reach the node.
         await gateway.hop_radio(*Gateway.FACTORY_FREQ)
@@ -153,6 +160,7 @@ async def handle_commission(
 
             # discover() uses prefix_only=False so we have the full 32-byte pubkey.
             # Login with the factory default password before sending CLI commands.
+            await _prog("logging in...")
             if not await gateway.login(contact, "password"):
                 return {
                     "ok": False,
@@ -161,11 +169,12 @@ async def handle_commission(
                         "ensure it is factory-fresh (default password 'password') and retry"
                     ),
                 }
+            await _prog("login OK")
 
             if mode == "new":
-                return await _commission_new(req, gateway, config, contact)
+                return await _commission_new(req, gateway, config, contact, _prog)
             else:
-                return await _commission_replace(req, gateway, config, contact)
+                return await _commission_replace(req, gateway, config, contact, _prog)
         finally:
             await gateway.restore_radio(*home_radio)
 
@@ -185,6 +194,7 @@ async def _commission_new(
     gateway: Gateway,
     config: Config,
     contact: dict[str, Any],
+    progress: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> dict[str, Any]:
     """
     Commission a brand-new node.
@@ -219,12 +229,23 @@ async def _commission_new(
         cmds.append((f"set radio {target_freq_str}", True))  # triggers reboot; faf
     cmds.append(("reboot", True))
 
+    _cmd_labels = {
+        f"password {admin_password}": "setting password",
+        f"set guest.password {guest_password}": "setting guest password",
+        f"set name {name}": f"setting name",
+        f"set radio {target_freq_str}": "setting radio (node will reboot)",
+        "reboot": "rebooting",
+    }
     for cmd, faf in cmds:
+        if progress is not None:
+            await progress(_cmd_labels.get(cmd, cmd))
         result = await gateway.send_command(contact, cmd, timeout=30.0)
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
     if config.config_path:
+        if progress is not None:
+            await progress("writing config.yaml...")
         _append_node_config(
             config_path=config.config_path,
             pubkey_prefix=pubkey_prefix,
@@ -234,6 +255,8 @@ async def _commission_new(
         )
 
     if config.secrets_path:
+        if progress is not None:
+            await progress("writing secrets.yaml...")
         _update_secrets(
             secrets_path=config.secrets_path,
             pubkey_prefix=pubkey_prefix,
@@ -261,6 +284,7 @@ async def _commission_replace(
     gateway: Gateway,
     config: Config,
     contact: dict[str, Any],
+    progress: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> dict[str, Any]:
     """
     Restore a node's identity from secrets.yaml and push its config.
@@ -296,6 +320,9 @@ async def _commission_replace(
     cmds.append(("reboot", True))
 
     for cmd, faf in cmds:
+        if progress is not None:
+            label = cmd.split()[0] if " " in cmd else cmd
+            await progress(f"{label}...")
         result = await gateway.send_command(contact, cmd, timeout=30.0)
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
