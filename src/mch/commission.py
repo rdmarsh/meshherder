@@ -13,16 +13,10 @@ ensuring gateway.discover() is called with the right dwell time.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-# Factory-fresh nodes route command responses via flood, but cannot route the
-# reply back to the gateway (no routing table entry). Wait briefly between
-# commands so the node can process each one; don't wait for responses.
-_CMD_DELAY = 1.5  # seconds between commissioning commands
 
 import yaml
 
@@ -156,9 +150,17 @@ async def handle_commission(
             # add_commission_contact() inserts it with flood routing so send_command() succeeds.
             contact = await gateway.add_commission_contact(node_info)
 
-            # No login here: send_login_sync uses 32-byte full-key routing which the
-            # firmware rejects for flood-routed contacts (out_path_len=255). Factory-fresh
-            # nodes accept CLI commands without auth; the 'password' command sets auth.
+            # discover() uses prefix_only=False so we have the full 32-byte pubkey.
+            # Login with the factory default password before sending CLI commands.
+            if not await gateway.login(contact, "password"):
+                return {
+                    "ok": False,
+                    "error": (
+                        "could not authenticate to factory node — "
+                        "ensure it is factory-fresh (default password 'password') and retry"
+                    ),
+                }
+
             if mode == "new":
                 return await _commission_new(req, gateway, config, contact)
             else:
@@ -225,12 +227,9 @@ async def _commission_new(
     cmds.append(("reboot", True))
 
     for cmd, faf in cmds:
-        # await_response=False: factory nodes flood-route commands but cannot route
-        # responses back (no gateway entry in routing table). Send and move on.
-        result = await gateway.send_command(contact, cmd, await_response=False)
+        result = await gateway.send_command(contact, cmd, timeout=30.0)
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
-        await asyncio.sleep(_CMD_DELAY)
 
     # Save prv_key to secrets.yaml under the factory prefix (temporary — operator
     # must rename this entry to the node's new pubkey prefix after it reboots).
@@ -300,7 +299,6 @@ async def _commission_replace(
         result = await gateway.send_command(contact, cmd, await_response=False)
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
-        await asyncio.sleep(_CMD_DELAY)
 
     log.info("replaced node identity for %s (%s)", pubkey_prefix, node_cfg.label or "")
     return {

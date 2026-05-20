@@ -380,15 +380,15 @@ async def test_discover_subscribes_before_sending_request():
 
 @pytest.mark.asyncio
 async def test_discover_sends_req_with_all_types_filter():
-    """discover() calls send_node_discover_req(filter=0x0F)."""
+    """discover() calls send_node_discover_req with filter=0x0F and prefix_only=False."""
     fake_mc = make_discover_mc()
     gw = make_connected_gateway(fake_mc)
     gw.info = {**HOME_RADIO, "name": "TestGW"}
-    capture_subscribe(fake_mc)  # return values unused here
+    capture_subscribe(fake_mc)
 
     await gw.discover(factory_freq=FACTORY_FREQ, dwell=0.01)
 
-    fake_mc.commands.send_node_discover_req.assert_awaited_once_with(filter=0x0F)
+    fake_mc.commands.send_node_discover_req.assert_awaited_once_with(filter=0x0F, prefix_only=False)
 
 
 @pytest.mark.asyncio

@@ -14,12 +14,6 @@ from mch.gateway import CommandResult
 from mch.models import Node, NodeState
 
 
-@pytest.fixture(autouse=True)
-def zero_cmd_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Zero out inter-command delay so commission tests don't sleep."""
-    monkeypatch.setattr("mch.commission._CMD_DELAY", 0)
-
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -41,6 +35,7 @@ def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
     gw.add_commission_contact = AsyncMock(
         side_effect=lambda ni: {"public_key": ni["pubkey"], "adv_name": ""}
     )
+    gw.login = AsyncMock(return_value=True)
     gw.info = {"radio_freq": 915.075, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5}
     return gw
 
@@ -869,6 +864,78 @@ async def test_commission_new_restores_home_radio_after_commissioning():
     }, wq, db, cfg)
 
     gw.restore_radio.assert_called_once_with(915.075, 125.0, 9, 5)
+
+
+# ---------------------------------------------------------------------------
+# handle_commission — login with factory default password
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_commission_new_logins_with_factory_password():
+    """'new' mode logs in with 'password' (factory default) before commands."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "name": "TestNode", "target_freq": "915.075,125,9,5",
+    }, wq, db, cfg)
+
+    gw.login.assert_called_once()
+    _, pwd = gw.login.call_args[0]
+    assert pwd == "password"
+
+
+@pytest.mark.asyncio
+async def test_commission_new_login_failure_returns_error():
+    """'new' mode returns error when login fails — does not call send_command."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = AsyncMock(return_value=False)
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "name": "TestNode", "target_freq": "915.075,125,9,5",
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    assert "authenticate" in resp["error"]
+    gw.send_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_login_failure_returns_error():
+    """'replace' mode also returns error when login fails."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = AsyncMock(return_value=False)
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
+    )
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    assert "authenticate" in resp["error"]
+    gw.send_command.assert_not_called()
 
 
 @pytest.mark.asyncio
