@@ -99,7 +99,7 @@ class Gateway:
                     or r.bw != self.info.get("radio_bw")
                     or r.sf != self.info.get("radio_sf")):
                 log.info(
-                    "forcing gateway to home freq: %.3f/%d/SF%d",
+                    "changing gateway to home freq: %.3f/%d/SF%d",
                     r.freq, r.bw, r.sf,
                 )
                 await self._mc.commands.set_radio(r.freq, r.bw, r.sf, r.cr)
