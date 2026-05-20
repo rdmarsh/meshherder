@@ -731,9 +731,9 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
 
     while True:  # outer: re-enter values loop
         if label:
-            label = click.prompt("Site label", default=label).strip()
+            label = click.prompt("Node label", default=label).strip()
         else:
-            label = click.prompt("Site label").strip()
+            label = click.prompt("Node label").strip()
         group = click.prompt("Group (optional, press Enter to skip)", default=group or "").strip() or None
         name_default = name or label
         # Re-prompt name until within 31 bytes.
