@@ -619,6 +619,7 @@ def _run_commission_wizard(socket: str) -> None:
         resp = _rpc(socket, {"cmd": "commission", "mode": "scan"}, timeout=30)
         if not resp.get("ok"):
             click.echo(f"\nSearch failed: {resp.get('error', 'unknown error')}")
+            click.echo("")
             choice = click.prompt("Press Enter to retry or q to cancel", default="", show_default=False).strip().lower()
             if choice == "q":
                 return
@@ -629,6 +630,7 @@ def _run_commission_wizard(socket: str) -> None:
 
         if len(nodes) == 0:
             click.echo("\nNo unmanaged nodes found. Is it powered on and in range with an antenna?")
+            click.echo("")
             choice = click.prompt("Press Enter to retry or q to cancel", default="", show_default=False).strip().lower()
             if choice == "q":
                 return
