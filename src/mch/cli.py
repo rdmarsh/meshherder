@@ -595,10 +595,50 @@ def commission(ctx: click.Context) -> None:
 
 
 def _run_commission_wizard(socket: str) -> None:
-    """Interactive wizard: asks mode, collects params, confirms, sends RPC, prints result."""
+    """Interactive wizard: scans for nodes, asks mode, collects params, sends RPC, prints result."""
     click.echo("")
     click.echo("Commission a MeshCore node")
     click.echo("=" * 26)
+    click.echo("")
+
+    # Search first — no point asking questions if there's no node to commission.
+    gateway_radio = None
+    while True:
+        click.echo("Searching for unmanaged nodes on factory frequency (869.618 MHz)...")
+        resp = _rpc(socket, {"cmd": "commission", "mode": "scan"}, timeout=30)
+        if not resp.get("ok"):
+            click.echo(f"\nSearch failed: {resp.get('error', 'unknown error')}")
+            choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
+            if choice == "q":
+                return
+            continue
+
+        nodes = resp["data"]["nodes"]
+        gateway_radio = resp["data"].get("gateway_radio")
+
+        if len(nodes) == 0:
+            click.echo("\nNo unmanaged nodes found. Is it powered on and in range with an antenna?")
+            choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
+            if choice == "q":
+                return
+            continue
+
+        if len(nodes) > 1:
+            click.echo(f"\nFound {len(nodes)} unmanaged nodes - commission one at a time:")
+            for n in nodes:
+                click.echo(f"  {n['pubkey'][:12]}")
+            click.echo("")
+            choice = click.prompt(
+                "Power off all but one, then press Enter to retry or q to cancel", default=""
+            ).strip().lower()
+            if choice == "q":
+                return
+            continue
+
+        found_pubkey = nodes[0]["pubkey"][:12]
+        click.echo(f"\nFound 1 unmanaged node: {found_pubkey}")
+        break
+
     click.echo("")
     click.echo("  (n) New node     - brand new hardware, generate fresh identity")
     click.echo("  (r) Replace node - restore a known node's identity from secrets.yaml")
@@ -608,7 +648,7 @@ def _run_commission_wizard(socket: str) -> None:
     while True:
         mode_raw = click.prompt("Mode", default="q").strip().lower()
         if mode_raw in ("n", "new"):
-            _commission_new_wizard(socket)
+            _commission_new_wizard(socket, gateway_radio)
             return
         if mode_raw in ("r", "replace"):
             _commission_replace_wizard(socket)
@@ -619,22 +659,36 @@ def _run_commission_wizard(socket: str) -> None:
         click.echo("  please enter n, r, or q")
 
 
-def _commission_new_wizard(socket: str) -> None:
-    """Collect params for a new node, confirm, send RPC, display result."""
+def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> None:
+    """Collect params for a new node, confirm, send RPC with retry, display result."""
     click.echo("")
     click.echo("New node commissioning")
-    click.echo("")
-    click.echo("The gateway will search for unmanaged nodes on the factory frequency.")
-    click.echo("Make sure only ONE new node is powered on and in range.")
     click.echo("")
 
     label = click.prompt("Site label").strip()
     group = click.prompt("Group (optional, press Enter to skip)", default="").strip() or None
-    name_default = label
-    name = click.prompt(f"Mesh name", default=name_default).strip()
-    target_freq = click.prompt("Target frequency (freq,bw,sf,cr)").strip()
-    admin_password = click.prompt("Admin password (Enter to skip)", default="", hide_input=True).strip() or ""
-    guest_password = click.prompt("Guest password (Enter to skip)", default="", hide_input=True).strip() or None
+    name = click.prompt("Mesh name", default=label).strip()
+
+    if gateway_radio:
+        target_freq = click.prompt("Target frequency (freq,bw,sf,cr)", default=gateway_radio).strip()
+    else:
+        target_freq = click.prompt("Target frequency (freq,bw,sf,cr)").strip()
+
+    # Ask twice for admin password; skip confirmation when empty.
+    while True:
+        admin_password = click.prompt(
+            "Admin password (Enter to skip)", default="", hide_input=True
+        ).strip()
+        if not admin_password:
+            break
+        confirm = click.prompt("Confirm admin password", hide_input=True)
+        if admin_password == confirm:
+            break
+        click.echo("Passwords do not match.")
+
+    guest_password = click.prompt(
+        "Guest password (Enter to skip)", default="", hide_input=True
+    ).strip() or None
 
     click.echo("")
     click.echo("  label:    " + label)
@@ -649,22 +703,30 @@ def _commission_new_wizard(socket: str) -> None:
         return
 
     click.echo("")
-    click.echo("Searching for unmanaged nodes...")
 
-    resp = _rpc(socket, {
-        "cmd": "commission",
-        "mode": "new",
-        "label": label,
-        "group": group,
-        "name": name,
-        "target_freq": target_freq,
-        "admin_password": admin_password,
-        "guest_password": guest_password,
-    }, timeout=60)
+    while True:
+        click.echo("Commissioning node...")
+        resp = _rpc(socket, {
+            "cmd": "commission",
+            "mode": "new",
+            "label": label,
+            "group": group,
+            "name": name,
+            "target_freq": target_freq,
+            "admin_password": admin_password,
+            "guest_password": guest_password,
+        }, timeout=60)
 
-    if not resp.get("ok"):
-        click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
-        raise SystemExit(1)
+        if resp.get("ok"):
+            break
+
+        click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
+        click.echo("Check the node is powered on, in range, and with an antenna.")
+        choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
+        if choice == "q":
+            click.echo("cancelled")
+            return
+        click.echo("Retrying...")
 
     d = resp["data"]
     factory_prefix = d.get("factory_prefix", "?")
@@ -673,7 +735,7 @@ def _commission_new_wizard(socket: str) -> None:
     click.echo("")
     click.echo("Node commissioned successfully.")
     click.echo("")
-    click.echo("Private key (32 bytes) — save this before the node reboots:")
+    click.echo("Private key (32 bytes) - save this before the node reboots:")
     click.echo(f"  {prv_key}")
     click.echo("")
     click.echo(f"Saved to secrets.yaml under temporary prefix: {factory_prefix}")
@@ -687,7 +749,7 @@ def _commission_new_wizard(socket: str) -> None:
 
 
 def _commission_replace_wizard(socket: str) -> None:
-    """List replaceable nodes, ask operator to pick one, confirm, send RPC."""
+    """List replaceable nodes, ask operator to pick one, confirm, send RPC with retry."""
     resp = _rpc(socket, {"cmd": "commission", "mode": "list_replace"}, timeout=10)
     if not resp.get("ok"):
         click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
@@ -729,17 +791,25 @@ def _commission_replace_wizard(socket: str) -> None:
         return
 
     click.echo("")
-    click.echo("Searching for unmanaged nodes...")
 
-    resp = _rpc(socket, {
-        "cmd": "commission",
-        "mode": "replace",
-        "pubkey_prefix": prefix,
-    }, timeout=60)
+    while True:
+        click.echo("Commissioning node...")
+        resp = _rpc(socket, {
+            "cmd": "commission",
+            "mode": "replace",
+            "pubkey_prefix": prefix,
+        }, timeout=60)
 
-    if not resp.get("ok"):
-        click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
-        raise SystemExit(1)
+        if resp.get("ok"):
+            break
+
+        click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
+        click.echo("Check the node is powered on, in range, and with an antenna.")
+        choice = click.prompt("Press Enter to retry or q to cancel", default="").strip().lower()
+        if choice == "q":
+            click.echo("cancelled")
+            return
+        click.echo("Retrying...")
 
     click.echo("")
     click.echo(f"Replacement complete. '{label}' ({prefix}) is rebooting with its restored identity.")

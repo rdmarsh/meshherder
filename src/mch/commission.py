@@ -85,8 +85,8 @@ async def handle_commission(
     The queue is always resumed in the finally block.
     """
     mode = req.get("mode")
-    if mode not in ("new", "replace", "list_replace"):
-        return {"ok": False, "error": f"mode must be 'new', 'replace', or 'list_replace', got {mode!r}"}
+    if mode not in ("new", "replace", "list_replace", "scan"):
+        return {"ok": False, "error": f"mode must be 'new', 'replace', 'list_replace', or 'scan', got {mode!r}"}
 
     if mode == "list_replace":
         # Return config nodes that have a prv_key in secrets — no discovery needed.
@@ -99,8 +99,32 @@ async def handle_commission(
 
     gateway = wq._gateway
 
+    if mode == "scan":
+        # Discover unmanaged nodes and return them with the gateway's home radio string.
+        wq.pause()
+        try:
+            unknown = await discover_unmanaged(gateway, db, config)
+            r = config.gateway.radio
+            gateway_radio = (
+                f"{r.freq:.3f},{r.bw:g},{r.sf},{r.cr}" if r else None
+            )
+            return {"ok": True, "data": {"nodes": unknown, "gateway_radio": gateway_radio}}
+        except Exception as exc:
+            log.exception("commission scan error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+        finally:
+            wq.resume()
+
     wq.pause()
     try:
+        # Save home radio state before discover() hops and restores it.
+        home_radio = (
+            gateway.info.get("radio_freq"),
+            gateway.info.get("radio_bw"),
+            gateway.info.get("radio_sf"),
+            gateway.info.get("radio_cr"),
+        )
+
         unknown = await discover_unmanaged(gateway, db, config)
 
         if len(unknown) == 0:
@@ -120,10 +144,15 @@ async def handle_commission(
         node_info = unknown[0]
         contact = {"public_key": node_info["pubkey"], "adv_name": ""}
 
-        if mode == "new":
-            return await _commission_new(req, gateway, config, contact)
-        else:
-            return await _commission_replace(req, gateway, config, contact)
+        # discover() restored home freq; re-hop to factory so commissioning commands reach the node.
+        await gateway.hop_radio(*Gateway.FACTORY_FREQ)
+        try:
+            if mode == "new":
+                return await _commission_new(req, gateway, config, contact)
+            else:
+                return await _commission_replace(req, gateway, config, contact)
+        finally:
+            await gateway.restore_radio(*home_radio)
 
     except Exception as exc:
         log.exception("commission error: %s", exc)
