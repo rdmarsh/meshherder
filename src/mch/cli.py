@@ -604,7 +604,7 @@ def _run_commission_wizard(socket: str) -> None:
     # Search first — no point asking questions if there's no node to commission.
     gateway_radio = None
     while True:
-        click.echo("Searching for unmanaged nodes on default factory frequency (869.618 MHz)...")
+        click.echo("Searching for unmanaged nodes in range on default factory frequency (869.618 MHz)...")
         resp = _rpc(socket, {"cmd": "commission", "mode": "scan"}, timeout=30)
         if not resp.get("ok"):
             click.echo(f"\nSearch failed: {resp.get('error', 'unknown error')}")
