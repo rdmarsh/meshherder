@@ -312,12 +312,17 @@ class Gateway:
         contact: dict[str, Any],
         command: str,
         timeout: float = 30.0,
+        await_response: bool = True,
     ) -> CommandResult:
         """
         Send a CLI command to a managed node and return the text response.
 
-        Registers a Future keyed by pubkey_prefix before sending; the background
-        receive loop resolves it when the matching CONTACT_MSG_RECV arrives.
+        When await_response=True (default): registers a Future keyed by pubkey_prefix
+        and waits for the background receive loop to resolve it via CONTACT_MSG_RECV.
+
+        When await_response=False: sends the command and returns immediately without
+        waiting for a response. Use for commissioning commands where flood-routed
+        contacts cannot route their responses back (no path to gateway in routing table).
 
         Only one send_cmd is in flight at a time (_send_lock) to avoid the
         gateway's suggested_timeout calculation going wrong when two commands
@@ -326,16 +331,22 @@ class Gateway:
         mc = self._require_connected()
         pubkey_prefix = contact["public_key"][:12]
 
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future[str] = loop.create_future()
-        self._pending[pubkey_prefix] = fut
+        if await_response:
+            loop = asyncio.get_running_loop()
+            fut: asyncio.Future[str] = loop.create_future()
+            self._pending[pubkey_prefix] = fut
 
         async with self._send_lock:
             log.debug("send_command to %r: %r", contact.get("adv_name"), command)
             result = await mc.commands.send_cmd(contact, command)
             if result.type == EventType.ERROR:
-                self._pending.pop(pubkey_prefix, None)
+                if await_response:
+                    self._pending.pop(pubkey_prefix, None)
                 return CommandResult(success=False, error=f"send failed: {result.payload}")
+
+        if not await_response:
+            log.debug("sent (no-wait) to %r: %r", contact.get("adv_name"), command)
+            return CommandResult(success=True)
 
         # _send_lock released — receive loop will now resolve the future
         try:

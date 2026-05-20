@@ -200,6 +200,38 @@ async def test_send_command_requires_connection():
         await gw.send_command(make_contact(), "ver")
 
 
+@pytest.mark.asyncio
+async def test_send_command_no_wait_returns_immediately():
+    """await_response=False returns immediately after send_cmd without registering a future."""
+    contact = make_contact("aabbcc112233")
+    fake_mc = MagicMock()
+    gw = make_connected_gateway(fake_mc)
+
+    fake_mc.commands.send_cmd = AsyncMock(return_value=make_event(
+        EventType.MSG_SENT, {"suggested_timeout": 2000}
+    ))
+    # Receive loop not started — if await_response were True this would hang forever.
+    result = await gw.send_command(contact, "password test", await_response=False)
+    assert result.success is True
+    fake_mc.commands.send_cmd.assert_called_once()
+    assert gw._pending == {}
+
+
+@pytest.mark.asyncio
+async def test_send_command_no_wait_send_failure_returns_error():
+    """await_response=False still reports send-level errors."""
+    contact = make_contact("aabbcc112233")
+    fake_mc = MagicMock()
+    gw = make_connected_gateway(fake_mc)
+
+    fake_mc.commands.send_cmd = AsyncMock(return_value=make_event(
+        EventType.ERROR, "ERR_CODE_NOT_FOUND"
+    ))
+    result = await gw.send_command(contact, "password test", await_response=False)
+    assert result.success is False
+    assert "send failed" in result.error
+
+
 # ---------------------------------------------------------------------------
 # login
 # ---------------------------------------------------------------------------

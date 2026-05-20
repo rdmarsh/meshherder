@@ -14,6 +14,12 @@ from mch.gateway import CommandResult
 from mch.models import Node, NodeState
 
 
+@pytest.fixture(autouse=True)
+def zero_cmd_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zero out inter-command delay so commission tests don't sleep."""
+    monkeypatch.setattr("mch.commission._CMD_DELAY", 0)
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
