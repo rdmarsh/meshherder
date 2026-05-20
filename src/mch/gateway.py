@@ -288,19 +288,20 @@ class Gateway:
         may not need a password.
         """
         mc = self._require_connected()
-        log.info("logging in to %r", contact.get("adv_name"))
+        label = contact.get("adv_name") or contact.get("public_key", "")[:12]
+        log.info("logging in to %s", label)
         result = await mc.commands.send_login_sync(
             contact, password, timeout=30, min_timeout=30
         )
         if result and result.type == EventType.LOGIN_SUCCESS:
             log.info(
-                "login OK for %r  permissions=%s  is_admin=%s",
-                contact.get("adv_name"),
+                "login OK for %s  permissions=%s  is_admin=%s",
+                label,
                 result.payload.get("permissions"),
                 result.payload.get("is_admin"),
             )
             return True
-        log.warning("login failed for %r: %r", contact.get("adv_name"), result)
+        log.warning("login failed for %s: %r", label, result)
         return False
 
     # ------------------------------------------------------------------

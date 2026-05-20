@@ -212,18 +212,20 @@ async def _commission_new(
     prv_key_hex = prv_key_bytes.hex()
 
     # Commands in order: (command, fire_and_forget)
-    # Radio is set before prv.key so the node boots on the right frequency.
-    # prv.key is set before reboot; it changes identity after restart.
-    # reboot is fire-and-forget — the node may auto-reboot from prv.key.
+    # prv.key must come before radio: 'set radio' triggers an immediate node reboot.
+    # If radio is sent first, the node reboots before it can receive set prv.key.
+    # With prv.key first: key is persisted, then 'set radio' triggers the reboot,
+    # and the node comes up with both the new identity and the target frequency.
+    # reboot is fire-and-forget as a fallback if set radio didn't already trigger one.
     cmds: list[tuple[str, bool]] = []
     cmds.append((f"password {admin_password}", False))
     if guest_password:
         cmds.append((f"set guest.password {guest_password}", False))
     if name:
         cmds.append((f"set name {name}", False))
-    if target_freq_str:
-        cmds.append((f"set radio {target_freq_str}", False))
     cmds.append((f"set prv.key {prv_key_hex}", False))
+    if target_freq_str:
+        cmds.append((f"set radio {target_freq_str}", True))  # triggers reboot; faf
     cmds.append(("reboot", True))
 
     for cmd, faf in cmds:

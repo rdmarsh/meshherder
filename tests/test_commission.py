@@ -337,7 +337,7 @@ async def test_commission_new_sends_reboot_last():
 
 @pytest.mark.asyncio
 async def test_commission_new_sends_radio_before_prv_key():
-    """'new' mode sends set radio before set prv.key so node boots on right freq."""
+    """'new' mode sends set prv.key before set radio: radio triggers reboot so key must be persisted first."""
     from mch.commission import handle_commission
 
     pubkey = "a1" * 32
@@ -354,7 +354,7 @@ async def test_commission_new_sends_radio_before_prv_key():
     sent = [call.args[1] for call in gw.send_command.call_args_list]
     radio_idx = next(i for i, c in enumerate(sent) if c.startswith("set radio"))
     prv_idx = next(i for i, c in enumerate(sent) if c.startswith("set prv.key"))
-    assert radio_idx < prv_idx
+    assert prv_idx < radio_idx
 
 
 @pytest.mark.asyncio
