@@ -473,7 +473,9 @@ class Gateway:
 
         sub = mc.dispatcher.subscribe(EventType.DISCOVER_RESPONSE, _on_discover_response)
         try:
-            await mc.commands.send_node_discover_req(filter=0x0F)
+            # prefix_only=False: get the full 32-byte pubkey in the response.
+            # The default (True) returns only 8 bytes, which is insufficient for login.
+            await mc.commands.send_node_discover_req(filter=0x0F, prefix_only=False)
             await asyncio.sleep(dwell)
         finally:
             sub.unsubscribe()
