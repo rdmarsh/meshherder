@@ -719,13 +719,25 @@ def _prompt_radio_all(freq: str, bw: str, sf: str, cr: str, gateway_radio: str |
             f"Radio settings ('c' to change) [{gw_display}]",
             default="",
             prompt_suffix=": ",
-        ).strip().lower()
-        if accept != "c":
-            # Accept gateway defaults — return them directly.
+        ).strip()
+        if accept == "":
+            # Accept gateway defaults.
             parts = gateway_radio.split(",")
             def _gw(i: int) -> str:
                 return parts[i].strip() if len(parts) > i else ""
             return _gw(0), _gw(1), _gw(2), _gw(3)
+        if accept.lower() != "c":
+            # Try to parse as a pasted freq,bw,sf,cr string.
+            parts = [p.strip() for p in accept.split(",")]
+            if len(parts) == 4:
+                try:
+                    f, b, s, c = parts
+                    float(f); float(b); int(s); int(c)
+                    return f, b, s, c
+                except ValueError:
+                    pass
+            click.echo("  enter nothing to accept defaults, 'c' to change, or paste freq,bw,sf,cr")
+            # Fall through to individual prompts.
 
     click.echo("")
     freq = _prompt_radio_freq(freq)
