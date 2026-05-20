@@ -35,6 +35,9 @@ Think Ansible for your nodes, running continuously in the background.
 - **`mch exec`** — run one-off MeshCore CLI commands against any managed node without adding them
   to config. Destructive commands (reboot, clkreboot) require confirmation; irreversible commands
   (erase, set prv.key) are blocked.
+- **`mch commission`** — guided wizard to commission a fresh or replacement MeshCore node. Pauses
+  the sync queue, hops to the factory default frequency, discovers the node, pushes password/name/
+  radio/identity config, and saves the private key to `secrets.yaml`. No need to stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
 
 ## Requirements
@@ -227,7 +230,20 @@ with pubkey prefixes ready to paste in.
 
 ```yaml
 nodes:
-  aabbccdd: "hunter2"
+  aabbccdd:
+    password: "hunter2"
+    guest_password: "guest"    # optional
+    prv_key: "deadbeef..."     # optional — set by mch commission; used for node replacement
+```
+
+A fleet-wide default password is supported with the `default` key:
+
+```yaml
+nodes:
+  default:
+    password: "fleetpassword"  # fallback for any node without an explicit entry
+  aabbccdd:
+    password: "overridepassword"  # takes priority over default
 ```
 
 mchd only uses the password when it gets a permission error from a node — it does not send it on
@@ -283,6 +299,42 @@ nodes:
 4. Run `mch status` to confirm the node is now known, then `mch sync <prefix>` to sync it
    immediately without waiting for the scheduler.
 
+### Commissioning a new node
+
+Use `mch commission` to take a freshly-flashed node from zero config to fully managed without
+stopping mchd. The wizard supports two modes:
+
+**New node** — node has a factory-generated identity you don't know yet:
+
+1. Power on the fresh node near the gateway (factory default frequency: 869.618 MHz, 62.5 kHz, SF8, CR5).
+2. Run `mch commission` and select **n** (new).
+3. Enter the label, group, mesh-visible name, target frequency, and admin password.
+4. The daemon discovers the node, sets the password, name, radio, and a freshly-generated private
+   key, then reboots the node. The private key is saved to `secrets.yaml` under the node's current
+   (factory) pubkey prefix.
+5. Wait for the node to reboot (~30 seconds). Its identity changes after the reboot.
+6. Run `mch contacts` to find the new pubkey prefix.
+7. Add a config.yaml entry for the new prefix, and rename the secrets.yaml entry from the factory
+   prefix to the new one.
+8. Restart mchd (or wait for the next sync cycle).
+
+**Replacement node** — restoring a known identity onto new hardware:
+
+Prerequisites: `prv_key` must already be in `secrets.yaml` for the node you are replacing (it was
+saved there when the original node was commissioned).
+
+1. Power on the blank hardware near the gateway.
+2. Run `mch commission` and select **r** (replace).
+3. Select the node from the list of replaceable nodes.
+4. The daemon discovers the blank hardware, restores the private key (restoring the original mesh
+   identity), sets the password and radio frequency, then reboots.
+5. After reboot the node comes back with the original pubkey — mchd will sync it on the next cycle
+   (or use `mch sync <prefix>` to sync immediately).
+
+> **Note:** During commissioning the daemon discovers unmanaged nodes on the factory default
+> frequency (869.618 MHz). If more than one unmanaged node is in range, commissioning is aborted —
+> commission one node at a time.
+
 ### Building a node on the bench
 
 Power the node on near the gateway. MeshCore nodes broadcast advertisements on startup; within a
@@ -336,6 +388,7 @@ mch contacts                  Repeater nodes visible to the gateway not yet in c
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node immediately; CLI waits for the result
 mch exec <node> <command>     Run a raw MeshCore CLI command on a node (e.g. ver, stats-radio)
+mch commission                Commission a fresh or replacement MeshCore node (interactive wizard)
 mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch stop                      Stop mchd via systemd
 mch restart                   Restart mchd via systemd

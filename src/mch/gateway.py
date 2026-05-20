@@ -424,3 +424,49 @@ class Gateway:
         result = await mc.commands.send_appstart()
         p = result.payload
         return p["radio_freq"], p["radio_bw"], p["radio_sf"], p["radio_cr"]
+
+    # ------------------------------------------------------------------
+    # discovery
+    # ------------------------------------------------------------------
+
+    FACTORY_FREQ: tuple[float, float, int, int] = (869.618, 62.5, 8, 5)
+
+    async def discover(
+        self,
+        factory_freq: tuple[float, float, int, int] = FACTORY_FREQ,
+        dwell: float = 8.0,
+    ) -> list[dict[str, Any]]:
+        """
+        Hop to factory frequency, broadcast a node-discover request, collect
+        DISCOVER_RESPONSE events for `dwell` seconds, then restore radio.
+
+        Subscribe before sending to avoid the race where a fast responder
+        replies before we've registered the callback.
+
+        Returns a list of response payloads (dicts with pubkey, node_type, SNR_in, …).
+        """
+        mc = self._require_connected()
+        freq, bw, sf, cr = factory_freq
+        saved = await self.hop_radio(freq, bw, sf, cr)
+
+        discovered: list[dict[str, Any]] = []
+
+        def _on_discover_response(event: Any) -> None:
+            discovered.append(event.payload)
+            log.debug(
+                "discover: found %s (type=%d SNR=%.1f)",
+                event.payload.get("pubkey", "?")[:12],
+                event.payload.get("node_type", -1),
+                event.payload.get("SNR_in", 0),
+            )
+
+        sub = mc.dispatcher.subscribe(EventType.DISCOVER_RESPONSE, _on_discover_response)
+        try:
+            await mc.commands.send_node_discover_req(filter=0x0F)
+            await asyncio.sleep(dwell)
+        finally:
+            sub.unsubscribe()
+            await self.restore_radio(*saved)
+
+        log.info("discover: found %d node(s) in %.1fs on %.3f MHz", len(discovered), dwell, freq)
+        return discovered

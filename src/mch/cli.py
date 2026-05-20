@@ -578,6 +578,175 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple, yes: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# commission
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.pass_context
+def commission(ctx: click.Context) -> None:
+    """Interactively commission a new or replacement MeshCore node.
+
+    The gateway will hop to the factory frequency (869.618 MHz) and search
+    for unmanaged nodes. Make sure only one new or replacement node is powered
+    on and within range before proceeding.
+    """
+    socket = ctx.obj["socket"]
+    _run_commission_wizard(socket)
+
+
+def _run_commission_wizard(socket: str) -> None:
+    """Interactive wizard: asks mode, collects params, confirms, sends RPC, prints result."""
+    click.echo("")
+    click.echo("Commission a MeshCore node")
+    click.echo("=" * 26)
+    click.echo("")
+    click.echo("  (n) New node     - brand new hardware, generate fresh identity")
+    click.echo("  (r) Replace node - restore a known node's identity from secrets.yaml")
+    click.echo("  (q) Cancel")
+    click.echo("")
+
+    while True:
+        mode_raw = click.prompt("Mode", default="q").strip().lower()
+        if mode_raw in ("n", "new"):
+            _commission_new_wizard(socket)
+            return
+        if mode_raw in ("r", "replace"):
+            _commission_replace_wizard(socket)
+            return
+        if mode_raw in ("q", "quit", ""):
+            click.echo("cancelled")
+            return
+        click.echo("  please enter n, r, or q")
+
+
+def _commission_new_wizard(socket: str) -> None:
+    """Collect params for a new node, confirm, send RPC, display result."""
+    click.echo("")
+    click.echo("New node commissioning")
+    click.echo("")
+    click.echo("The gateway will search for unmanaged nodes on the factory frequency.")
+    click.echo("Make sure only ONE new node is powered on and in range.")
+    click.echo("")
+
+    label = click.prompt("Site label").strip()
+    group = click.prompt("Group (optional, press Enter to skip)", default="").strip() or None
+    name_default = label
+    name = click.prompt(f"Mesh name", default=name_default).strip()
+    target_freq = click.prompt("Target frequency (freq,bw,sf,cr)").strip()
+    admin_password = click.prompt("Admin password (Enter to skip)", default="", hide_input=True).strip() or ""
+    guest_password = click.prompt("Guest password (Enter to skip)", default="", hide_input=True).strip() or None
+
+    click.echo("")
+    click.echo("  label:    " + label)
+    click.echo("  group:    " + (group or "-"))
+    click.echo("  name:     " + name)
+    click.echo("  freq:     " + target_freq)
+    click.echo("  password: " + ("(set)" if admin_password else "(none)"))
+    click.echo("")
+
+    if not click.confirm("Proceed with commissioning?", default=False):
+        click.echo("cancelled")
+        return
+
+    click.echo("")
+    click.echo("Searching for unmanaged nodes...")
+
+    resp = _rpc(socket, {
+        "cmd": "commission",
+        "mode": "new",
+        "label": label,
+        "group": group,
+        "name": name,
+        "target_freq": target_freq,
+        "admin_password": admin_password,
+        "guest_password": guest_password,
+    }, timeout=60)
+
+    if not resp.get("ok"):
+        click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
+        raise SystemExit(1)
+
+    d = resp["data"]
+    factory_prefix = d.get("factory_prefix", "?")
+    prv_key = d.get("prv_key", "")
+
+    click.echo("")
+    click.echo("Node commissioned successfully.")
+    click.echo("")
+    click.echo("Private key (32 bytes) — save this before the node reboots:")
+    click.echo(f"  {prv_key}")
+    click.echo("")
+    click.echo(f"Saved to secrets.yaml under temporary prefix: {factory_prefix}")
+    click.echo("")
+    click.echo("Next steps:")
+    click.echo("  1. Wait 30-60s for the node to reboot with its new identity")
+    click.echo("  2. Run: mch contacts")
+    click.echo("  3. Note the new pubkey_prefix for this node")
+    click.echo("  4. Add a config.yaml entry (mch contacts shows a ready-to-paste snippet)")
+    click.echo(f"  5. In secrets.yaml: rename '{factory_prefix}' to the new prefix")
+
+
+def _commission_replace_wizard(socket: str) -> None:
+    """List replaceable nodes, ask operator to pick one, confirm, send RPC."""
+    resp = _rpc(socket, {"cmd": "commission", "mode": "list_replace"}, timeout=10)
+    if not resp.get("ok"):
+        click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
+        raise SystemExit(1)
+
+    candidates = resp["data"].get("replaceable", [])
+    if not candidates:
+        click.echo("error: no nodes have a prv_key in secrets.yaml - nothing to replace", err=True)
+        raise SystemExit(1)
+
+    click.echo("")
+    click.echo("Nodes eligible for replacement (have prv_key in secrets.yaml):")
+    click.echo("")
+    for i, c in enumerate(candidates, 1):
+        click.echo(f"  {i}. {c['pubkey_prefix']}  {c.get('label') or '(no label)'}")
+    click.echo("")
+
+    while True:
+        try:
+            idx = int(click.prompt(f"Select node [1-{len(candidates)}]")) - 1
+            if 0 <= idx < len(candidates):
+                break
+            click.echo(f"  please enter a number between 1 and {len(candidates)}")
+        except (ValueError, click.Abort):
+            click.echo("cancelled")
+            return
+
+    chosen = candidates[idx]
+    prefix = chosen["pubkey_prefix"]
+    label = chosen.get("label") or prefix
+
+    click.echo("")
+    click.echo(f"About to replace hardware for '{label}' ({prefix}).")
+    click.echo("The new hardware should be in factory state (fresh flash, default frequency).")
+    click.echo("")
+
+    if not click.confirm("Is the replacement hardware ready?", default=False):
+        click.echo("cancelled")
+        return
+
+    click.echo("")
+    click.echo("Searching for unmanaged nodes...")
+
+    resp = _rpc(socket, {
+        "cmd": "commission",
+        "mode": "replace",
+        "pubkey_prefix": prefix,
+    }, timeout=60)
+
+    if not resp.get("ok"):
+        click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
+        raise SystemExit(1)
+
+    click.echo("")
+    click.echo(f"Replacement complete. '{label}' ({prefix}) is rebooting with its restored identity.")
+    click.echo(f"Once it comes back up, run: mch sync {prefix}")
+
+
+# ---------------------------------------------------------------------------
 # start / stop (via systemd)
 # ---------------------------------------------------------------------------
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from mch.config import RadioConfig, load
+from mch.config import NodeSecrets, RadioConfig, load
 
 
 def _write_config(tmp_path: Path, text: str) -> Path:
@@ -177,7 +177,7 @@ def test_secrets_default_password_loaded(tmp_path):
     secrets.write_text("nodes:\n  default: fleetpassword\n")
     secrets.chmod(0o600)
     cfg = load(p, secrets_path=secrets)
-    assert cfg.secrets.get("default") == "fleetpassword"
+    assert cfg.secrets["default"].password == "fleetpassword"
 
 
 def test_secrets_default_with_per_node_override(tmp_path):
@@ -187,5 +187,49 @@ def test_secrets_default_with_per_node_override(tmp_path):
     secrets.write_text("nodes:\n  aabbccdd: nodepass\n  default: fleetpass\n")
     secrets.chmod(0o600)
     cfg = load(p, secrets_path=secrets)
-    assert cfg.secrets["aabbccdd"] == "nodepass"
-    assert cfg.secrets["default"] == "fleetpass"
+    assert cfg.secrets["aabbccdd"].password == "nodepass"
+    assert cfg.secrets["default"].password == "fleetpass"
+
+
+def test_secrets_new_format_password(tmp_path):
+    """New per-node dict format loads password field."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd:\n    password: nodepass\n")
+    secrets.chmod(0o600)
+    cfg = load(p, secrets_path=secrets)
+    assert cfg.secrets["aabbccdd"].password == "nodepass"
+    assert cfg.secrets["aabbccdd"].guest_password is None
+    assert cfg.secrets["aabbccdd"].prv_key is None
+
+
+def test_secrets_new_format_prv_key(tmp_path):
+    """prv_key field is loaded from new per-node dict format."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd:\n    password: p\n    prv_key: deadbeef\n")
+    secrets.chmod(0o600)
+    cfg = load(p, secrets_path=secrets)
+    assert cfg.secrets["aabbccdd"].prv_key == "deadbeef"
+
+
+def test_secrets_new_format_guest_password(tmp_path):
+    """guest_password field is loaded from new per-node dict format."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd:\n    password: p\n    guest_password: guest\n")
+    secrets.chmod(0o600)
+    cfg = load(p, secrets_path=secrets)
+    assert cfg.secrets["aabbccdd"].guest_password == "guest"
+
+
+def test_secrets_old_flat_format_migrated(tmp_path):
+    """Old flat format {prefix: password} is automatically migrated to NodeSecrets."""
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd: oldpass\n  default: fleetpass\n")
+    secrets.chmod(0o600)
+    cfg = load(p, secrets_path=secrets)
+    assert cfg.secrets["aabbccdd"].password == "oldpass"
+    assert cfg.secrets["default"].password == "fleetpass"
+    assert cfg.secrets["aabbccdd"].prv_key is None

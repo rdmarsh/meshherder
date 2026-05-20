@@ -172,6 +172,8 @@ class WorkQueue:
         self._running = False
         self._current_task: asyncio.Task | None = None
         self._contacts: list[dict[str, Any]] = []  # cached at startup; refreshed by run_cycle
+        self._paused: asyncio.Event = asyncio.Event()
+        self._paused.set()  # starts unpaused — event set means "OK to proceed"
 
     async def run(self) -> None:
         """
@@ -202,6 +204,14 @@ class WorkQueue:
         self._running = False
         if self._current_task:
             self._current_task.cancel()
+
+    def pause(self) -> None:
+        """Signal the queue not to start new node operations (e.g. during commissioning)."""
+        self._paused.clear()
+
+    def resume(self) -> None:
+        """Allow the queue to resume processing nodes."""
+        self._paused.set()
 
     async def _run_next_due(self, contacts: list[dict]) -> None:
         """Find the next due node, sleep until it's time, and process it."""
@@ -245,6 +255,9 @@ class WorkQueue:
             self._gateway.info.get("radio_bw", 0),
             self._gateway.info.get("radio_sf", 0),
         )
+
+        # block here if commission (or any other operation) has paused the queue
+        await self._paused.wait()
 
         if contact and node_cfg:
             await self._process_node(node_cfg, group_cfg, contact)
@@ -586,14 +599,12 @@ class WorkQueue:
             node.auth_cached = False
             await self._db.upsert_node(node)
 
-            password = (
-                next(
-                    (pwd for prefix, pwd in self._config.secrets.items()
-                     if prefix != "default" and node_cfg.pubkey_prefix.startswith(prefix)),
-                    None,
-                )
-                or self._config.secrets.get("default")
-            )
+            ns = next(
+                (ns for prefix, ns in self._config.secrets.items()
+                 if prefix != "default" and node_cfg.pubkey_prefix.startswith(prefix)),
+                None,
+            ) or self._config.secrets.get("default")
+            password = ns.password if ns else None
             if not password:
                 raise _ReloginFailed("permission denied — no password configured")
 

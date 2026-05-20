@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from mch.config import Config
+from mch.config import Config, NodeSecrets
 from mch.daemon import _dispatch
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
@@ -65,7 +65,7 @@ async def test_node_dispatch_prefix_returns_facts(db, wq, config):
 async def test_node_dispatch_passwd_known_when_in_secrets(db, wq, config):
     """passwd_known is True when secrets has an entry matching the node's pubkey."""
     node = await _seed_node_with_facts(db)
-    config.secrets = {node.pubkey[:8]: "hunter2"}
+    config.secrets = {node.pubkey[:8]: NodeSecrets(password="hunter2")}
 
     resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
 
@@ -87,7 +87,7 @@ async def test_node_dispatch_passwd_known_false_when_no_secret(db, wq, config):
 async def test_node_dispatch_passwd_known_true_when_default_secret(db, wq, config):
     """passwd_known is True when a fleet-wide default password is configured."""
     node = await _seed_node_with_facts(db)
-    config.secrets = {"default": "fleetpassword"}
+    config.secrets = {"default": NodeSecrets(password="fleetpassword")}
 
     resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
 
@@ -106,7 +106,7 @@ async def test_issues_dispatch_no_open_node_when_default_password(db, wq, config
         auth_cached=False,
     )
     await db.upsert_node(node)
-    config.secrets = {"default": "fleetpassword"}
+    config.secrets = {"default": NodeSecrets(password="fleetpassword")}
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
@@ -125,7 +125,7 @@ async def test_status_dispatch_no_open_node_count_when_default_password(db, wq, 
         auth_cached=False,
     )
     await db.upsert_node(node)
-    config.secrets = {"default": "fleetpassword"}
+    config.secrets = {"default": NodeSecrets(password="fleetpassword")}
 
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
@@ -636,7 +636,7 @@ async def test_issues_dispatch_no_open_node_when_passwd_configured(db, wq, confi
         auth_cached=False,
     )
     await db.upsert_node(node)
-    config.secrets = {node.pubkey[:8]: "hunter2"}
+    config.secrets = {node.pubkey[:8]: NodeSecrets(password="hunter2")}
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
