@@ -30,7 +30,12 @@ def _wpad(s: str, width: int) -> str:
     return s + " " * max(0, width - _wlen(s))
 
 
-async def _request(socket_path: str, cmd: dict[str, Any], timeout: float = 30) -> dict[str, Any]:
+async def _request(
+    socket_path: str,
+    cmd: dict[str, Any],
+    timeout: float = 30,
+    on_progress: Any = None,
+) -> dict[str, Any]:
     try:
         reader, writer = await asyncio.open_unix_connection(socket_path)
     except (FileNotFoundError, ConnectionRefusedError):
@@ -41,17 +46,23 @@ async def _request(socket_path: str, cmd: dict[str, Any], timeout: float = 30) -
     writer.write((json.dumps(cmd) + "\n").encode())
     await writer.drain()
     try:
-        raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
+        while True:
+            raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
+            data = json.loads(raw)
+            if data.get("type") == "progress":
+                if on_progress:
+                    on_progress(data["msg"])
+            else:
+                writer.close()
+                return data
     except (TimeoutError, asyncio.TimeoutError):
         writer.close()
         click.echo(f"error: timed out waiting for daemon response ({timeout:.0f}s)", err=True)
         raise SystemExit(1)
-    writer.close()
-    return json.loads(raw)
 
 
-def _rpc(socket_path: str, cmd: dict[str, Any], timeout: float = 30) -> dict[str, Any]:
-    return asyncio.run(_request(socket_path, cmd, timeout=timeout))
+def _rpc(socket_path: str, cmd: dict[str, Any], timeout: float = 30, on_progress: Any = None) -> dict[str, Any]:
+    return asyncio.run(_request(socket_path, cmd, timeout=timeout, on_progress=on_progress))
 
 
 def _check(resp: dict[str, Any]) -> Any:
@@ -820,7 +831,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
                 "target_freq": target_freq,
                 "admin_password": admin_password,
                 "guest_password": guest_password or None,
-            }, timeout=60)
+            }, timeout=120, on_progress=lambda msg: click.echo(f"  {msg}"))
 
             if resp.get("ok"):
                 commission_ok = True
@@ -905,7 +916,7 @@ def _commission_replace_wizard(socket: str) -> None:
             "cmd": "commission",
             "mode": "replace",
             "pubkey_prefix": prefix,
-        }, timeout=60)
+        }, timeout=120, on_progress=lambda msg: click.echo(f"  {msg}"))
 
         if resp.get("ok"):
             break

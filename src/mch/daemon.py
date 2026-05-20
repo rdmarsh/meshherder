@@ -48,7 +48,7 @@ async def _handle_client(
     try:
         raw = await asyncio.wait_for(reader.readline(), timeout=10)
         req = json.loads(raw)
-        resp = await _dispatch(req, wq, db, config)
+        resp = await _dispatch(req, wq, db, config, writer)
     except asyncio.TimeoutError:
         resp = {"ok": False, "error": "timeout reading command"}
     except json.JSONDecodeError as exc:
@@ -98,6 +98,7 @@ async def _dispatch(
     wq: WorkQueue,
     db: Database,
     config: Config,
+    writer: asyncio.StreamWriter | None = None,
 ) -> dict[str, Any]:
     cmd = req.get("cmd", "")
 
@@ -336,7 +337,15 @@ async def _dispatch(
 
     if cmd == "commission":
         from mch.commission import handle_commission
-        return await handle_commission(req, wq, db, config)
+        progress_cb = None
+        if writer is not None and req.get("mode") in ("new", "replace"):
+            async def progress_cb(msg: str) -> None:
+                try:
+                    writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
+                    await writer.drain()
+                except (ConnectionResetError, BrokenPipeError):
+                    pass
+        return await handle_commission(req, wq, db, config, progress=progress_cb)
 
     return {"ok": False, "error": f"unknown command: {cmd!r}"}
 
