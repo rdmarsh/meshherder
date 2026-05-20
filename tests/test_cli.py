@@ -661,11 +661,10 @@ def _commission_input(*lines: str) -> str:
 
 
 def test_commission_new_happy_path():
-    """Happy path: scan finds node, 'new' mode, confirms, daemon returns success with prv_key."""
+    """Happy path: scan finds node, 'new' mode, confirms, daemon returns success with pubkey_prefix."""
     runner = CliRunner()
     success_resp = {"ok": True, "data": {
-        "factory_prefix": "a695e2be",
-        "prv_key": "deadbeef" * 8,
+        "pubkey_prefix": "a695e2be",
         "label": "Test Site",
         "name": "Test Site",
         "group": None,
@@ -686,8 +685,7 @@ def test_commission_new_happy_path():
             "y",          # confirm
         ))
     assert result.exit_code == 0, result.output
-    assert "deadbeef" in result.output  # prv_key shown
-    assert "a695e2be" in result.output  # factory prefix shown
+    assert "a695e2be" in result.output  # pubkey_prefix shown
 
 
 def test_commission_new_cancel_aborts():
@@ -716,8 +714,7 @@ def test_commission_new_admin_password_defaults_to_password():
     """Admin password defaults to 'password' when user presses Enter."""
     runner = CliRunner()
     success_resp = {"ok": True, "data": {
-        "factory_prefix": "a695e2be",
-        "prv_key": "deadbeef" * 8,
+        "pubkey_prefix": "a695e2be",
         "label": "Test Site",
         "name": "Test Site",
         "group": None,
@@ -760,8 +757,7 @@ def test_commission_new_edit_at_summary_re_enters_values():
     """Entering 'e' at the summary confirm re-enters the wizard keeping prior values as defaults."""
     runner = CliRunner()
     success_resp = {"ok": True, "data": {
-        "factory_prefix": "a695e2be",
-        "prv_key": "deadbeef" * 8,
+        "pubkey_prefix": "a695e2be",
         "label": "Test Site",
         "name": "Test Site",
         "group": None,
