@@ -233,3 +233,19 @@ def test_secrets_old_flat_format_migrated(tmp_path):
     assert cfg.secrets["aabbccdd"].password == "oldpass"
     assert cfg.secrets["default"].password == "fleetpass"
     assert cfg.secrets["aabbccdd"].prv_key is None
+
+
+# ------------------------------------------------------------------
+# pubkey_prefix type coercion
+# ------------------------------------------------------------------
+
+def test_pubkey_prefix_numeric_yaml_coerced_to_str(tmp_path):
+    """pubkey_prefix that YAML parses as int (all-digit value) is coerced to str."""
+    # YAML parses bare integers without quotes as int; startswith() would TypeError
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: 123456
+    """)
+    cfg = load(p)
+    assert cfg.nodes[0].pubkey_prefix == "123456"
+    assert isinstance(cfg.nodes[0].pubkey_prefix, str)
