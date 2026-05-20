@@ -86,12 +86,12 @@ sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
 # Grant serial port access
 sudo usermod -aG dialout mch
 
-# Config directory — group-readable so operators can inspect, not world-readable
-sudo install -d -o root -g mch -m 750 /usr/local/etc/mch
+# Config directory — owned by mch so the daemon can write secrets.yaml during commissioning
+sudo install -d -o mch -g mch -m 750 /usr/local/etc/mch
 
 # Config and secrets
-sudo install -o root -g mch -m 640 examples/config.example.yaml /usr/local/etc/mch/config.yaml
-sudo install -o root -g mch -m 600 examples/secrets.example.yaml /usr/local/etc/mch/secrets.yaml
+sudo install -o mch -g mch -m 640 examples/config.example.yaml /usr/local/etc/mch/config.yaml
+sudo install -o mch -g mch -m 600 examples/secrets.example.yaml /usr/local/etc/mch/secrets.yaml
 
 # Database directory
 sudo install -d -o mch -g mch -m 755 /var/lib/mch
