@@ -470,3 +470,37 @@ class Gateway:
 
         log.info("discover: found %d node(s) in %.1fs on %.3f MHz", len(discovered), dwell, freq)
         return discovered
+
+    async def add_commission_contact(self, node_info: dict[str, Any]) -> dict[str, Any]:
+        """Add a node from a DISCOVER_RESPONSE to the gateway's contact store.
+
+        DISCOVER_RESPONSE gives us the pubkey but does NOT add the node to the
+        gateway's contact store. send_cmd fails with ERR_CODE_NOT_FOUND if the
+        destination isn't there. This method adds it with flood routing (no known
+        path to a fresh node) so subsequent send_command() calls succeed.
+
+        Returns the contact dict to pass to send_command().
+        """
+        mc = self._require_connected()
+        contact = {
+            "public_key": node_info["pubkey"],
+            "type": node_info.get("node_type", 2),
+            "flags": 0,
+            "out_path": "",
+            "out_path_len": -1,  # -1 = flood routing
+            "out_path_hash_mode": 0,
+            "adv_name": "",
+            "last_advert": 0,
+            "adv_lat": 0,
+            "adv_lon": 0,
+        }
+        result = await mc.commands.add_contact(contact)
+        if result.type == EventType.ERROR:
+            log.warning(
+                "add_commission_contact: could not add %s to contact store (%s) — send_command may fail",
+                node_info["pubkey"][:12],
+                result.payload,
+            )
+        else:
+            log.info("commission: added %s to contact store (flood routing)", node_info["pubkey"][:12])
+        return contact

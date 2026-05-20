@@ -32,6 +32,9 @@ def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     gw.hop_radio = AsyncMock(return_value=None)
     gw.restore_radio = AsyncMock(return_value=None)
+    gw.add_commission_contact = AsyncMock(
+        side_effect=lambda ni: {"public_key": ni["pubkey"], "adv_name": ""}
+    )
     gw.info = {"radio_freq": 915.075, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5}
     return gw
 
@@ -801,6 +804,27 @@ async def test_commission_scan_returns_none_gateway_radio_when_not_configured():
 # ---------------------------------------------------------------------------
 # handle_commission — radio re-hop after discover
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_commission_new_adds_contact_before_commands():
+    """handle_commission adds discovered node to the gateway contact store before sending commands."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "name": "TestNode", "target_freq": "915.075,125,9,5",
+    }, wq, db, cfg)
+
+    gw.add_commission_contact.assert_called_once()
+    call_arg = gw.add_commission_contact.call_args[0][0]
+    assert call_arg["pubkey"] == pubkey
+
 
 @pytest.mark.asyncio
 async def test_commission_new_rehops_to_factory_before_commands():
