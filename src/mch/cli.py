@@ -748,7 +748,6 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
     # Saved values — used as defaults when the outer edit loop iterates.
     label = ""
     group = ""
-    name = ""
     admin_password = "password"
     guest_password = ""
     freq = _gw(0)
@@ -758,21 +757,19 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
 
     while True:  # outer: re-enter values loop
         # --- identity ---
-        if label:
-            label = click.prompt("Node label", default=label).strip()
-        else:
-            label = click.prompt("Node label").strip()
-        group = click.prompt("Group (Enter to skip)", default=group or "").strip() or None
-        name_default = name or label
-        # Re-prompt name until within 31 bytes.
+        # Re-prompt until within 31 bytes (MeshCore firmware cap for mesh-visible name).
         while True:
-            name = click.prompt("Node name", default=name_default).strip()
-            encoded = name.encode("utf-8")
+            if label:
+                label = click.prompt("Node name", default=label).strip()
+            else:
+                label = click.prompt("Node name").strip()
+            encoded = label.encode("utf-8")
             if len(encoded) <= 31:
                 break
             truncated = encoded[:31].decode("utf-8", errors="ignore")
             click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
-            name_default = truncated
+            label = truncated
+        group = click.prompt("Group (Enter to skip)", default=group or "").strip() or None
 
         # --- security ---
         click.echo("")
@@ -787,9 +784,8 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
         target_freq = f"{freq},{bw},{sf},{cr}"
 
         click.echo("")
-        click.echo("  label:    " + label)
+        click.echo("  name:     " + label)
         click.echo("  group:    " + (group or "-"))
-        click.echo("  name:     " + name)
         click.echo("  password: " + admin_password)
         if guest_password:
             click.echo("  guest pw: " + guest_password)
@@ -812,7 +808,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
                 "mode": "new",
                 "label": label,
                 "group": group,
-                "name": name,
+                "name": label,
                 "target_freq": target_freq,
                 "admin_password": admin_password,
                 "guest_password": guest_password or None,
