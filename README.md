@@ -37,7 +37,8 @@ Think Ansible for your nodes, running continuously in the background.
   (erase, set prv.key) are blocked.
 - **`mch commission`** — guided wizard to commission a fresh or replacement MeshCore node. Pauses
   the sync queue, hops to the factory default frequency, discovers the node, pushes password/name/
-  radio/identity config, and saves the private key to `secrets.yaml`. No need to stop mchd.
+  and radio config, then writes the node's entry into `config.yaml` and saves the password to
+  `secrets.yaml`. No need to stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
 
 ## Requirements
@@ -233,7 +234,7 @@ nodes:
   aabbccdd:
     password: "hunter2"
     guest_password: "guest"    # optional
-    prv_key: "deadbeef..."     # optional — set by mch commission; used for node replacement
+    prv_key: "deadbeef..."     # optional — stored manually for node replacement (replace mode)
 ```
 
 A fleet-wide default password is supported with the `default` key:
@@ -304,19 +305,16 @@ nodes:
 Use `mch commission` to take a freshly-flashed node from zero config to fully managed without
 stopping mchd. The wizard supports two modes:
 
-**New node** — node has a factory-generated identity you don't know yet:
+**New node** — node has a factory-generated identity:
 
 1. Power on the fresh node near the gateway (factory default frequency: 869.618 MHz, 62.5 kHz, SF8, CR5).
 2. Run `mch commission` and select **n** (new).
 3. Enter the label, group, mesh-visible name, target frequency, and admin password.
-4. The daemon discovers the node, sets the password, name, radio, and a freshly-generated private
-   key, then reboots the node. The private key is saved to `secrets.yaml` under the node's current
-   (factory) pubkey prefix.
-5. Wait for the node to reboot (~30 seconds). Its identity changes after the reboot.
-6. Run `mch contacts` to find the new pubkey prefix.
-7. Add a config.yaml entry for the new prefix, and rename the secrets.yaml entry from the factory
-   prefix to the new one.
-8. Restart mchd (or wait for the next sync cycle).
+4. The daemon discovers the node, sets the password, name, and radio, then reboots the node.
+   The factory pubkey is the permanent identity — it does not change after reboot.
+5. `mch commission` writes the node entry into `config.yaml` and saves the password to `secrets.yaml`
+   automatically — no manual editing needed.
+6. Wait ~30 seconds for the node to reboot on the target frequency, then run `mch sync`.
 
 **Replacement node** — restoring a known identity onto new hardware:
 

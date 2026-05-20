@@ -817,17 +817,9 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
     click.echo(f"Node pubkey prefix: {pubkey_prefix}")
     click.echo(f"Password saved to secrets.yaml under: {pubkey_prefix}")
     click.echo("")
-    click.echo("Next steps:")
+    click.echo("config.yaml updated. Next steps:")
     click.echo("  1. Wait 30-60s for the node to reboot on the target frequency")
-    click.echo("  2. Add a config.yaml entry:")
-    click.echo(f"       - pubkey_prefix: {pubkey_prefix}")
-    if d.get("label"):
-        click.echo(f"         label: {d['label']}")
-    if d.get("group"):
-        click.echo(f"         group: {d['group']}")
-    if d.get("target_freq"):
-        click.echo(f"         via: {d['target_freq']}")
-    click.echo("  3. Run: mch sync")
+    click.echo("  2. Run: mch sync")
 
 
 def _commission_replace_wizard(socket: str) -> None:
