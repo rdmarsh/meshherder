@@ -114,9 +114,6 @@ class Config:
     profiles_url: str | None = None
     # profiles_file: use this local file instead of the bundled default
     profiles_file: str | None = None
-    # set by load() so commission and other write-back operations know where to write
-    config_path: Path | None = field(default=None, repr=False)
-    secrets_path: Path | None = field(default=None, repr=False)
 
 
 def load(config_path: Path, secrets_path: Path | None = None) -> Config:
@@ -148,8 +145,6 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
         secrets_path = Path(raw.get("secrets_file", config_path.parent / "secrets.yaml"))
 
     cfg.secrets = _load_secrets(secrets_path)
-    cfg.config_path = config_path
-    cfg.secrets_path = secrets_path
 
     return cfg
 
