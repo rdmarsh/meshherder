@@ -648,12 +648,12 @@ def test_exec_daemon_error_exits_nonzero():
 
 # ------ commission ------
 
-_COMMISSION_NODES_RESP = {"ok": True, "data": {
-    "nodes": [
-        {"pubkey_prefix": "aabbccdd", "label": "Site A", "prv_key": True},
-        {"pubkey_prefix": "11223344", "label": "Site B", "prv_key": True},
-    ],
+# scan returns exactly one unmanaged node + gateway_radio
+_SCAN_RESP_ONE = {"ok": True, "data": {
+    "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
+    "gateway_radio": "915.075,125,9,5",
 }}
+_SCAN_RESP_NONE = {"ok": True, "data": {"nodes": [], "gateway_radio": "915.075,125,9,5"}}
 
 
 def _commission_input(*lines: str) -> str:
@@ -661,7 +661,7 @@ def _commission_input(*lines: str) -> str:
 
 
 def test_commission_new_happy_path():
-    """Happy path: 'new' mode collects inputs, confirms, calls daemon, shows prv_key."""
+    """Happy path: scan finds node, 'new' mode, confirms, daemon returns success with prv_key."""
     runner = CliRunner()
     success_resp = {"ok": True, "data": {
         "factory_prefix": "a695e2be",
@@ -671,16 +671,16 @@ def test_commission_new_happy_path():
         "group": None,
         "target_freq": "915.075,125,9,5",
     }}
-    with patch("mch.cli._rpc", return_value=success_resp):
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
-            "n",               # mode: new
-            "Test Site",       # label
-            "",                # group (skip)
-            "",                # name (default to label)
-            "915.075,125,9,5", # target freq
-            "adminpass",       # admin password
-            "",                # guest password (skip)
-            "y",               # confirm
+            "n",          # mode: new (after scan)
+            "Test Site",  # label
+            "",           # group (skip)
+            "",           # name (default to label)
+            "",           # target freq (accept gateway default)
+            "",           # admin password (empty — no confirm needed)
+            "",           # guest password (skip)
+            "y",          # confirm
         ))
     assert result.exit_code == 0
     assert "deadbeef" in result.output  # prv_key shown
@@ -688,48 +688,88 @@ def test_commission_new_happy_path():
 
 
 def test_commission_new_cancel_aborts():
-    """Answering 'n' at the confirm prompt aborts without calling the daemon."""
+    """Answering 'n' at the confirm prompt aborts without calling the commission RPC."""
     runner = CliRunner()
-    with patch("mch.cli._rpc") as mock_rpc:
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
-            "n",               # mode: new
-            "Test Site",       # label
-            "",                # group
-            "",                # name
-            "915.075,125,9,5", # freq
-            "adminpass",       # password
-            "",                # guest password
-            "n",               # cancel
+            "n",          # mode: new
+            "Test Site",  # label
+            "",           # group
+            "",           # name
+            "",           # freq (accept default)
+            "",           # admin password (empty)
+            "",           # guest password
+            "n",          # cancel at confirm
         ))
-    mock_rpc.assert_not_called()
+    assert mock_rpc.call_count == 1  # only the scan call, no commission call
     assert result.exit_code == 0
     assert "cancelled" in result.output.lower()
 
 
-def test_commission_new_daemon_error_shown():
-    """When daemon returns an error, it is displayed."""
+def test_commission_new_password_mismatch_reprompts():
+    """Mismatched admin password re-prompts until they match."""
     runner = CliRunner()
-    with patch("mch.cli._rpc", return_value={"ok": False, "error": "no unmanaged nodes found"}):
+    success_resp = {"ok": True, "data": {
+        "factory_prefix": "a695e2be",
+        "prv_key": "deadbeef" * 8,
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": None,
+        "target_freq": "915.075,125,9,5",
+    }}
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
-            "n",
-            "Test Site",
-            "",
-            "",
-            "915.075,125,9,5",
-            "adminpass",
-            "",
-            "y",
+            "n",          # mode
+            "Test Site",  # label
+            "",           # group
+            "",           # name
+            "",           # freq
+            "pass1",      # admin password
+            "wrong",      # confirm (mismatch)
+            "pass1",      # retry admin password
+            "pass1",      # confirm (match)
+            "",           # guest password
+            "y",          # confirm
         ))
-    assert result.exit_code != 0
-    assert "no unmanaged nodes found" in result.output
+    assert result.exit_code == 0
+    assert "do not match" in result.output.lower()
+
+
+def test_commission_new_daemon_error_shows_retry_prompt():
+    """When commission RPC fails, error is shown and retry/cancel prompt is offered."""
+    runner = CliRunner()
+    error_resp = {"ok": False, "error": "commission failed at 'password x': ERR_CODE_NOT_FOUND"}
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, error_resp]):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+            "n",          # mode
+            "Test Site",  # label
+            "",           # group
+            "",           # name
+            "",           # freq
+            "",           # admin password (empty)
+            "",           # guest password
+            "y",          # confirm
+            "q",          # quit at retry prompt
+        ))
+    assert "ERR_CODE_NOT_FOUND" in result.output
+    assert result.exit_code == 0  # graceful exit via retry prompt
 
 
 def test_commission_quit_at_mode_prompt():
-    """Entering 'q' at the mode prompt exits cleanly."""
+    """Entering 'q' at the mode prompt (after scan) exits cleanly."""
     runner = CliRunner()
-    with patch("mch.cli._rpc") as mock_rpc:
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
-    mock_rpc.assert_not_called()
+    assert mock_rpc.call_count == 1  # scan was called, but nothing else
+    assert result.exit_code == 0
+
+
+def test_commission_scan_no_nodes_retry_then_quit():
+    """When no unmanaged nodes found, retry prompt is offered; user can quit."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_NONE]):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
+    assert "no unmanaged nodes" in result.output.lower()
     assert result.exit_code == 0
 
 
@@ -737,7 +777,7 @@ def test_commission_replace_no_replaceable_nodes():
     """'replace' mode with no config nodes having prv_key exits with informative message."""
     runner = CliRunner()
     list_resp = {"ok": True, "data": {"replaceable": []}}
-    with patch("mch.cli._rpc", return_value=list_resp):
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, list_resp]):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
             "r",
         ))
@@ -756,11 +796,11 @@ def test_commission_replace_happy_path():
         "pubkey_prefix": "aabbccdd",
         "label": "Site A",
     }}
-    with patch("mch.cli._rpc", side_effect=[list_resp, commission_resp]):
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, list_resp, commission_resp]):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
-            "r",    # replace
-            "1",    # select node 1
-            "y",    # confirm
+            "r",  # replace (after scan)
+            "1",  # select node 1
+            "y",  # confirm
         ))
     assert result.exit_code == 0
     assert "Site A" in result.output or "aabbccdd" in result.output

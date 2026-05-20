@@ -30,6 +30,9 @@ def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
     gw = MagicMock()
     gw.discover = AsyncMock(return_value=discovered or [])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    gw.hop_radio = AsyncMock(return_value=None)
+    gw.restore_radio = AsyncMock(return_value=None)
+    gw.info = {"radio_freq": 915.075, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5}
     return gw
 
 
@@ -723,3 +726,139 @@ def test_update_secrets_file_is_mode_600(tmp_path):
 
     mode = oct(os.stat(secrets_path).st_mode)[-3:]
     assert mode == "600"
+
+
+# ---------------------------------------------------------------------------
+# handle_commission — scan mode
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_commission_scan_pauses_and_resumes_queue():
+    """scan mode pauses and resumes the work queue."""
+    from mch.commission import handle_commission
+
+    gw = make_gateway(discovered=[discover_payload("aa" * 32)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({"cmd": "commission", "mode": "scan"}, wq, db, cfg)
+
+    wq.pause.assert_called_once()
+    wq.resume.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_commission_scan_returns_found_nodes():
+    """scan mode returns unmanaged nodes in data.nodes."""
+    from mch.commission import handle_commission
+
+    pubkey = "aa" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({"cmd": "commission", "mode": "scan"}, wq, db, cfg)
+
+    assert resp["ok"] is True
+    assert len(resp["data"]["nodes"]) == 1
+    assert resp["data"]["nodes"][0]["pubkey"] == pubkey
+
+
+@pytest.mark.asyncio
+async def test_commission_scan_returns_gateway_radio_string():
+    """scan mode includes gateway_radio formatted string when gateway radio is configured."""
+    from mch.commission import handle_commission
+
+    gw = make_gateway(discovered=[])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = Config(gateway=GatewayConfig(radio=RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5)))
+
+    resp = await handle_commission({"cmd": "commission", "mode": "scan"}, wq, db, cfg)
+
+    assert resp["ok"] is True
+    assert resp["data"]["gateway_radio"] == "915.075,125,9,5"
+
+
+@pytest.mark.asyncio
+async def test_commission_scan_returns_none_gateway_radio_when_not_configured():
+    """scan mode returns gateway_radio=None when gateway has no radio config."""
+    from mch.commission import handle_commission
+
+    gw = make_gateway(discovered=[])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()  # default GatewayConfig has radio=None
+
+    resp = await handle_commission({"cmd": "commission", "mode": "scan"}, wq, db, cfg)
+
+    assert resp["ok"] is True
+    assert resp["data"]["gateway_radio"] is None
+
+
+# ---------------------------------------------------------------------------
+# handle_commission — radio re-hop after discover
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_commission_new_rehops_to_factory_before_commands():
+    """After discover() restores home freq, handle_commission re-hops to factory for commands."""
+    from mch.commission import handle_commission
+    from mch.gateway import Gateway
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "name": "TestNode", "target_freq": "915.075,125,9,5",
+    }, wq, db, cfg)
+
+    gw.hop_radio.assert_called_once_with(*Gateway.FACTORY_FREQ)
+
+
+@pytest.mark.asyncio
+async def test_commission_new_restores_home_radio_after_commissioning():
+    """handle_commission restores the home radio freq after commissioning commands."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "name": "TestNode", "target_freq": "915.075,125,9,5",
+    }, wq, db, cfg)
+
+    gw.restore_radio.assert_called_once_with(915.075, 125.0, 9, 5)
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_rehops_to_factory_before_commands():
+    """'replace' mode also re-hops to factory freq before sending commands."""
+    from mch.commission import handle_commission
+    from mch.gateway import Gateway
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
+    )
+
+    await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    gw.hop_radio.assert_called_once_with(*Gateway.FACTORY_FREQ)
