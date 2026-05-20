@@ -142,11 +142,13 @@ async def handle_commission(
             }
 
         node_info = unknown[0]
-        contact = {"public_key": node_info["pubkey"], "adv_name": ""}
 
         # discover() restored home freq; re-hop to factory so commissioning commands reach the node.
         await gateway.hop_radio(*Gateway.FACTORY_FREQ)
         try:
+            # DISCOVER_RESPONSE does not add the node to the gateway's contact store.
+            # add_commission_contact() inserts it with flood routing so send_command() succeeds.
+            contact = await gateway.add_commission_contact(node_info)
             if mode == "new":
                 return await _commission_new(req, gateway, config, contact)
             else:
