@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import UTC, datetime
+
+import pytest
 
 from mch.db import Database
 from mch.models import (

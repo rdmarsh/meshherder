@@ -21,7 +21,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mch.config import Config, load as load_config
+from mch.config import Config
+from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
@@ -49,7 +50,7 @@ async def _handle_client(
         raw = await asyncio.wait_for(reader.readline(), timeout=10)
         req = json.loads(raw)
         resp = await _dispatch(req, wq, db, config, writer)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         resp = {"ok": False, "error": "timeout reading command"}
     except json.JSONDecodeError as exc:
         resp = {"ok": False, "error": f"bad JSON: {exc}"}
@@ -65,7 +66,7 @@ async def _handle_client(
         pass  # client disconnected before response was sent (e.g. CLI timed out)
 
 
-async def _resolve_node(query: str, db: Database) -> "Any":
+async def _resolve_node(query: str, db: Database) -> Any:
     """Resolve a pubkey prefix, label substring, or name substring to a single Node.
 
     Returns None if nothing matches.
@@ -110,7 +111,9 @@ async def _dispatch(
         drifted = [
             {
                 "node_pubkey": s.node_pubkey,
-                "label": pubkey_to_node[s.node_pubkey].label if s.node_pubkey in pubkey_to_node else "",
+                "label": (
+                    pubkey_to_node[s.node_pubkey].label if s.node_pubkey in pubkey_to_node else ""
+                ),
                 "key": s.key,
                 "desired": s.desired,
                 "observed": s.observed,
@@ -119,7 +122,9 @@ async def _dispatch(
             for s in drifted_records
         ]
 
-        _bad_states = {NodeState.UNKNOWN, NodeState.OFFLINE, NodeState.CONFIGURING, NodeState.PARTIAL}
+        _bad_states = {
+            NodeState.UNKNOWN, NodeState.OFFLINE, NodeState.CONFIGURING, NodeState.PARTIAL,
+        }
         bad_state = [
             {
                 "pubkey": n.pubkey,
@@ -232,7 +237,9 @@ async def _dispatch(
         return {"ok": True, "data": "sync started"}
 
     if cmd == "exec":
-        _BLOCKED = {"erase", "start ota", "set prv.key", "password", "setperm", "set guest.password"}
+        _BLOCKED = {
+            "erase", "start ota", "set prv.key", "password", "setperm", "set guest.password",
+        }
         _FIRE_AND_FORGET = {"reboot", "clkreboot"}
         pubkey = req.get("pubkey", "")
         command = (req.get("command") or "").strip()
@@ -252,12 +259,12 @@ async def _dispatch(
         if not contact:
             return {"ok": False, "error": f"no gateway contact for {node.pubkey[:12]}"}
         faf = cmd_root in _FIRE_AND_FORGET
-        result = await wq._gateway.send_command(contact, command, timeout=60)
-        if faf and not result.success:
+        cmd_result = await wq._gateway.send_command(contact, command, timeout=60)
+        if faf and not cmd_result.success:
             return {"ok": True, "data": "(sent - no response expected)"}
-        if not result.success:
-            return {"ok": False, "error": result.error or "no response"}
-        return {"ok": True, "data": result.text or "(ok)"}
+        if not cmd_result.success:
+            return {"ok": False, "error": cmd_result.error or "no response"}
+        return {"ok": True, "data": cmd_result.text or "(ok)"}
 
     if cmd == "contacts":
         from mch.queue import get_unfiled_contacts
@@ -285,7 +292,9 @@ async def _dispatch(
         drifted = [
             {
                 "node_pubkey": s.node_pubkey,
-                "label": pubkey_to_node[s.node_pubkey].label if s.node_pubkey in pubkey_to_node else "",
+                "label": (
+                    pubkey_to_node[s.node_pubkey].label if s.node_pubkey in pubkey_to_node else ""
+                ),
                 "key": s.key,
                 "desired": s.desired,
                 "observed": s.observed,
@@ -294,7 +303,9 @@ async def _dispatch(
             for s in drifted_records
         ]
         # nodes in a problematic state
-        _bad_states = {NodeState.UNKNOWN, NodeState.OFFLINE, NodeState.CONFIGURING, NodeState.PARTIAL}
+        _bad_states = {
+            NodeState.UNKNOWN, NodeState.OFFLINE, NodeState.CONFIGURING, NodeState.PARTIAL,
+        }
         bad_state = [
             {
                 "pubkey": n.pubkey,
@@ -323,11 +334,20 @@ async def _dispatch(
             and not _has_default_password
             and not any(n.pubkey.startswith(p) for p in config.secrets)
         ]
-        return {"ok": True, "data": {"drifted": drifted, "bad_state": bad_state, "ghosts": ghosts, "open_nodes": open_nodes}}
+        return {
+            "ok": True,
+            "data": {
+                "drifted": drifted,
+                "bad_state": bad_state,
+                "ghosts": ghosts,
+                "open_nodes": open_nodes,
+            },
+        }
 
     if cmd == "hint":
-        from mch.recommend import get_profile, load_profiles
         from pathlib import Path as _Path
+
+        from mch.recommend import get_profile, load_profiles
         profiles_file = _Path(config.profiles_file) if config.profiles_file else None
         profiles, universal = load_profiles(
             profiles_url=config.profiles_url,
@@ -343,7 +363,7 @@ async def _dispatch(
             if not node:
                 return {"ok": False, "error": f"node {pubkey!r} not found"}
             nodes = [node]
-        result = []
+        hint_results: list[dict[str, Any]] = []
         for n in nodes:
             facts = await db.get_facts(n.pubkey)
             raw_count = facts.get("neighbors")
@@ -351,7 +371,7 @@ async def _dispatch(
             # treat unknown neighbour count as 0 for profile lookup (mobile = most conservative)
             # count stays None so NBRS displays as '-' in the table
             profile = get_profile(count if count is not None else 0, profiles)
-            result.append({
+            hint_results.append({
                 "pubkey": n.pubkey,
                 "label": n.label,
                 "name": n.name,
@@ -367,7 +387,7 @@ async def _dispatch(
                     for u in universal
                 ],
             })
-        return {"ok": True, "data": result}
+        return {"ok": True, "data": hint_results}
 
     if cmd == "commission":
         from mch.commission import handle_commission
@@ -408,7 +428,7 @@ class Daemon:
         except GatewayError as exc:
             log.error("gateway connection failed: %s", exc)
             await self._db.close()
-            raise SystemExit(1)
+            raise SystemExit(1) from None
 
         if config.gateway.advert_on_start == "zerohop":
             log.info("sending startup advert.zerohop")
@@ -436,7 +456,7 @@ class Daemon:
         db = self._db
         wq = self._wq
 
-        async def client_connected(r, w):
+        async def client_connected(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
             await _handle_client(r, w, wq, db, config)
 
         self._server = await asyncio.start_unix_server(
@@ -496,7 +516,7 @@ def main() -> None:
         config = load_config(config_path)
     except Exception as exc:
         print(f"error loading config: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     daemon = Daemon(config)
     asyncio.run(daemon.run())

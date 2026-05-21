@@ -14,7 +14,8 @@ ensuring gateway.discover() is called with the right dwell time.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from mch.config import Config
 from mch.gateway import Gateway
@@ -32,7 +33,7 @@ log = logging.getLogger(__name__)
 
 async def discover_unmanaged(
     gateway: Gateway,
-    db: "Database",
+    db: Database,
     config: Config,
     *,
     dwell: float = 8.0,
@@ -69,10 +70,10 @@ async def discover_unmanaged(
 
 async def handle_commission(
     req: dict[str, Any],
-    wq: "WorkQueue",
-    db: "Database",
+    wq: WorkQueue,
+    db: Database,
     config: Config,
-    progress: Optional[Callable[[str], Awaitable[None]]] = None,
+    progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """
     Handle the 'commission' RPC request.
@@ -83,7 +84,10 @@ async def handle_commission(
     """
     mode = req.get("mode")
     if mode not in ("new", "replace", "list_replace", "scan"):
-        return {"ok": False, "error": f"mode must be 'new', 'replace', 'list_replace', or 'scan', got {mode!r}"}
+        return {
+            "ok": False,
+            "error": f"mode must be 'new', 'replace', 'list_replace', or 'scan', got {mode!r}",
+        }
 
     if mode == "list_replace":
         # Return config nodes that have a prv_key in secrets — no discovery needed.
@@ -119,11 +123,11 @@ async def handle_commission(
     wq.pause()
     try:
         # Save home radio state before discover() hops and restores it.
-        home_radio = (
-            gateway.info.get("radio_freq"),
-            gateway.info.get("radio_bw"),
-            gateway.info.get("radio_sf"),
-            gateway.info.get("radio_cr"),
+        home_radio: tuple[float, float, int, int] = (
+            float(gateway.info.get("radio_freq") or 0),
+            float(gateway.info.get("radio_bw") or 0),
+            int(gateway.info.get("radio_sf") or 0),
+            int(gateway.info.get("radio_cr") or 0),
         )
 
         await _prog("switching to factory frequency...")
@@ -132,7 +136,7 @@ async def handle_commission(
         if len(unknown) == 0:
             return {
                 "ok": False,
-                "error": "no unmanaged nodes found — is it in range and powered on with an antenna?",
+                "error": "no unmanaged nodes found - is it powered on, in range, with an antenna?",
             }
         if len(unknown) > 1:
             pubkeys = ", ".join(n["pubkey"][:12] for n in unknown)
@@ -189,7 +193,7 @@ async def _commission_new(
     gateway: Gateway,
     config: Config,
     contact: dict[str, Any],
-    progress: Optional[Callable[[str], Awaitable[None]]] = None,
+    progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """
     Commission a brand-new node.
@@ -261,7 +265,7 @@ async def _commission_replace(
     gateway: Gateway,
     config: Config,
     contact: dict[str, Any],
-    progress: Optional[Callable[[str], Awaitable[None]]] = None,
+    progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """
     Restore a node's identity from secrets.yaml and push its config.

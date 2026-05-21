@@ -16,7 +16,7 @@ Think Ansible for your nodes, running continuously in the background.
   policy.
 - **Read-only facts** — a configurable list of read-only data (firmware version, hardware name,
   role, and more) collected each sync cycle and stored in a local SQLite database.
-- **Multi-frequency support** — nodes on different radio settings? Add `radio:` to the node entry;
+- **Multi-frequency support** — nodes on different radio settings? Add `via:` to the node entry;
   mchd hops the gateway, manages the node, and restores the home frequency when done.
 - **Staggered scheduler** — nodes are spread randomly across the sync window so mchd restarts never
   cause a sync surge.

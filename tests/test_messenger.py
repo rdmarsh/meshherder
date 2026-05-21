@@ -11,7 +11,6 @@ from mch.gateway import Gateway
 from mch.messenger import Messenger, _chunk, _find_node
 from mch.models import Node, NodeState, SettingPolicy, SettingRecord
 
-
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
@@ -143,7 +142,6 @@ async def test_status_command_no_nodes(db):
 
 
 async def test_status_command_with_nodes(db):
-    from mch.db import Database
     await db.upsert_node(Node(pubkey="aa", name="A", state=NodeState.CONFIGURED))
     await db.upsert_node(Node(pubkey="bb", name="B", state=NodeState.PARTIAL))
     m, gw = _make_messenger(db)

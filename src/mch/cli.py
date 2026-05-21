@@ -14,7 +14,6 @@ from typing import Any
 
 import click
 
-
 DEFAULT_SOCKET = "/run/mch/mchd.sock"
 
 
@@ -39,27 +38,29 @@ async def _request(
     except (FileNotFoundError, ConnectionRefusedError):
         click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
         click.echo("  is mchd running?  try: mchd --help", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     writer.write((json.dumps(cmd) + "\n").encode())
     await writer.drain()
     try:
         while True:
             raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
-            data = json.loads(raw)
+            data: dict[str, Any] = json.loads(raw)
             if data.get("type") == "progress":
                 if on_progress:
                     on_progress(data["msg"])
             else:
                 writer.close()
                 return data
-    except (TimeoutError, asyncio.TimeoutError):
+    except TimeoutError:
         writer.close()
         click.echo(f"error: timed out waiting for daemon response ({timeout:.0f}s)", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
-def _rpc(socket_path: str, cmd: dict[str, Any], timeout: float = 30, on_progress: Any = None) -> dict[str, Any]:
+def _rpc(
+    socket_path: str, cmd: dict[str, Any], timeout: float = 30, on_progress: Any = None
+) -> dict[str, Any]:
     return asyncio.run(_request(socket_path, cmd, timeout=timeout, on_progress=on_progress))
 
 
@@ -79,7 +80,7 @@ def _check(resp: dict[str, Any]) -> Any:
 @click.option(
     "--socket", "-s",
     default=DEFAULT_SOCKET,
-    envvar="MCHERD_SOCKET",
+    envvar="MCHD_SOCKET",
     help="Path to daemon Unix socket",
     show_default=True,
 )
@@ -131,16 +132,24 @@ def status(ctx: click.Context, query: str | None) -> None:
                 return "-"
             return raw.split("-")[0]  # "v1.15.0-dee3e26..." → "v1.15.0"
 
-        state_w = max(len("STATE"),   max((len(n["state"])                        for n in nodes), default=0))
-        group_w = max(len("GROUP"),   max((len(n.get("group") or "-")            for n in nodes), default=0))
-        label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-")          for n in nodes), default=0))
-        name_w  = max(_wlen("NAME"),  max((_wlen(n["name"])                       for n in nodes), default=0))
-        nbrs_w  = max(len("NBRS"),    max((len(n.get("neighbors") or "-")         for n in nodes), default=0))
-        ver_w   = max(len("VER"),     max((len(_short_ver(n.get("ver")))          for n in nodes), default=0))
+        state_w = max(len("STATE"), max((len(n["state"]) for n in nodes), default=0))
+        group_w = max(len("GROUP"), max((len(n.get("group") or "-") for n in nodes), default=0))
+        label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in nodes), default=0))
+        name_w = max(_wlen("NAME"), max((_wlen(n["name"]) for n in nodes), default=0))
+        nbrs_w = max(len("NBRS"), max((len(n.get("neighbors") or "-") for n in nodes), default=0))
+        ver_w = max(len("VER"), max((len(_short_ver(n.get("ver"))) for n in nodes), default=0))
 
         row = "  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
-        click.echo(row.format("STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w), "NBRS", "VER", "LAST SEEN", "PUBKEY", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
-        click.echo(row.format("-----", _wpad("-----", label_w), "-----", _wpad("----", name_w), "----", "---", "---------", "------", sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w))
+        click.echo(row.format(
+            "STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w),
+            "NBRS", "VER", "LAST SEEN", "PUBKEY",
+            sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
+        ))
+        click.echo(row.format(
+            "-----", _wpad("-----", label_w), "-----", _wpad("----", name_w),
+            "----", "---", "---------", "------",
+            sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
+        ))
         for n in nodes:
             last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
             group = (n.get("group") or "-")
@@ -179,7 +188,7 @@ def sync(ctx: click.Context, node: str | None) -> None:
 
     NODE: even-length pubkey prefix (2, 4, 6, 8 … chars). Omit to sync all nodes.
     """
-    payload: dict = {"cmd": "sync"}
+    payload: dict[str, Any] = {"cmd": "sync"}
     if node:
         payload["prefix"] = node
         # inline single-node sync can take many per-operation timeouts (30s each)
@@ -217,7 +226,7 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
 # node detail and issue section renderers
 # ---------------------------------------------------------------------------
 
-def _render_node_detail(data: dict) -> None:
+def _render_node_detail(data: dict[str, Any]) -> None:
     """Render the full per-node detail view."""
     def _ts(v: str | None) -> str:
         return (v or "")[:19].replace("T", " ") or "never"
@@ -269,10 +278,10 @@ def _render_node_detail(data: dict) -> None:
 
 
 def _render_issue_sections(
-    drifted: list[dict],
-    bad_state: list[dict],
-    ghosts: list[dict],
-    open_nodes: list[dict],
+    drifted: list[dict[str, Any]],
+    bad_state: list[dict[str, Any]],
+    ghosts: list[dict[str, Any]],
+    open_nodes: list[dict[str, Any]],
 ) -> None:
     """Render issue sections below the fleet table. No-ops if all lists are empty."""
     if not drifted and not bad_state and not ghosts and not open_nodes:
@@ -282,7 +291,10 @@ def _render_issue_sections(
 
     if drifted:
         click.echo("drifted settings:")
-        node_w = max(len("NODE"), max((len(s.get("label") or s["node_pubkey"][:16]) for s in drifted), default=0))
+        node_w = max(
+            len("NODE"),
+            max((len(s.get("label") or s["node_pubkey"][:16]) for s in drifted), default=0),
+        )
         fmt = "  {:<{nw}}  {:<22}  {:<14}  {:<14}  {}"
         click.echo(fmt.format("NODE", "KEY", "DESIRED", "OBSERVED", "POLICY", nw=node_w))
         click.echo(fmt.format("----", "---", "-------", "--------", "------", nw=node_w))
@@ -296,7 +308,10 @@ def _render_issue_sections(
 
     if bad_state:
         click.echo("problem states:")
-        name_w = max(_wlen("NODE"), max((_wlen(n.get("label") or n["name"]) for n in bad_state), default=0))
+        name_w = max(
+            _wlen("NODE"),
+            max((_wlen(n.get("label") or n["name"]) for n in bad_state), default=0),
+        )
         fmt = "  {}  {:<12}  {:<16}  {}"
         click.echo(fmt.format(_wpad("NODE", name_w), "STATE", "LAST SEEN", "PUBKEY"))
         click.echo(fmt.format(_wpad("----", name_w), "-----", "---------", "------"))
@@ -319,7 +334,10 @@ def _render_issue_sections(
 
     if open_nodes:
         click.echo("open nodes (no ACL - anyone on the mesh can send commands):")
-        name_w = max(_wlen("NODE"), max((_wlen(n.get("label") or n["name"]) for n in open_nodes), default=0))
+        name_w = max(
+            _wlen("NODE"),
+            max((_wlen(n.get("label") or n["name"]) for n in open_nodes), default=0),
+        )
         fmt = "  {}  {}"
         click.echo(fmt.format(_wpad("NODE", name_w), "PUBKEY"))
         click.echo(fmt.format(_wpad("----", name_w), "------"))
@@ -333,7 +351,7 @@ def _render_issue_sections(
 # contacts — gateway REP nodes not yet in config.yaml
 # ---------------------------------------------------------------------------
 
-def _filter_contacts(contacts: list[dict], query: str | None) -> list[dict]:
+def _filter_contacts(contacts: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
     """Filter contacts by pubkey prefix or name substring."""
     if not query:
         return contacts
@@ -345,7 +363,7 @@ def _filter_contacts(contacts: list[dict], query: str | None) -> list[dict]:
     ]
 
 
-def _filter_nodes(nodes: list[dict], query: str | None) -> list[dict]:
+def _filter_nodes(nodes: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
     """Filter nodes by pubkey prefix, label substring, or name substring."""
     if not query:
         return nodes
@@ -358,7 +376,7 @@ def _filter_nodes(nodes: list[dict], query: str | None) -> list[dict]:
     ]
 
 
-def _filter_drift(drifted: list[dict], query: str | None) -> list[dict]:
+def _filter_drift(drifted: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
     """Filter drifted settings by pubkey prefix or label substring."""
     if not query:
         return drifted
@@ -370,7 +388,7 @@ def _filter_drift(drifted: list[dict], query: str | None) -> list[dict]:
     ]
 
 
-def _filter_ghosts(ghosts: list[dict], query: str | None) -> list[dict]:
+def _filter_ghosts(ghosts: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
     """Filter ghost config entries by pubkey_prefix or label substring."""
     if not query:
         return ghosts
@@ -429,7 +447,7 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         click.echo("# config.yaml — append to the 'nodes:' section:")
         click.echo(f"  - pubkey_prefix: {prefix}")
         click.echo(f'    label: "{name}"')
-        click.echo(f"    group:          # assign to a group, or remove this line\n")
+        click.echo("    group:          # assign to a group, or remove this line\n")
 
         click.echo("# secrets.yaml — append to the 'nodes:' section:")
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
@@ -472,7 +490,7 @@ def hint(ctx: click.Context, query: str | None) -> None:
         _hint_table(data)
 
 
-def _hint_table(data: list) -> None:
+def _hint_table(data: list[dict[str, Any]]) -> None:
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in data), default=0))
 
     row = "  {}  {:<4}  {:<7}  {}"
@@ -489,7 +507,7 @@ def _hint_table(data: list) -> None:
         ))
 
 
-def _hint_detail(n: dict) -> None:
+def _hint_detail(n: dict[str, Any]) -> None:
     count = n["neighbour_count"]
     profile = n["profile"]
 
@@ -498,7 +516,10 @@ def _hint_detail(n: dict) -> None:
     click.echo("")
 
     if count is None:
-        click.echo("(no neighbour data - add 'neighbors' to facts: in config.yaml and run mch sync to start collecting it)")
+        click.echo(
+            "(no neighbour data - add 'neighbors' to facts: in config.yaml"
+            " and run mch sync to start collecting it)"
+        )
         click.echo("")
     else:
         click.echo(f"neighbours: {count}")
@@ -509,8 +530,14 @@ def _hint_detail(n: dict) -> None:
     # Build the full list: profile settings (if known) first, then universal
     settings: list[tuple[str, str, str]] = []
     if profile:
-        settings.append(("txdelay",        profile["txdelay"],        "Flood retransmit delay - high-reach nodes fire first"))
-        settings.append(("direct.txdelay", profile["direct_txdelay"], "Direct traffic delay (lower than flood delay)"))
+        settings.append((
+            "txdelay", profile["txdelay"], "Flood retransmit delay - high-reach nodes fire first",
+        ))
+        settings.append((
+            "direct.txdelay",
+            profile["direct_txdelay"],
+            "Direct traffic delay (lower than flood delay)",
+        ))
 
     for u in n.get("universal", []):
         settings.append((u["key"], u["value"], u["description"]))
@@ -530,14 +557,16 @@ def _hint_detail(n: dict) -> None:
     for key, val, _ in settings:
         click.echo(f"      {key}:")
         click.echo(f'        desired: "{val}"')
-        click.echo(f"        policy: enforce")
+        click.echo("        policy: enforce")
 
 
 # ---------------------------------------------------------------------------
 # exec
 # ---------------------------------------------------------------------------
 
-_EXEC_BLOCKED = frozenset({"erase", "start ota", "set prv.key", "password", "setperm", "set guest.password"})
+_EXEC_BLOCKED = frozenset({
+    "erase", "start ota", "set prv.key", "password", "setperm", "set guest.password",
+})
 _EXEC_CONFIRM = frozenset({"reboot", "clkreboot", "clear stats", "log erase"})
 
 
@@ -546,7 +575,7 @@ _EXEC_CONFIRM = frozenset({"reboot", "clkreboot", "clear stats", "log erase"})
 @click.argument("command", nargs=-1, required=True)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt for destructive commands")
 @click.pass_context
-def exec_cmd(ctx: click.Context, node: str, command: tuple, yes: bool) -> None:
+def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool) -> None:
     """Run a raw MeshCore CLI command on a node.
 
     NODE: pubkey prefix, label substring, or name substring.
@@ -559,7 +588,10 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple, yes: bool) -> None:
     cmd_root = cmd_str.split()[0].lower() if cmd_str else ""
 
     if cmd_root in _EXEC_BLOCKED:
-        click.echo(f"error: '{cmd_root}' is blocked in mch exec - use config operations instead", err=True)
+        click.echo(
+            f"error: '{cmd_root}' is blocked in mch exec - use config operations instead",
+            err=True,
+        )
         raise SystemExit(1)
 
     # resolve node to get pubkey for confirmation display
@@ -578,7 +610,9 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple, yes: bool) -> None:
             click.echo("cancelled", err=True)
             raise SystemExit(1)
 
-    resp = _rpc(ctx.obj["socket"], {"cmd": "exec", "pubkey": pubkey, "command": cmd_str}, timeout=90)
+    resp = _rpc(
+        ctx.obj["socket"], {"cmd": "exec", "pubkey": pubkey, "command": cmd_str}, timeout=90
+    )
     data = _check(resp)
     click.echo(data)
 
@@ -610,12 +644,16 @@ def _run_commission_wizard(socket: str) -> None:
     # Search first — no point asking questions if there's no node to commission.
     gateway_radio = None
     while True:
-        click.echo("Searching for unmanaged nodes in range on default factory frequency (869.618 MHz)...")
+        click.echo(
+            "Searching for unmanaged nodes in range on default factory frequency (869.618 MHz)..."
+        )
         resp = _rpc(socket, {"cmd": "commission", "mode": "scan"}, timeout=30)
         if not resp.get("ok"):
             click.echo(f"\nSearch failed: {resp.get('error', 'unknown error')}")
             click.echo("")
-            choice = click.prompt("Press Enter to retry or q to cancel", default="", show_default=False).strip().lower()
+            choice = click.prompt(
+                "Press Enter to retry or q to cancel", default="", show_default=False
+            ).strip().lower()
             if choice == "q":
                 return
             continue
@@ -626,7 +664,9 @@ def _run_commission_wizard(socket: str) -> None:
         if len(nodes) == 0:
             click.echo("\nNo unmanaged nodes found. Is it powered on and in range with an antenna?")
             click.echo("")
-            choice = click.prompt("Press Enter to retry or q to cancel", default="", show_default=False).strip().lower()
+            choice = click.prompt(
+                "Press Enter to retry or q to cancel", default="", show_default=False
+            ).strip().lower()
             if choice == "q":
                 return
             continue
@@ -637,7 +677,9 @@ def _run_commission_wizard(socket: str) -> None:
                 click.echo(f"  {n['pubkey'][:12]}")
             click.echo("")
             choice = click.prompt(
-                "Power off all but one, then press Enter to retry or q to cancel", default="", show_default=False
+                "Power off all but one, then press Enter to retry or q to cancel",
+                default="",
+                show_default=False,
             ).strip().lower()
             if choice == "q":
                 return
@@ -670,7 +712,7 @@ def _run_commission_wizard(socket: str) -> None:
 def _prompt_radio_freq(default: str = "") -> str:
     """Prompt for a LoRa frequency in MHz; re-prompt until valid."""
     while True:
-        val = click.prompt("Frequency (MHz)", default=default).strip()
+        val: str = click.prompt("Frequency (MHz)", default=default).strip()
         try:
             if 400.0 <= float(val) <= 928.0:
                 return val
@@ -682,19 +724,21 @@ def _prompt_radio_freq(default: str = "") -> str:
 def _prompt_radio_bw(default: str = "") -> str:
     """Prompt for LoRa bandwidth (kHz); re-prompt until valid."""
     while True:
-        val = click.prompt("Bandwidth (kHz)", default=default).strip()
+        val: str = click.prompt("Bandwidth (kHz)", default=default).strip()
         try:
             if float(val) in (7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0):
                 return val
         except ValueError:
             pass
-        click.echo("  bandwidth must be one of: 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500")
+        click.echo(
+            "  bandwidth must be one of: 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500"
+        )
 
 
 def _prompt_radio_sf(default: str = "") -> str:
     """Prompt for spreading factor (7-12); re-prompt until valid."""
     while True:
-        val = click.prompt("Spreading factor (7-12)", default=default).strip()
+        val: str = click.prompt("Spreading factor (7-12)", default=default).strip()
         try:
             if 7 <= int(val) <= 12:
                 return val
@@ -706,7 +750,7 @@ def _prompt_radio_sf(default: str = "") -> str:
 def _prompt_radio_cr(default: str = "") -> str:
     """Prompt for coding rate (5-8); re-prompt until valid."""
     while True:
-        val = click.prompt("Coding rate (5-8)", default=default).strip()
+        val: str = click.prompt("Coding rate (5-8)", default=default).strip()
         try:
             if 5 <= int(val) <= 8:
                 return val
@@ -715,13 +759,14 @@ def _prompt_radio_cr(default: str = "") -> str:
         click.echo("  coding rate must be an integer 5-8")
 
 
-def _prompt_radio_all(freq: str, bw: str, sf: str, cr: str, gateway_radio: str | None) -> tuple[str, str, str, str]:
+def _prompt_radio_all(
+    freq: str, bw: str, sf: str, cr: str, gateway_radio: str | None
+) -> tuple[str, str, str, str]:
     """
     Prompt for radio settings. If gateway_radio is set and current values match it,
     offer a single Enter-to-accept shortcut before falling through to individual prompts.
     """
     if gateway_radio:
-        current = f"{freq},{bw},{sf},{cr}"
         gw_display = gateway_radio
         accept = click.prompt(
             "Radio settings ('c' to change)",
@@ -733,7 +778,10 @@ def _prompt_radio_all(freq: str, bw: str, sf: str, cr: str, gateway_radio: str |
             if len(parts) == 4:
                 try:
                     f, b, s, c = parts
-                    float(f); float(b); int(s); int(c)
+                    float(f)
+                    float(b)
+                    int(s)
+                    int(c)
                     return f, b, s, c
                 except ValueError:
                     pass
@@ -760,7 +808,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
 
     # Saved values — used as defaults when the outer edit loop iterates.
     label = ""
-    group = ""
+    group: str | None = ""
     name = ""
     admin_password = "password"
     guest_password = ""
@@ -785,7 +833,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
             truncated = encoded[:31].decode("utf-8", errors="ignore")
             click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
             name_default = truncated
-        raw_group = click.prompt("Group label", default=group or "-").strip()
+        raw_group: str = click.prompt("Group label", default=group or "-").strip()
         group = None if raw_group == "-" else raw_group
 
         # --- security ---
@@ -927,14 +975,18 @@ def _commission_replace_wizard(socket: str) -> None:
 
         click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
         click.echo("Check the node is powered on, in range, and with an antenna.")
-        choice = click.prompt("[Enter] retry  [q]uit", default="", show_default=False).strip().lower()
+        choice = click.prompt(
+            "[Enter] retry  [q]uit", default="", show_default=False
+        ).strip().lower()
         if choice == "q":
             click.echo("cancelled")
             return
         click.echo("Retrying...")
 
     click.echo("")
-    click.echo(f"Replacement complete. '{label}' ({prefix}) is rebooting with its restored identity.")
+    click.echo(
+        f"Replacement complete. '{label}' ({prefix}) is rebooting with its restored identity."
+    )
     click.echo(f"Once it comes back up, run: mch sync {prefix}")
 
 
