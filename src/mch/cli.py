@@ -9,9 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
-import sys
 import unicodedata
-from pathlib import Path
 from typing import Any
 
 import click
@@ -100,15 +98,33 @@ def cli(ctx: click.Context, socket: str) -> None:
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def status(ctx: click.Context, query: str | None) -> None:
-    """Show daemon and fleet status."""
+    """Show daemon and fleet status, or detail for a single matched node."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "status"})
     data = _check(resp)
 
     all_nodes = data.get("nodes", [])
     nodes = _filter_nodes(all_nodes, query)
-    issue_count = data.get("issues", 0)
+    drifted = _filter_drift(data.get("drifted", []), query)
+    bad_state = _filter_nodes(data.get("bad_state", []), query)
+    ghosts = _filter_ghosts(data.get("ghosts", []), query)
+    open_nodes = _filter_nodes(data.get("open_nodes", []), query)
+
     filtered = bool(query and len(nodes) != len(all_nodes))
 
+    # Single match → detail view
+    if query and len(nodes) == 1:
+        pubkey = nodes[0]["pubkey"]
+        detail_resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
+        detail = _check(detail_resp)
+        _render_node_detail(detail)
+        return
+
+    # Zero matches with a query
+    if query and not nodes:
+        click.echo(f"  no nodes matching '{query}'")
+        return
+
+    # Fleet table
     if nodes:
         def _short_ver(raw: str | None) -> str:
             if not raw:
@@ -139,8 +155,6 @@ def status(ctx: click.Context, query: str | None) -> None:
                 last, n["pubkey"][:16] + "…",
                 sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
             ))
-    elif query:
-        click.echo(f"  no nodes matching '{query}'")
     else:
         click.echo("  no nodes in database")
 
@@ -148,28 +162,63 @@ def status(ctx: click.Context, query: str | None) -> None:
     if filtered:
         click.echo(f"{len(nodes)} of {len(all_nodes)} nodes shown")
     else:
-        footer = f"{len(all_nodes)} nodes"
-        if issue_count:
-            issue_word = "issue" if issue_count == 1 else "issues"
-            footer += f"  {issue_count} {issue_word} - run 'mch issues' for details"
-        click.echo(footer)
+        click.echo(f"{len(all_nodes)} nodes")
+
+    _render_issue_sections(drifted, bad_state, ghosts, open_nodes)
 
 
 # ---------------------------------------------------------------------------
-# node
+# sync
 # ---------------------------------------------------------------------------
 
 @cli.command()
-@click.argument("pubkey")
+@click.argument("node", required=False)
 @click.pass_context
-def node(ctx: click.Context, pubkey: str) -> None:
-    """Show details for a single node.
+def sync(ctx: click.Context, node: str | None) -> None:
+    """Trigger an immediate sync cycle, or sync a single node by pubkey prefix.
 
-    PUBKEY: pubkey prefix or label (case-insensitive).
+    NODE: even-length pubkey prefix (2, 4, 6, 8 … chars). Omit to sync all nodes.
     """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
+    payload: dict = {"cmd": "sync"}
+    if node:
+        payload["prefix"] = node
+        # inline single-node sync can take many per-operation timeouts (30s each)
+        resp = _rpc(ctx.obj["socket"], payload, timeout=300)
+    else:
+        resp = _rpc(ctx.obj["socket"], payload)
+    data = _check(resp)
+    click.echo(data)
+
+
+# ---------------------------------------------------------------------------
+# logs
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("pubkey", required=False)
+@click.option("--limit", "-n", default=50, show_default=True, help="Max log lines")
+@click.pass_context
+def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
+    """Show recent per-node activity log (optionally filtered to one node by pubkey prefix)."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "logs", "pubkey": pubkey, "limit": limit})
     data = _check(resp)
 
+    if not data:
+        click.echo("no logs")
+        return
+
+    for entry in reversed(data):
+        ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
+        node_label = f" [{entry['node_pubkey'][:12]}]" if entry.get("node_pubkey") else ""
+        click.echo(f"{ts} [{entry['level']:<5}]{node_label} {entry['message']}")
+
+
+# ---------------------------------------------------------------------------
+# node detail and issue section renderers
+# ---------------------------------------------------------------------------
+
+def _render_node_detail(data: dict) -> None:
+    """Render the full per-node detail view."""
     def _ts(v: str | None) -> str:
         return (v or "")[:19].replace("T", " ") or "never"
 
@@ -219,48 +268,17 @@ def node(ctx: click.Context, pubkey: str) -> None:
             click.echo(f"  [{level:<5}] {ts}  {entry['message']}")
 
 
-# ---------------------------------------------------------------------------
-# sync
-# ---------------------------------------------------------------------------
-
-@cli.command()
-@click.argument("node", required=False)
-@click.pass_context
-def sync(ctx: click.Context, node: str | None) -> None:
-    """Trigger an immediate sync cycle, or sync a single node by pubkey prefix.
-
-    NODE: even-length pubkey prefix (2, 4, 6, 8 … chars). Omit to sync all nodes.
-    """
-    payload: dict = {"cmd": "sync"}
-    if node:
-        payload["prefix"] = node
-        # inline single-node sync can take many per-operation timeouts (30s each)
-        resp = _rpc(ctx.obj["socket"], payload, timeout=300)
-    else:
-        resp = _rpc(ctx.obj["socket"], payload)
-    data = _check(resp)
-    click.echo(data)
-
-
-# ---------------------------------------------------------------------------
-# issues
-# ---------------------------------------------------------------------------
-
-@cli.command()
-@click.argument("query", required=False, default=None)
-@click.pass_context
-def issues(ctx: click.Context, query: str | None) -> None:
-    """Show all current issues: drifted settings, problem states, and config ghosts."""
-    resp = _rpc(ctx.obj["socket"], {"cmd": "issues"})
-    data = _check(resp) or {}
-    drifted = _filter_drift(data.get("drifted", []), query)
-    bad_state = _filter_nodes(data.get("bad_state", []), query)
-    ghosts = _filter_ghosts(data.get("ghosts", []), query)
-    open_nodes = _filter_nodes(data.get("open_nodes", []), query)
-
+def _render_issue_sections(
+    drifted: list[dict],
+    bad_state: list[dict],
+    ghosts: list[dict],
+    open_nodes: list[dict],
+) -> None:
+    """Render issue sections below the fleet table. No-ops if all lists are empty."""
     if not drifted and not bad_state and not ghosts and not open_nodes:
-        click.echo("no issues detected")
         return
+
+    click.echo("")
 
     if drifted:
         click.echo("drifted settings:")
@@ -309,29 +327,6 @@ def issues(ctx: click.Context, query: str | None) -> None:
             label = n.get("label") or n["name"]
             pubkey = n.get("pubkey", "")[:16] + "…" if n.get("pubkey") else "-"
             click.echo(fmt.format(_wpad(label, name_w), pubkey))
-
-
-# ---------------------------------------------------------------------------
-# logs
-# ---------------------------------------------------------------------------
-
-@cli.command()
-@click.argument("pubkey", required=False)
-@click.option("--limit", "-n", default=50, show_default=True, help="Max log lines")
-@click.pass_context
-def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
-    """Show recent per-node activity log (optionally filtered to one node by pubkey prefix)."""
-    resp = _rpc(ctx.obj["socket"], {"cmd": "logs", "pubkey": pubkey, "limit": limit})
-    data = _check(resp)
-
-    if not data:
-        click.echo("no logs")
-        return
-
-    for entry in reversed(data):
-        ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
-        node_label = f" [{entry['node_pubkey'][:12]}]" if entry.get("node_pubkey") else ""
-        click.echo(f"{ts} [{entry['level']:<5}]{node_label} {entry['message']}")
 
 
 # ---------------------------------------------------------------------------
