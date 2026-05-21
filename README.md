@@ -36,9 +36,10 @@ Think Ansible for your nodes, running continuously in the background.
   to config. Destructive commands (reboot, clkreboot) require confirmation; irreversible commands
   (erase, set prv.key) are blocked.
 - **`mch commission`** — guided wizard to commission a fresh or replacement MeshCore node. Pauses
-  the sync queue, hops to the factory default frequency, discovers the node, pushes password/name/
-  and radio config, then prints ready-to-paste snippets for `config.yaml` and `secrets.yaml`.
-  No need to stop mchd.
+  the sync queue, hops to the factory default frequency, discovers the node, generates or restores
+  a managed private key, pushes name/password/radio config, verifies the expected public key after
+  reboot, then prints ready-to-paste snippets for `config.yaml` and `secrets.yaml`. No need to
+  stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
 
 ## Requirements
@@ -312,11 +313,14 @@ stopping mchd. The wizard supports two modes:
 1. Power on the fresh node near the gateway (factory default frequency: 869.618 MHz, 62.5 kHz, SF8, CR5).
 2. Run `mch commission` and select **n** (new).
 3. Enter the label, group, mesh-visible name, target frequency, and admin password.
-4. The daemon discovers the node, generates and sets a new private key, sets the password, name,
+4. The daemon discovers the node, generates and sets a new private key, sets the name, password,
    and radio, then reboots the node.
 5. `mch commission` prints ready-to-paste snippets for both `config.yaml` and `secrets.yaml`.
    Copy them into your config files.
-6. Wait ~30 seconds for the node to reboot on the target frequency, then run `mch sync`.
+6. Commissioning verifies that the generated public key is visible on the target frequency before
+   returning success.
+7. Commit the config/secrets edits, restart mchd, then run `mch sync <prefix>` if you want to sync
+   immediately.
 
 **Replacement node** — restoring a known identity onto new hardware:
 
@@ -426,10 +430,10 @@ mchd: '📡 Millbrook' done — facts:5 settings:1/1 enforced drift:0 ops:0/0 fa
 ```
 
 Per-node activity (settings changes, operation results, errors) is also stored in the local
-database and shown by `mch node` and `mch logs`:
+database and shown by `mch status <prefix>` and `mch logs`:
 
 ```
-mch node aabbccdd
+mch status aabbccdd
 
   state:       configured
   ...
