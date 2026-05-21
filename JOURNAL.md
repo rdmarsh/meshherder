@@ -108,8 +108,10 @@
 ## 2026-05-21 - Test Frequency Guardrail
 
 - Operator rule:
-  - Production frequency is `915.075,125,9,5`; do not use it for local/live testing.
-  - Test mesh frequency is `915.800,250,10,5`.
+  - Production frequency is `915.075,125,9,5`; it is OK in public README/examples but not for
+    local/live testing.
+  - Primary test mesh frequency is `915.800,250,10,5`.
+  - Secondary test/hop mesh frequency is `916.575,62.5,7,8`.
   - Factory discovery/configuration frequency remains `869.618,62.5,8,5`.
-- Updated examples and unit-test fixtures so test commissioning paths use `915.800,250,10,5`.
+- Updated unit-test fixtures so test commissioning paths use `915.800,250,10,5`.
 - Left `src/mch/data/profiles.yaml` unchanged because it is regional preset data, not a test target.

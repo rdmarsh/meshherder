@@ -207,9 +207,9 @@ gateway:
   device: /dev/meshcore0
   baud: 115200
   radio:
-    freq: 915.800
-    bw: 250
-    sf: 10
+    freq: 915.075
+    bw: 125
+    sf: 9
     cr: 5
 
 scheduler:
@@ -416,12 +416,12 @@ journalctl -u mchd -f
 A normal startup and sync looks like this:
 
 ```
-mchd: gateway connected: name='🤖 mch-gw' freq=915.800 bw=250 sf=10 cr=5
+mchd: gateway connected: name='🤖 mch-gw' freq=915.075 bw=125 sf=9 cr=5
 mchd: work queue started (interval=1.0d)
 mchd: processing node '📡 Millbrook' (aabbccdd...)
 mchd: hopping to 916.575/62.5/SF7 for '📡 Millbrook'
-mchd: hopping radio: 915.800/250/SF10 → 916.575/62.5/SF7
-mchd: radio restored: 915.800/250/SF10
+mchd: hopping radio: 915.075/125/SF9 → 916.575/62.5/SF7
+mchd: radio restored: 915.075/125/SF9
 mchd: '📡 Millbrook' done — facts:5 settings:1/1 enforced drift:0 ops:0/0 failed
 ```
 
