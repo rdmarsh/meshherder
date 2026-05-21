@@ -169,3 +169,23 @@
 - Conclusion:
   - Fresh flash -> `mch commission new` works end-to-end on Heltec V3 / v1.15.0 with the current
     command order and retrying identity verifier.
+
+## 2026-05-22 - Post-Commission Documentation Decisions
+
+- Keep `config.yaml` and `secrets.yaml` operator-managed for now.
+  - `mch commission new` should print paste-ready snippets, not auto-edit config files.
+  - This keeps private keys/passwords reviewable and commit-friendly while replacement mode is still
+    being proven live.
+- Next live workflow to test:
+  - Add the successful `487131f1` config/secrets snippets manually.
+  - Restart mchd.
+  - Reflash/reset the Heltec V3 to factory.
+  - Run `mch commission` in replacement mode and verify the node returns with public key
+    `487131f1...`.
+- Possible future feature:
+  - A "reset node to factory" helper is useful for bench testing, but should be an explicit
+    dangerous command requiring local serial access and confirmation of the target device/image.
+  - It should not be part of normal sync or hidden inside commission.
+- CLI wording:
+  - Prefer `mch status <node>` for node detail views going forward.
+  - Treat `mch node <node>` references as legacy wording to remove or alias later.

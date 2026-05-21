@@ -93,13 +93,23 @@ daemon never caches passwords in the DB.
 
 1. Pauses the work queue so commissioning and normal sync don't contend on the gateway.
 2. Hops to the factory default frequency (869.618 MHz) and discovers unmanaged nodes.
-3. Pushes password, name, and radio config over the mesh.
-4. Reboots the node fire-and-forget.
-5. Prints paste-ready `config.yaml` and `secrets.yaml` snippets.
-6. Returns the queue to normal.
+3. For new nodes, generates a MeshCore-compatible private key locally and derives the matching
+   public key. For replacements, reads the existing `prv_key` from `secrets.yaml`.
+4. Pushes normal settings first, then session/identity-changing settings:
+   name, guest password, admin password, private key, radio.
+5. Waits for `set radio` to return because v1.15-era firmware replies `OK - reboot to apply`.
+6. Reboots the node fire-and-forget.
+7. Discovers on the target radio and verifies that the expected public key is visible. This is
+   retried because a freshly rebooted node can miss the first scan.
+8. Prints paste-ready `config.yaml` and `secrets.yaml` snippets.
+9. Returns the queue to normal.
 
 The operator then adds the snippets to their config files and restarts mchd (or waits for
 hot-reload). This keeps mchd read-only with respect to config files.
+
+Live testing on a Heltec V3 running `v1.15.0-dee3e26` confirmed the intended new-node path:
+fresh flash, factory discovery, generated private key, reboot onto the test mesh frequency, and
+direct serial verification that `public.key`, `prv.key`, name, and radio all matched the snippets.
 
 ## Known design gaps
 
@@ -111,3 +121,9 @@ hot-reload). This keeps mchd read-only with respect to config files.
   undefined behaviour. Should detect and reject.
 - **Config hot-reload**: config.yaml and secrets.yaml are read once at startup. Adding a new
   node or changing a password requires a daemon restart.
+- **Factory reset workflow**: a reset/reflash helper would be useful for bench testing and
+  replacement drills, but it should be an explicit dangerous operation. It should never run as
+  part of normal sync, and should probably require local serial access plus a confirmation that
+  names the exact serial device and firmware image.
+- **Command naming**: the detail view should continue moving toward `mch status <node>` as the
+  primary interface. Older `mch node <node>` wording should be treated as legacy documentation.
