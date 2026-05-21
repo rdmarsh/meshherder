@@ -121,9 +121,8 @@ direct serial verification that `public.key`, `prv.key`, name, and radio all mat
   undefined behaviour. Should detect and reject.
 - **Config hot-reload**: config.yaml and secrets.yaml are read once at startup. Adding a new
   node or changing a password requires a daemon restart.
-- **Factory reset workflow**: a reset/reflash helper would be useful for bench testing and
-  replacement drills, but it should be an explicit dangerous operation. It should never run as
-  part of normal sync, and should probably require local serial access plus a confirmation that
-  names the exact serial device and firmware image.
+- **Factory reset notes**: for bench testing and replacement drills, documentation with the exact
+  `esptool` erase/write commands is enough for now. This should stay outside normal sync and
+  commissioning automation.
 - **Command naming**: the detail view should continue moving toward `mch status <node>` as the
   primary interface. Older `mch node <node>` wording should be treated as legacy documentation.

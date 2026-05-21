@@ -106,13 +106,17 @@ New findings from this recheck:
     itself reboot; it replies `OK - reboot to apply`. The correct behavior is to wait for `set radio`
     and then send one fire-and-forget `reboot`.
 
-30. Add an explicit bench reset/reflash helper.
+30. Document the bench reset/reflash commands.
 
-    A "reset node to factory" option would help repeat live commissioning and replacement tests, but
-    it is dangerous enough to keep separate from normal commission/sync. It should require local
-    serial access, print the exact serial device and firmware image, and require explicit
-    confirmation before erasing or flashing. Do not run this over the mesh and do not make it an
-    automatic recovery path.
+    A separate "reset node to factory" command is not needed yet. A short operator note with the
+    explicit `esptool` commands is enough for repeat commissioning and replacement tests:
+
+    ```bash
+    esptool --chip esp32s3 --port /dev/cu.usbserial-0001 --baud 460800 erase-flash
+    esptool --chip esp32s3 --port /dev/cu.usbserial-0001 --baud 460800 write-flash 0x0 /path/to/Heltec_v3_repeater-v1.15.0-dee3e26-merged.bin
+    ```
+
+    Keep this outside normal sync and commissioning automation.
 
 31. Prefer `mch status <node>` over `mch node <node>`.
 

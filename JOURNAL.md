@@ -182,10 +182,13 @@
   - Reflash/reset the Heltec V3 to factory.
   - Run `mch commission` in replacement mode and verify the node returns with public key
     `487131f1...`.
-- Possible future feature:
-  - A "reset node to factory" helper is useful for bench testing, but should be an explicit
-    dangerous command requiring local serial access and confirmation of the target device/image.
-  - It should not be part of normal sync or hidden inside commission.
+- Factory reset/reflash note:
+  - A separate `mch` reset command is not needed yet; documenting the explicit `esptool` commands is
+    enough for bench testing.
+  - Example for Heltec V3:
+    `esptool --chip esp32s3 --port /dev/cu.usbserial-0001 --baud 460800 erase-flash`
+  - Then write a merged image at `0x0`, for example:
+    `esptool --chip esp32s3 --port /dev/cu.usbserial-0001 --baud 460800 write-flash 0x0 /path/to/Heltec_v3_repeater-v1.15.0-dee3e26-merged.bin`
 - CLI wording:
   - Prefer `mch status <node>` for node detail views going forward.
   - Treat `mch node <node>` references as legacy wording to remove or alias later.
