@@ -236,6 +236,66 @@ def test_secrets_old_flat_format_migrated(tmp_path):
 
 
 # ------------------------------------------------------------------
+# node label validation
+# ------------------------------------------------------------------
+
+def test_label_with_space_raises(tmp_path):
+    """A node label containing a space is rejected at load time."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabb
+            label: "QH Tower"
+    """)
+    with pytest.raises(ValueError, match="label"):
+        load(p)
+
+
+def test_label_with_emoji_raises(tmp_path):
+    """A node label containing emoji is rejected at load time."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabb
+            label: "\U0001f4e1 Tower"
+    """)
+    with pytest.raises(ValueError, match="label"):
+        load(p)
+
+
+def test_label_valid_chars(tmp_path):
+    """A label with letters, digits, dashes, underscores, and dots is accepted."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabb
+            label: qh-tower.01
+    """)
+    cfg = load(p)
+    assert cfg.nodes[0].label == "qh-tower.01"
+
+
+def test_label_absent_is_ok(tmp_path):
+    """A node without a label field is accepted (label defaults to empty string)."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabb
+    """)
+    cfg = load(p)
+    assert cfg.nodes[0].label == ""
+
+
+def test_duplicate_labels_raise(tmp_path):
+    """Two nodes with the same label raise ValueError at load time."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabb
+            label: site-a
+          - pubkey_prefix: ccdd
+            label: site-a
+    """)
+    with pytest.raises(ValueError, match="duplicate"):
+        load(p)
+
+
+# ------------------------------------------------------------------
 # pubkey_prefix type coercion
 # ------------------------------------------------------------------
 
