@@ -295,6 +295,30 @@ def test_duplicate_labels_raise(tmp_path):
         load(p)
 
 
+def test_duplicate_pubkey_prefix_raises(tmp_path):
+    """Two config nodes with the same pubkey_prefix raise ValueError at load time."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+          - pubkey_prefix: aabbccdd
+    """)
+    with pytest.raises(ValueError, match="pubkey_prefix"):
+        load(p)
+
+
+def test_duplicate_secrets_prefix_raises(tmp_path):
+    """Duplicate pubkey_prefix keys in secrets.yaml raise ValueError.
+
+    yaml.safe_load silently overwrites duplicates; we need a custom loader to catch this.
+    """
+    p = _write_config(tmp_path, "gateway: {}")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd: password1\n  aabbccdd: password2\n")
+    secrets.chmod(0o600)
+    with pytest.raises(ValueError, match="duplicate"):
+        load(p, secrets_path=secrets)
+
+
 # ------------------------------------------------------------------
 # pubkey_prefix type coercion
 # ------------------------------------------------------------------

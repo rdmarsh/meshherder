@@ -13,6 +13,23 @@ import yaml
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
 
+
+class _NoDuplicateKeysLoader(yaml.SafeLoader):
+    """YAML loader that raises ValueError on duplicate mapping keys.
+
+    yaml.safe_load silently overwrites duplicate keys with the last value.
+    Operators who accidentally paste the same prefix twice would lose one entry silently.
+    """
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        if isinstance(node, yaml.MappingNode):
+            seen: set = set()
+            for key_node, _ in node.value:
+                key = key_node.value  # raw string before type coercion
+                if key in seen:
+                    raise ValueError(f"duplicate key {key!r} in secrets file")
+                seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
 log = logging.getLogger(__name__)
 
 from mch.models import SettingPolicy
@@ -145,10 +162,17 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     )
 
     labels = [n.label for n in cfg.nodes if n.label]
-    duplicates = {lbl for lbl in labels if labels.count(lbl) > 1}
-    if duplicates:
+    dup_labels = {lbl for lbl in labels if labels.count(lbl) > 1}
+    if dup_labels:
         raise ValueError(
-            f"duplicate node labels in config: {', '.join(sorted(duplicates))} - each label must be unique"
+            f"duplicate node labels in config: {', '.join(sorted(dup_labels))} - each label must be unique"
+        )
+
+    prefixes = [n.pubkey_prefix for n in cfg.nodes]
+    dup_prefixes = {p for p in prefixes if prefixes.count(p) > 1}
+    if dup_prefixes:
+        raise ValueError(
+            f"duplicate pubkey_prefix in config: {', '.join(sorted(dup_prefixes))} - each node must be unique"
         )
 
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
@@ -239,7 +263,7 @@ def _load_secrets(path: Path) -> dict[str, NodeSecrets]:
         return {}
     _check_permissions(path)
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.load(path.read_text(), Loader=_NoDuplicateKeysLoader) or {}
     except yaml.YAMLError as exc:
         raise ValueError(f"secrets file is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
