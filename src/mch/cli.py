@@ -910,8 +910,9 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
     click.echo("")
     click.echo("Next steps:")
     click.echo("  1. Add both entries to your config files")
-    click.echo("  2. Wait 30-60s for the node to reboot on the target frequency")
-    click.echo(f"  3. Run: mch sync {pubkey_prefix}")
+    click.echo("  2. Restart or reload mchd so it reads the new entries")
+    click.echo(f"  3. Run: mch status {pubkey_prefix}")
+    click.echo(f"  4. Optional: mch sync {pubkey_prefix}")
 
 
 def _commission_replace_wizard(socket: str) -> None:
