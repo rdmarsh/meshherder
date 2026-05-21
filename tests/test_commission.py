@@ -312,6 +312,28 @@ async def test_commission_new_sends_reboot_last():
 
 
 @pytest.mark.asyncio
+async def test_commission_new_fire_and_forget_commands_do_not_wait_for_response():
+    """'new' mode sends radio/reboot without waiting for replies from a rebooting node."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "admin",
+        "name": "TestNode", "target_freq": "915.075,125,9,5",
+    }, wq, db, cfg)
+
+    calls_by_command = {call.args[1]: call for call in gw.send_command.call_args_list}
+    assert calls_by_command["set radio 915.075,125,9,5"].kwargs["await_response"] is False
+    assert calls_by_command["reboot"].kwargs["await_response"] is False
+
+
+@pytest.mark.asyncio
 async def test_commission_new_returns_pubkey_prefix():
     """'new' mode returns pubkey_prefix (first 8 hex chars of factory pubkey) in response data."""
     from mch.commission import handle_commission
@@ -529,6 +551,33 @@ async def test_commission_replace_sends_reboot_last():
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
     assert sent[-1] == "reboot"
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_fire_and_forget_commands_do_not_wait_for_response():
+    """'replace' mode sends radio/reboot without waiting for replies from a rebooting node."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(
+            pubkey_prefix="aabbccdd",
+            via=RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5),
+        )],
+        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
+    )
+
+    await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    calls_by_command = {call.args[1]: call for call in gw.send_command.call_args_list}
+    assert calls_by_command["set radio 915.075,125.0,9,5"].kwargs["await_response"] is False
+    assert calls_by_command["reboot"].kwargs["await_response"] is False
 
 
 # ---------------------------------------------------------------------------

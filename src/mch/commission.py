@@ -238,7 +238,9 @@ async def _commission_new(
     for cmd, faf in cmds:
         if progress is not None:
             await progress(_cmd_labels.get(cmd, cmd))
-        result = await gateway.send_command(contact, cmd, timeout=30.0)
+        result = await gateway.send_command(
+            contact, cmd, timeout=30.0, await_response=not faf
+        )
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
@@ -304,7 +306,9 @@ async def _commission_replace(
         if progress is not None:
             label = cmd.split()[0] if " " in cmd else cmd
             await progress(f"{label}...")
-        result = await gateway.send_command(contact, cmd, timeout=30.0)
+        result = await gateway.send_command(
+            contact, cmd, timeout=30.0, await_response=not faf
+        )
         if not result.success and not faf:
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
