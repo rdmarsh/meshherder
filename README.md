@@ -264,27 +264,8 @@ esptool --chip esp32s3 --port /dev/cu.usbserial-0001 --baud 460800 erase-flash
 esptool --chip esp32s3 --port /dev/cu.usbserial-0001 --baud 460800 write-flash 0x0 /path/to/Heltec_v3_repeater-v1.15.0-dee3e26-merged.bin
 ```
 
-Typical output:
-
-```text
-esptool v5.2.0
-Connected to ESP32-S3 on /dev/cu.usbserial-0001:
-Chip type:          ESP32-S3 (QFN56) (revision v0.2)
-Features:           Wi-Fi, BT 5 (LE), Dual Core + LP Core, 240MHz, Embedded Flash 8MB (GD)
-Crystal frequency:  40MHz
-MAC:                ac:a7:04:00:af:74
-
-Stub flasher running.
-Changing baud rate to 460800...
-Changed.
-
-Configuring flash size...
-Flash will be erased from 0x00000000 to 0x0012bfff...
-Wrote 1227120 bytes (784693 compressed) at 0x00000000 in 22.0 seconds (447.0 kbit/s).
-Hash of data verified.
-
-Hard resetting via RTS pin...
-```
+Erase first when you want a real factory reset; writing the merged image alone may preserve old
+state outside the written image range. See `DEVELOP.md` for a full example transcript.
 
 ### Node label vs. mesh-visible name
 
