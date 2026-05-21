@@ -257,7 +257,9 @@ is required — mchd will mark the node offline until the password is corrected.
 ### Node label vs. mesh-visible name
 
 `label:` is mch's **local label** for the node — it only ever appears on the host running mchd.
-Use whatever is useful to you as the operator: full location, site code, anything.
+Labels must use only letters, digits, dashes, underscores, and dots (`[a-zA-Z0-9_\-.]+`) because
+they are used directly in CLI commands (`mch status east-hill-cab3`). Invalid labels or duplicate
+labels cause mchd to refuse to start with a clear error.
 
 `settings.name.desired:` is what gets **enforced on the hardware** and broadcast across the mesh —
 visible to anyone scanning. If you don't want your deployment location appearing on the mesh, set a
@@ -266,7 +268,7 @@ neutral name here and keep the descriptive one in `label:`:
 ```yaml
 nodes:
   - pubkey_prefix: aabbccdd
-    label: "East Hill Site — cabinet 3"  # local only, never leaves this machine
+    label: east-hill-cab3               # local only, never leaves this machine
     default_policy: enforce
     settings:
       name:
@@ -344,7 +346,7 @@ snippet, add it to config, and restart mchd. If the node needs a login password,
 
 ```
 mch status                  # fleet view: state, label, group, firmware, neighbours, last seen
-mch node <label|prefix>     # detail for one node: facts, settings, recent activity
+mch status <label|prefix>   # one match → detail view; multiple matches → filtered table
 mch hint                    # suggested txdelay for every node based on neighbour count
 mch hint <label|prefix>     # full suggestions + paste-ready config block
 mch contacts                # nodes visible to the gateway but not yet in config
@@ -375,9 +377,7 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 
 ```
 mch status                    Fleet overview: state, label, group, firmware, neighbours, last seen
-mch status <label|prefix>     Same, filtered to matching nodes
-mch node <label|prefix>       Detail for one node: facts, settings, recent activity
-mch issues                    All current issues: drifted settings, problem states, ghosts, open nodes
+mch status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
 mch hint                      Suggested txdelay for all nodes based on neighbour count
 mch hint <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes
