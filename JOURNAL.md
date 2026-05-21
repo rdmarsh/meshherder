@@ -59,3 +59,27 @@
   - Treat CLI-looking error responses as command failures during commissioning.
   - Redact passwords and private keys from commissioning errors.
   - Move session-invalidating changes (`password`, `set prv.key`) after normal settings.
+
+## 2026-05-21 - Commission Retry with Password/Key Late
+
+- Deployed commit `b83ee4d commission: validate command replies` to `luna`.
+- First retry failed at login because the previous attempt had successfully changed the admin password
+  from `password` to `mchtest`.
+- Reset the test node admin password back to `password` over direct serial so the factory-login path
+  could be tested again.
+- Second retry completed from the daemon's point of view and printed snippets for generated public key
+  `f14257729a72...`.
+- Direct serial verification showed only partial success:
+  - `get name` returned `mch test`.
+  - `get radio` returned `915.7999877,250,10,5`.
+  - `get public.key` still returned the original factory key
+    `C45A1487AF1D00F4CFAB5B639E2BAC328C34C703F28D4FF65287AC0FBC755811`.
+  - `get prv.key` still returned the original factory private key.
+- Conclusion:
+  - On this Heltec V3 / v1.15.0 build, `set prv.key` over the mesh did not apply even though the
+    command path did not report a failure.
+  - `commission new` must verify the expected generated public key after reboot/radio change before
+    returning success or snippets.
+- Follow-up code direction:
+  - Add post-commission discovery verification for the generated public key on the target radio.
+  - Do not trust `set prv.key` success unless the expected key is actually observed.

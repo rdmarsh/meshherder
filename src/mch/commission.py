@@ -61,6 +61,14 @@ def _looks_like_cli_error_response(text: str | None) -> bool:
     ))
 
 
+def _parse_radio_tuple(raw: str | None) -> tuple[float, float, int, int]:
+    """Parse freq,bw,sf,cr for post-commission discovery."""
+    if raw is None:
+        return Gateway.FACTORY_FREQ
+    freq, bw, sf, cr = raw.split(",")
+    return round(float(freq), 3), float(bw), int(sf), int(cr)
+
+
 async def _send_commission_command(
     gateway: Gateway,
     contact: dict[str, Any],
@@ -80,6 +88,26 @@ async def _send_commission_command(
             f"node replied {result.text!r}"
         )
     return None
+
+
+async def _verify_commissioned_identity(
+    gateway: Gateway,
+    expected_pubkey: str,
+    radio: tuple[float, float, int, int],
+    progress: Callable[[str], Awaitable[None]] | None = None,
+) -> str | None:
+    """Confirm the node advertises with the generated identity after reboot/radio change."""
+    if progress is not None:
+        await progress("verifying identity")
+    discovered = await gateway.discover(factory_freq=radio, dwell=8.0)
+    found = [str(node.get("pubkey", "")).lower() for node in discovered]
+    if expected_pubkey.lower() in found:
+        return None
+    short_found = ", ".join(pubkey[:12] for pubkey in found) or "none"
+    return (
+        "commission verification failed: expected new public key "
+        f"{expected_pubkey[:12]}..., discovered {short_found}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +328,12 @@ async def _commission_new(
         )
         if error:
             return {"ok": False, "error": error}
+
+    verify_error = await _verify_commissioned_identity(
+        gateway, pubkey, _parse_radio_tuple(target_freq_str), progress
+    )
+    if verify_error:
+        return {"ok": False, "error": verify_error}
 
     config_snippet = _build_config_snippet(pubkey_prefix, label, group, target_freq_str)
     secrets_snippet = _build_secrets_snippet(
