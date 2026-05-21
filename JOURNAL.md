@@ -192,3 +192,25 @@
 - CLI wording:
   - Prefer `mch status <node>` for node detail views going forward.
   - Treat `mch node <node>` references as legacy wording to remove or alias later.
+
+## 2026-05-22 - Commission Wizard UX Notes
+
+- Live `mch commission` transcript after successful new-node commissioning showed the flow works,
+  but the copy is still rough:
+  - The top-level mode menu appears only after discovery, so the operator cannot say "new" or
+    "replace" up front.
+  - `New node` / `Replace node` wording is understandable but still a little abstract for the
+    workflow being tested.
+  - The final next step says `mch sync <prefix>`; future docs/UX should prefer `mch status <prefix>`
+    for detail views and use sync only when asking mchd to apply desired state.
+- Candidate CLI shapes to consider:
+  - Keep `mch commission` as the interactive wizard, but clean up text and prompts.
+  - Add explicit subcommands: `mch commission new` and `mch commission replace`.
+  - Shorter aliases such as `mch new` / `mch replace` are possible, but may be too broad for a tool
+    that will grow beyond commissioning.
+- Specific copy cleanup ideas:
+  - "New node" -> "Commission fresh node".
+  - "Replace node" -> "Restore existing identity".
+  - Make group prompt sentinel clearer: `Group label [- for none]`.
+  - After successful commissioning, say "Add snippets, restart/reload mchd, then run
+    `mch status <prefix>` to inspect or `mch sync <prefix>` to force sync."
