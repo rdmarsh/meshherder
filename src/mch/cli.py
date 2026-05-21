@@ -14,6 +14,8 @@ from typing import Any
 
 import click
 
+from mch.command_safety import blocked_exec_command, confirm_exec_command
+
 DEFAULT_SOCKET = "/run/mch/mchd.sock"
 
 
@@ -564,12 +566,6 @@ def _hint_detail(n: dict[str, Any]) -> None:
 # exec
 # ---------------------------------------------------------------------------
 
-_EXEC_BLOCKED = frozenset({
-    "erase", "start ota", "set prv.key", "password", "setperm", "set guest.password",
-})
-_EXEC_CONFIRM = frozenset({"reboot", "clkreboot", "clear stats", "log erase"})
-
-
 @cli.command(name="exec")
 @click.argument("node")
 @click.argument("command", nargs=-1, required=True)
@@ -585,11 +581,11 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
     Irreversible commands (erase, set prv.key, etc.) are blocked entirely.
     """
     cmd_str = " ".join(command)
-    cmd_root = cmd_str.split()[0].lower() if cmd_str else ""
+    blocked = blocked_exec_command(cmd_str)
 
-    if cmd_root in _EXEC_BLOCKED:
+    if blocked:
         click.echo(
-            f"error: '{cmd_root}' is blocked in mch exec - use config operations instead",
+            f"error: '{blocked}' is blocked in mch exec - use config operations instead",
             err=True,
         )
         raise SystemExit(1)
@@ -603,7 +599,7 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
     pubkey = data["pubkey"]
     label = data.get("label") or data["name"]
 
-    if cmd_root in _EXEC_CONFIRM and not yes:
+    if confirm_exec_command(cmd_str) and not yes:
         click.echo(f"  {cmd_str}  {label}  ({pubkey[:8]})")
         typed = click.prompt("type pubkey prefix to confirm").strip()
         if not pubkey.startswith(typed):

@@ -557,6 +557,24 @@ async def test_exec_dispatch_blocked_command_returns_error(db, wq, config):
     assert "blocked" in resp["error"]
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "set prv.key deadbeef",
+        "set guest.password guest",
+        "start ota",
+        "  SET   PRV.KEY deadbeef  ",
+    ],
+)
+async def test_exec_dispatch_multi_word_blocked_command_returns_error(command, db, wq, config):
+    """exec blocks dangerous multi-word commands before node/contact lookup."""
+    resp = await _dispatch(
+        {"cmd": "exec", "pubkey": "aabbccdd", "command": command}, wq, db, config
+    )
+    assert resp["ok"] is False
+    assert "blocked" in resp["error"]
+
+
 async def test_exec_dispatch_unknown_node_returns_error(db, wq, config):
     """exec with an unknown node returns an error."""
     resp = await _dispatch({"cmd": "exec", "pubkey": "deadbeef", "command": "ver"}, wq, db, config)

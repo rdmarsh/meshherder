@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from mch.command_safety import blocked_exec_command, fire_and_forget_command
 from mch.config import Config
 from mch.config import load as load_config
 from mch.db import Database
@@ -237,15 +238,11 @@ async def _dispatch(
         return {"ok": True, "data": "sync started"}
 
     if cmd == "exec":
-        _BLOCKED = {
-            "erase", "start ota", "set prv.key", "password", "setperm", "set guest.password",
-        }
-        _FIRE_AND_FORGET = {"reboot", "clkreboot"}
         pubkey = req.get("pubkey", "")
         command = (req.get("command") or "").strip()
-        cmd_root = command.split()[0].lower() if command else ""
-        if cmd_root in _BLOCKED:
-            return {"ok": False, "error": f"{cmd_root!r} is blocked - use config operations"}
+        blocked = blocked_exec_command(command)
+        if blocked:
+            return {"ok": False, "error": f"{blocked!r} is blocked - use config operations"}
         try:
             node = await _resolve_node(pubkey, db)
         except ValueError as exc:
@@ -258,7 +255,7 @@ async def _dispatch(
         )
         if not contact:
             return {"ok": False, "error": f"no gateway contact for {node.pubkey[:12]}"}
-        faf = cmd_root in _FIRE_AND_FORGET
+        faf = fire_and_forget_command(command) is not None
         cmd_result = await wq._gateway.send_command(contact, command, timeout=60)
         if faf and not cmd_result.success:
             return {"ok": True, "data": "(sent - no response expected)"}
