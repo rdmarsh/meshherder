@@ -123,6 +123,22 @@ New findings from this recheck:
     Node detail UX should converge on `mch status <label|prefix>`. Existing `mch node` references
     in docs and code should either be removed, redirected, or treated as a legacy alias.
 
+32. Clean up commissioning CLI text and consider explicit subcommands.
+
+    Live testing showed `mch commission` works, but the wizard copy is still a little confusing.
+    Add a focused UX pass before broadening replacement testing:
+
+    - Consider `mch commission new` and `mch commission replace` so operators can choose the
+      workflow before discovery/menu prompts.
+    - Keep bare `mch commission` as the interactive wizard if useful.
+    - Avoid top-level `mch new` / `mch replace` unless the project is comfortable making
+      commissioning the dominant command namespace.
+    - Rename menu labels from `New node` / `Replace node` to clearer action phrases such as
+      `Commission fresh node` and `Restore existing identity`.
+    - Make sentinel prompts explicit, e.g. `Group label [- for none]`.
+    - Update success next steps to mention both inspection and action:
+      `mch status <prefix>` to inspect, `mch sync <prefix>` to force convergence.
+
 27. Split reachability radio from desired node radio.
 
     `NodeConfig.via` currently acts as both "how the gateway reaches this node" and "what radio
