@@ -29,6 +29,11 @@ def _wpad(s: str, width: int) -> str:
     return s + " " * max(0, width - _wlen(s))
 
 
+def _pk(pubkey: str | None, length: int = 12) -> str:
+    """Short pubkey prefix for tables."""
+    return (pubkey or "-")[:length]
+
+
 async def _request(
     socket_path: str,
     cmd: dict[str, Any],
@@ -141,15 +146,15 @@ def status(ctx: click.Context, query: str | None) -> None:
         nbrs_w = max(len("NBRS"), max((len(n.get("neighbors") or "-") for n in nodes), default=0))
         ver_w = max(len("VER"), max((len(_short_ver(n.get("ver"))) for n in nodes), default=0))
 
-        row = "  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}  {}"
+        row = "  {:<12}  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}"
         click.echo(row.format(
-            "STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w),
-            "NBRS", "VER", "LAST SEEN", "PUBKEY",
+            "PUBKEY", "STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w),
+            "NBRS", "VER", "LAST SEEN",
             sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
         click.echo(row.format(
-            "-----", _wpad("-----", label_w), "-----", _wpad("----", name_w),
-            "----", "---", "---------", "------",
+            "------", "-----", _wpad("-----", label_w), "-----", _wpad("----", name_w),
+            "----", "---", "---------",
             sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
         for n in nodes:
@@ -158,12 +163,13 @@ def status(ctx: click.Context, query: str | None) -> None:
             nbrs  = n.get("neighbors") or "-"
             ver   = _short_ver(n.get("ver"))
             click.echo(row.format(
+                _pk(n["pubkey"]),
                 n["state"],
                 _wpad(n.get("label") or "-", label_w),
                 group,
                 _wpad(n["name"], name_w),
                 nbrs, ver,
-                last, n["pubkey"][:16] + "…",
+                last,
                 sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
             ))
     else:
@@ -297,12 +303,12 @@ def _render_issue_sections(
             len("NODE"),
             max((len(s.get("label") or s["node_pubkey"][:16]) for s in drifted), default=0),
         )
-        fmt = "  {:<{nw}}  {:<22}  {:<14}  {:<14}  {}"
-        click.echo(fmt.format("NODE", "KEY", "DESIRED", "OBSERVED", "POLICY", nw=node_w))
-        click.echo(fmt.format("----", "---", "-------", "--------", "------", nw=node_w))
+        fmt = "  {:<12}  {:<{nw}}  {:<22}  {:<14}  {:<14}  {}"
+        click.echo(fmt.format("PUBKEY", "NODE", "KEY", "DESIRED", "OBSERVED", "POLICY", nw=node_w))
+        click.echo(fmt.format("------", "----", "---", "-------", "--------", "------", nw=node_w))
         for s in drifted:
             node = s.get("label") or s["node_pubkey"][:16]
-            click.echo(fmt.format(node, s["key"][:22],
+            click.echo(fmt.format(_pk(s["node_pubkey"]), node, s["key"][:22],
                                   (s.get("desired") or "-")[:14],
                                   (s.get("observed") or "-")[:14],
                                   s["policy"], nw=node_w))
@@ -314,14 +320,13 @@ def _render_issue_sections(
             _wlen("NODE"),
             max((_wlen(n.get("label") or n["name"]) for n in bad_state), default=0),
         )
-        fmt = "  {}  {:<12}  {:<16}  {}"
-        click.echo(fmt.format(_wpad("NODE", name_w), "STATE", "LAST SEEN", "PUBKEY"))
-        click.echo(fmt.format(_wpad("----", name_w), "-----", "---------", "------"))
+        fmt = "  {:<12}  {}  {:<12}  {:<16}"
+        click.echo(fmt.format("PUBKEY", _wpad("NODE", name_w), "STATE", "LAST SEEN"))
+        click.echo(fmt.format("------", _wpad("----", name_w), "-----", "---------"))
         for n in bad_state:
             label = n.get("label") or n["name"]
             last = (n.get("last_seen") or "never")[:16].replace("T", " ")
-            pubkey = n.get("pubkey", "")[:16] + "…" if n.get("pubkey") else "-"
-            click.echo(fmt.format(_wpad(label, name_w), n["state"], last, pubkey))
+            click.echo(fmt.format(_pk(n.get("pubkey")), _wpad(label, name_w), n["state"], last))
         click.echo("")
 
     if ghosts:
@@ -340,13 +345,12 @@ def _render_issue_sections(
             _wlen("NODE"),
             max((_wlen(n.get("label") or n["name"]) for n in open_nodes), default=0),
         )
-        fmt = "  {}  {}"
-        click.echo(fmt.format(_wpad("NODE", name_w), "PUBKEY"))
-        click.echo(fmt.format(_wpad("----", name_w), "------"))
+        fmt = "  {:<12}  {}"
+        click.echo(fmt.format("PUBKEY", _wpad("NODE", name_w)))
+        click.echo(fmt.format("------", _wpad("----", name_w)))
         for n in open_nodes:
             label = n.get("label") or n["name"]
-            pubkey = n.get("pubkey", "")[:16] + "…" if n.get("pubkey") else "-"
-            click.echo(fmt.format(_wpad(label, name_w), pubkey))
+            click.echo(fmt.format(_pk(n.get("pubkey")), _wpad(label, name_w)))
 
 
 # ---------------------------------------------------------------------------
@@ -495,13 +499,14 @@ def hint(ctx: click.Context, query: str | None) -> None:
 def _hint_table(data: list[dict[str, Any]]) -> None:
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in data), default=0))
 
-    row = "  {}  {:<4}  {:<7}  {}"
-    click.echo(row.format(_wpad("LABEL", label_w), "NBRS", "TXDELAY", "DIRECT.TXDELAY"))
-    click.echo(row.format(_wpad("-----", label_w), "----", "-------", "--------------"))
+    row = "  {:<12}  {}  {:<4}  {:<7}  {}"
+    click.echo(row.format("PUBKEY", _wpad("LABEL", label_w), "NBRS", "TXDELAY", "DIRECT.TXDELAY"))
+    click.echo(row.format("------", _wpad("-----", label_w), "----", "-------", "--------------"))
     for n in data:
         count = n["neighbour_count"]
         profile = n["profile"]
         click.echo(row.format(
+            _pk(n.get("pubkey")),
             _wpad(n.get("label") or "-", label_w),
             str(count) if count is not None else "-",
             profile["txdelay"] if profile else "-",

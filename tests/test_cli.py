@@ -1,6 +1,7 @@
 """Tests for CLI helper functions and command output."""
 
 import asyncio
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -264,6 +265,7 @@ def test_status_shows_label_and_group_columns():
     result = _run(["status"], _status_resp(nodes=[
         _summary(group="repeaters", ver="v1.14.1", neighbors="5")
     ]))
+    assert result.output.lstrip().startswith("PUBKEY")
     assert "LABEL" in result.output
     assert "GROUP" in result.output
     assert "site-a" in result.output
@@ -284,6 +286,7 @@ def test_status_shows_drifted_section():
         "observed": "wrong", "policy": "enforce",
     }]))
     assert "drifted settings" in result.output
+    assert re.search(r"PUBKEY\s+NODE", result.output)
     assert "owner.info" in result.output
     assert "site-a" in result.output
 
@@ -294,6 +297,7 @@ def test_status_shows_bad_state_section():
         "name": "wip 07", "state": "configuring", "last_seen": None,
     }]))
     assert "problem states" in result.output
+    assert re.search(r"PUBKEY\s+NODE", result.output)
     assert "configuring" in result.output
     assert "wip 07" in result.output
 
@@ -312,6 +316,7 @@ def test_status_shows_open_nodes_section():
         "pubkey": "aabbccdd" * 8, "label": "wip 06", "name": "wip 06",
     }]))
     assert "open node" in result.output
+    assert re.search(r"PUBKEY\s+NODE", result.output)
     assert "wip 06" in result.output
 
 
@@ -476,7 +481,9 @@ def _hint_node(label="site-a", name="Tower", count=5):
 def test_hint_table_multiple_nodes():
     result = _run(["hint"], {"ok": True, "data": [_hint_node("site-a"), _hint_node("site-b")]})
     assert result.exit_code == 0
+    assert result.output.lstrip().startswith("PUBKEY")
     assert "TXDELAY" in result.output
+    assert "aabbccdd" in result.output
     assert "site-a" in result.output
 
 
