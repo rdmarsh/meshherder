@@ -8,6 +8,7 @@ import pytest
 
 from mch.config import Config, GatewayConfig, NodeConfig, NodeSecrets, RadioConfig
 from mch.gateway import CommandResult
+from mch.meshkey import derive_public_key
 from mch.models import Node
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,13 @@ def make_wq(gateway=None, db=None) -> MagicMock:
 
 def discover_payload(pubkey: str, node_type: int = 2) -> dict:
     return {"pubkey": pubkey + "0" * (64 - len(pubkey)), "node_type": node_type, "SNR_in": 10.0}
+
+
+GENERATED_PRV_KEY = (
+    "489E11DCC0A5E037E65C90D2327AA11A42EAFE0C9F68DEBE82B0F71C88C0874B"
+    "CC291D9B2B98A54F5C1426B7AB8156B0D684EAA4EBA755AC614A9FD32B74C308"
+)
+GENERATED_PUBKEY = derive_public_key(GENERATED_PRV_KEY)
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +231,7 @@ async def test_commission_new_sends_password():
         "cmd": "commission", "mode": "new",
         "admin_password": "hunter2",
         "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
@@ -243,6 +252,7 @@ async def test_commission_new_sends_name():
     await handle_commission({
         "cmd": "commission", "mode": "new",
         "name": "Quakers Hill North", "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
@@ -263,6 +273,7 @@ async def test_commission_new_sends_radio():
     await handle_commission({
         "cmd": "commission", "mode": "new",
         "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
@@ -284,6 +295,7 @@ async def test_commission_new_sends_guest_password():
         "cmd": "commission", "mode": "new",
         "admin_password": "admin", "guest_password": "guest",
         "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
@@ -305,6 +317,7 @@ async def test_commission_new_sends_reboot_last():
         "cmd": "commission", "mode": "new",
         "admin_password": "admin",
         "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
@@ -326,6 +339,7 @@ async def test_commission_new_fire_and_forget_commands_do_not_wait_for_response(
         "cmd": "commission", "mode": "new",
         "admin_password": "admin",
         "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     calls_by_command = {call.args[1]: call for call in gw.send_command.call_args_list}
@@ -335,11 +349,11 @@ async def test_commission_new_fire_and_forget_commands_do_not_wait_for_response(
 
 @pytest.mark.asyncio
 async def test_commission_new_returns_pubkey_prefix():
-    """'new' mode returns pubkey_prefix (first 8 hex chars of factory pubkey) in response data."""
+    """'new' mode returns pubkey_prefix derived from the generated private key."""
     from mch.commission import handle_commission
 
-    pubkey = "a695e2be23f2" + "0" * 52
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    factory_pubkey = "a695e2be23f2" + "0" * 52
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
     wq = make_wq(gateway=gw)
     db = make_db()
     cfg = make_config()
@@ -347,11 +361,35 @@ async def test_commission_new_returns_pubkey_prefix():
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
         "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     assert resp["ok"] is True
-    assert resp["data"]["pubkey_prefix"] == pubkey[:8]
-    assert "prv_key" not in resp["data"]
+    assert resp["data"]["pubkey_prefix"] == GENERATED_PUBKEY[:8]
+    assert resp["data"]["public_key"] == GENERATED_PUBKEY
+
+
+@pytest.mark.asyncio
+async def test_commission_new_sends_generated_prv_key_before_password():
+    """'new' mode sets the generated private key before password/name/radio changes."""
+    from mch.commission import handle_commission
+
+    factory_pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "hunter2",
+        "name": "TestNode",
+        "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    sent = [call.args[1] for call in gw.send_command.call_args_list]
+    assert sent[:2] == [f"set prv.key {GENERATED_PRV_KEY}", "password hunter2"]
 
 
 # ---------------------------------------------------------------------------
@@ -360,11 +398,11 @@ async def test_commission_new_returns_pubkey_prefix():
 
 @pytest.mark.asyncio
 async def test_commission_new_returns_config_snippet():
-    """'new' mode returns a config.yaml snippet with pubkey_prefix, label, group, and via."""
+    """'new' mode returns a config.yaml snippet with derived pubkey_prefix, label, group, via."""
     from mch.commission import handle_commission
 
-    pubkey = "a695e2be" + "0" * 56
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    factory_pubkey = "a695e2be" + "0" * 56
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
     wq = make_wq(gateway=gw)
     db = make_db()
     cfg = make_config()
@@ -375,11 +413,12 @@ async def test_commission_new_returns_config_snippet():
         "group": "testgroup",
         "name": "Test Node",
         "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     assert resp["ok"]
     snippet = resp["data"]["config_snippet"]
-    assert "pubkey_prefix: a695e2be" in snippet
+    assert f"pubkey_prefix: {GENERATED_PUBKEY[:8]}" in snippet
     assert "label: Test Node" in snippet
     assert "group: testgroup" in snippet
     assert "via: 915.075,125,9,5" in snippet
@@ -387,11 +426,11 @@ async def test_commission_new_returns_config_snippet():
 
 @pytest.mark.asyncio
 async def test_commission_new_returns_secrets_snippet():
-    """'new' mode returns a secrets.yaml snippet with password; no prv_key."""
+    """'new' mode returns a secrets.yaml snippet with password and generated prv_key."""
     from mch.commission import handle_commission
 
-    pubkey = "a695e2be" + "0" * 56
-    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    factory_pubkey = "a695e2be" + "0" * 56
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
     wq = make_wq(gateway=gw)
     db = make_db()
     cfg = make_config()
@@ -401,13 +440,14 @@ async def test_commission_new_returns_secrets_snippet():
         "admin_password": "testpass",
         "name": "Test Node",
         "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     assert resp["ok"]
     snippet = resp["data"]["secrets_snippet"]
-    assert "a695e2be:" in snippet
+    assert f"{GENERATED_PUBKEY[:8]}:" in snippet
     assert "password: testpass" in snippet
-    assert "prv_key" not in snippet
+    assert f"prv_key: {GENERATED_PRV_KEY}" in snippet
 
 
 # ---------------------------------------------------------------------------
