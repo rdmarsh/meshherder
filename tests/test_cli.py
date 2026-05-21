@@ -212,119 +212,142 @@ def test_rpc_timeout_shows_clean_error():
 
 # ------ status ------
 
+def _status_resp(nodes=None, drifted=None, bad_state=None, ghosts=None, open_nodes=None):
+    """Build a status RPC response with empty defaults for all issue arrays."""
+    return {"ok": True, "data": {
+        "nodes": nodes or [],
+        "drifted": drifted or [],
+        "bad_state": bad_state or [],
+        "ghosts": ghosts or [],
+        "open_nodes": open_nodes or [],
+    }}
+
+
+def _summary(pubkey="aabbccdd" * 8, name="Tower", label="site-a",
+             group=None, state="configured", ver=None, neighbors=None):
+    return {"pubkey": pubkey, "name": name, "label": label, "group": group,
+            "state": state, "last_seen": None, "last_connected": None,
+            "neighbors": neighbors, "ver": ver}
+
+
+def _detail(pubkey="aabbccdd" * 8, name="Tower", label="site-a", group=None,
+            facts=None, settings=None, logs=None):
+    return {"ok": True, "data": {
+        "pubkey": pubkey, "name": name, "label": label, "group": group,
+        "state": "configured", "last_seen": None, "last_connected": None,
+        "auth_required": False, "auth_cached": True, "passwd_known": True,
+        "facts": facts or {}, "settings": settings or [], "logs": logs or [],
+    }}
+
+
+def _run_multi(args, *responses):
+    """Invoke a CLI command with _rpc mocked to return responses in sequence."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=list(responses)):
+        return runner.invoke(cli, ["--socket", "/fake.sock"] + args)
+
+
 def test_status_no_nodes():
-    result = _run(["status"], {"ok": True, "data": {"nodes": [], "issues": 0}})
+    result = _run(["status"], _status_resp())
     assert result.exit_code == 0
     assert "0 nodes" in result.output
 
 
 def test_status_lists_nodes():
-    result = _run(["status"], {"ok": True, "data": {
-        "nodes": [{"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "site-a",
-                   "group": None, "state": "configured", "last_seen": None,
-                   "last_connected": None, "neighbors": None, "ver": None}],
-        "issues": 0,
-    }})
+    result = _run(["status"], _status_resp(nodes=[_summary()]))
     assert result.exit_code == 0
     assert "configured" in result.output
     assert "Tower" in result.output
 
 
-def test_status_shows_issues_count():
-    result = _run(["status"], {"ok": True, "data": {
-        "nodes": [],
-        "issues": 3,
-    }})
-    assert "3 issues" in result.output
-
-
-def test_status_filtered():
-    # _rpc returns all 3 nodes; client-side filter reduces to 1; footer shows "1 of 3 nodes"
-    result = _run(["status", "tower"], {"ok": True, "data": {
-        "nodes": [
-            {"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "tower",
-             "group": None, "state": "configured", "last_seen": None,
-             "last_connected": None, "neighbors": None, "ver": None},
-            {"pubkey": "11223344" * 8, "name": "Valley", "label": "valley",
-             "group": None, "state": "configured", "last_seen": None,
-             "last_connected": None, "neighbors": None, "ver": None},
-            {"pubkey": "55667788" * 8, "name": "Ridge", "label": "ridge",
-             "group": None, "state": "configured", "last_seen": None,
-             "last_connected": None, "neighbors": None, "ver": None},
-        ],
-        "issues": 0,
-    }})
-    assert "1 of 3 nodes shown" in result.output
-
-
 def test_status_shows_label_and_group_columns():
-    result = _run(["status"], {"ok": True, "data": {
-        "nodes": [{"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "site-a",
-                   "group": "repeaters", "state": "configured", "last_seen": None,
-                   "last_connected": None, "neighbors": "5", "ver": "v1.14.1"}],
-        "issues": 0,
-    }})
+    result = _run(["status"], _status_resp(nodes=[
+        _summary(group="repeaters", ver="v1.14.1", neighbors="5")
+    ]))
     assert "LABEL" in result.output
     assert "GROUP" in result.output
     assert "site-a" in result.output
     assert "repeaters" in result.output
 
 
-def test_status_shows_issue_footer_when_issues_nonzero():
-    result = _run(["status"], {"ok": True, "data": {
-        "nodes": [],
-        "issues": 2,
-    }})
-    assert "mch issues" in result.output
+def test_status_no_issues_no_sections():
+    result = _run(["status"], _status_resp())
+    assert "drifted" not in result.output
+    assert "problem states" not in result.output
+    assert "ghost" not in result.output
 
 
-def test_status_no_footer_when_no_issues():
-    result = _run(["status"], {"ok": True, "data": {
-        "nodes": [],
-        "issues": 0,
-    }})
-    assert "mch issues" not in result.output
+def test_status_shows_drifted_section():
+    result = _run(["status"], _status_resp(drifted=[{
+        "node_pubkey": "aabbccdd" * 8, "label": "site-a",
+        "key": "owner.info", "desired": "Managed by mch",
+        "observed": "wrong", "policy": "enforce",
+    }]))
+    assert "drifted settings" in result.output
+    assert "owner.info" in result.output
+    assert "site-a" in result.output
 
 
-def test_status_singular_issue_grammar():
-    result = _run(["status"], {"ok": True, "data": {"nodes": [], "issues": 1}})
-    assert "1 issue " in result.output
-    assert "1 issues" not in result.output
+def test_status_shows_bad_state_section():
+    result = _run(["status"], _status_resp(bad_state=[{
+        "pubkey": "aabbccdd" * 8, "label": "wip 07",
+        "name": "wip 07", "state": "configuring", "last_seen": None,
+    }]))
+    assert "problem states" in result.output
+    assert "configuring" in result.output
+    assert "wip 07" in result.output
 
 
-def test_status_filtered_footer_says_shown():
-    result = _run(["status", "tower"], {"ok": True, "data": {
-        "nodes": [
-            {"pubkey": "aabbccdd" * 8, "name": "Tower", "label": "tower",
-             "group": None, "state": "configured", "last_seen": None,
-             "last_connected": None, "neighbors": None, "ver": None},
-            {"pubkey": "11223344" * 8, "name": "Valley", "label": "valley",
-             "group": None, "state": "configured", "last_seen": None,
-             "last_connected": None, "neighbors": None, "ver": None},
-        ],
-        "issues": 0,
-    }})
-    assert "1 of 2 nodes shown" in result.output
+def test_status_shows_ghosts_section():
+    result = _run(["status"], _status_resp(ghosts=[
+        {"pubkey_prefix": "deadbeef", "label": "wrong"}
+    ]))
+    assert "ghost" in result.output
+    assert "deadbeef" in result.output
+    assert "wrong" in result.output
 
 
-# ------ node ------
+def test_status_shows_open_nodes_section():
+    result = _run(["status"], _status_resp(open_nodes=[{
+        "pubkey": "aabbccdd" * 8, "label": "wip 06", "name": "wip 06",
+    }]))
+    assert "open node" in result.output
+    assert "wip 06" in result.output
 
-def test_node_detail_view():
-    result = _run(["node", "aabb"], {"ok": True, "data": {
-        "pubkey": "aabbccdd" * 8,
-        "name": "Tower",
-        "label": "site-a",
-        "group": "repeaters",
-        "state": "configured",
-        "last_seen": "2026-05-19T10:00:00",
-        "last_connected": None,
-        "auth_required": False,
-        "auth_cached": True,
-        "passwd_known": True,
-        "facts": {"ver": "v1.14.1", "board": "T-Beam"},
-        "settings": [],
-        "logs": [],
-    }})
+
+def test_status_multi_match_shows_table():
+    # query "site" matches 2 of 3 nodes → filtered table (not detail view)
+    result = _run(["status", "site"], _status_resp(nodes=[
+        _summary("aabbccdd" * 8, name="Site A", label="site-a"),
+        _summary("11223344" * 8, name="Site B", label="site-b"),
+        _summary("55667788" * 8, name="Ridge", label="ridge"),
+    ]))
+    assert "2 of 3 nodes shown" in result.output
+
+
+def test_status_multiple_matches_filters_issues():
+    # query "qh" matches 2 of 3 nodes; ridge's issue is filtered out
+    result = _run(["status", "qh"], _status_resp(
+        nodes=[_summary("aabbccdd" * 8, name="QH Tower", label="qh-tower"),
+               _summary("11223344" * 8, name="QH Valley", label="qh-valley"),
+               _summary("55667788" * 8, name="Ridge", label="ridge")],
+        drifted=[{"node_pubkey": "aabbccdd" * 8, "label": "qh-tower",
+                  "key": "owner.info", "desired": "x", "observed": "y", "policy": "enforce"},
+                 {"node_pubkey": "55667788" * 8, "label": "ridge",
+                  "key": "owner.info", "desired": "x", "observed": "y", "policy": "enforce"}],
+    ))
+    assert "qh-tower" in result.output
+    assert "ridge" not in result.output
+
+
+def test_status_single_match_shows_detail():
+    # query matching 1 of 2 nodes → node detail view (two RPC calls)
+    status = _status_resp(nodes=[
+        _summary(),  # pubkey "aabbccdd"*8, matches query "aabb"
+        _summary("11223344" * 8, name="Other", label="other"),
+    ])
+    detail = _detail(facts={"ver": "v1.14.1", "board": "T-Beam"})
+    result = _run_multi(["status", "aabb"], status, detail)
     assert result.exit_code == 0
     assert "Tower" in result.output
     assert "site-a" in result.output
@@ -333,121 +356,44 @@ def test_node_detail_view():
     assert "passwd:" in result.output
 
 
-def test_node_not_found():
-    result = _run(["node", "zzzz"], {"ok": False, "error": "node 'zzzz' not found"})
-    assert result.exit_code == 1
-    assert "not found" in result.output
-
-
-def test_node_activity_newest_at_bottom():
-    """Node recent activity must show oldest entry first, newest last."""
-    result = _run(["node", "aabb"], {"ok": True, "data": {
-        "pubkey": "aabbccdd" * 8,
-        "name": "Tower", "label": "site-a", "group": None,
-        "state": "configured", "last_seen": None, "last_connected": None,
-        "auth_required": False, "auth_cached": False,
-        "facts": {}, "settings": [],
-        "logs": [
-            {"level": "INFO", "timestamp": "2026-05-19T12:00:00", "message": "second event"},
-            {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "first event"},
-        ],
-    }})
+def test_status_single_match_activity_newest_at_bottom():
+    """Single-match detail: oldest activity entry first, newest last."""
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(logs=[
+        {"level": "INFO", "timestamp": "2026-05-19T12:00:00", "message": "second event"},
+        {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "first event"},
+    ])
+    result = _run_multi(["status", "aabb"], status, detail)
     assert result.exit_code == 0
     assert result.output.index("first event") < result.output.index("second event")
 
 
-def test_node_shows_settings_drift_flag():
-    result = _run(["node", "aabb"], {"ok": True, "data": {
-        "pubkey": "aabbccdd" * 8,
-        "name": "Tower",
-        "label": "site-a",
-        "group": None,
-        "state": "configured",
-        "last_seen": None,
-        "last_connected": None,
-        "auth_required": False,
-        "auth_cached": False,
-        "facts": {},
-        "settings": [
-            {"key": "owner.info", "desired": "Managed by mch",
-             "observed": "wrong", "policy": "enforce", "drift": True,
-             "last_checked": None, "last_set": None},
-        ],
-        "logs": [],
-    }})
+def test_status_single_match_shows_settings_drift_flag():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(settings=[{
+        "key": "owner.info", "desired": "Managed by mch",
+        "observed": "wrong", "policy": "enforce", "drift": True,
+        "last_checked": None, "last_set": None,
+    }])
+    result = _run_multi(["status", "aabb"], status, detail)
     assert "~" in result.output
     assert "owner.info" in result.output
 
 
-# ------ issues ------
-
-_ISSUES_EMPTY = {"ok": True, "data": {"drifted": [], "bad_state": [], "ghosts": [], "open_nodes": []}}
-
-
-def test_issues_no_issues():
-    result = _run(["issues"], _ISSUES_EMPTY)
+def test_status_no_match():
+    result = _run(["status", "zzzz"], _status_resp())
     assert result.exit_code == 0
-    assert "no issues detected" in result.output
+    assert "no nodes matching" in result.output
 
 
-def test_issues_shows_drifted_section():
-    data = {"drifted": [{"node_pubkey": "aabbccdd" * 8, "label": "site-a",
-                          "key": "owner.info", "desired": "Managed by mch",
-                          "observed": "wrong", "policy": "enforce"}],
-            "bad_state": [], "ghosts": [], "open_nodes": []}
-    result = _run(["issues"], {"ok": True, "data": data})
-    assert result.exit_code == 0
-    assert "drifted settings" in result.output
-    assert "owner.info" in result.output
-    assert "site-a" in result.output
-
-
-def test_issues_shows_bad_state_section():
-    data = {"drifted": [],
-            "bad_state": [{"pubkey": "aabbccdd" * 8, "label": "wip 07",
-                            "name": "wip 07", "state": "configuring", "last_seen": None}],
-            "ghosts": [], "open_nodes": []}
-    result = _run(["issues"], {"ok": True, "data": data})
-    assert result.exit_code == 0
-    assert "problem states" in result.output
-    assert "configuring" in result.output
-    assert "wip 07" in result.output
-    assert "aabbccdd" in result.output
-
-
-def test_issues_shows_ghosts_section():
-    data = {"drifted": [], "bad_state": [],
-            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "wrong"}], "open_nodes": []}
-    result = _run(["issues"], {"ok": True, "data": data})
-    assert result.exit_code == 0
-    assert "ghost" in result.output
-    assert "deadbeef" in result.output
-    assert "wrong" in result.output
-
-
-def test_issues_shows_open_nodes_section():
-    data = {"drifted": [], "bad_state": [], "ghosts": [],
-            "open_nodes": [{"pubkey": "aabbccdd" * 8, "label": "wip 06", "name": "wip 06"}]}
-    result = _run(["issues"], {"ok": True, "data": data})
-    assert result.exit_code == 0
-    assert "open node" in result.output
-    assert "wip 06" in result.output
-    assert "aabbccdd" in result.output
-
-
-def test_issues_filtered_by_query():
-    data = {"drifted": [{"node_pubkey": "aabbccdd" * 8, "label": "site-a",
-                          "key": "owner.info", "desired": "x", "observed": "y",
-                          "policy": "enforce"}],
-            "bad_state": [{"pubkey": "11223344" * 8, "label": "site-b",
-                            "name": "B", "state": "offline", "last_seen": None}],
-            "ghosts": [{"pubkey_prefix": "deadbeef", "label": "ghost-node"}],
-            "open_nodes": [{"pubkey": "99aabbcc" * 8, "label": "site-c", "name": "C"}]}
-    result = _run(["issues", "site-a"], {"ok": True, "data": data})
-    assert "site-a" in result.output
-    assert "site-b" not in result.output
-    assert "deadbeef" not in result.output
-    assert "site-c" not in result.output
+def test_status_filtered_footer_says_shown():
+    # 3 nodes, query "site" matches 2 → "2 of 3 nodes shown"
+    result = _run(["status", "site"], _status_resp(nodes=[
+        _summary("aabbccdd" * 8, label="site-a"),
+        _summary("11223344" * 8, label="site-b"),
+        _summary("55667788" * 8, label="ridge"),
+    ]))
+    assert "2 of 3 nodes shown" in result.output
 
 
 # ------ logs ------

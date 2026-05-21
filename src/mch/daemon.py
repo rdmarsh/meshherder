@@ -104,20 +104,51 @@ async def _dispatch(
 
     if cmd == "status":
         nodes = await db.get_all_nodes()
-        drifted = await db.get_drifted_settings()
+        pubkey_to_node = {n.pubkey: n for n in nodes}
+
+        drifted_records = await db.get_drifted_settings()
+        drifted = [
+            {
+                "node_pubkey": s.node_pubkey,
+                "label": pubkey_to_node[s.node_pubkey].label if s.node_pubkey in pubkey_to_node else "",
+                "key": s.key,
+                "desired": s.desired,
+                "observed": s.observed,
+                "policy": s.policy.value,
+            }
+            for s in drifted_records
+        ]
+
         _bad_states = {NodeState.UNKNOWN, NodeState.OFFLINE, NodeState.CONFIGURING, NodeState.PARTIAL}
-        bad_state = [n for n in nodes if n.state in _bad_states]
+        bad_state = [
+            {
+                "pubkey": n.pubkey,
+                "label": n.label,
+                "name": n.name,
+                "state": n.state.value,
+                "last_seen": n.last_seen.isoformat() if n.last_seen else None,
+            }
+            for n in nodes if n.state in _bad_states
+        ]
+
         db_pubkeys = {n.pubkey for n in nodes}
-        ghosts = [nc for nc in config.nodes if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)]
+        ghosts = [
+            {"pubkey_prefix": nc.pubkey_prefix, "label": nc.label}
+            for nc in config.nodes
+            if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)
+        ]
+
         _has_default_password = "default" in config.secrets
         open_nodes = [
-            n for n in nodes
+            {"pubkey": n.pubkey, "label": n.label, "name": n.name}
+            for n in nodes
             if n.state == NodeState.CONFIGURED
             and not n.auth_required
             and not n.auth_cached
             and not _has_default_password
             and not any(n.pubkey.startswith(p) for p in config.secrets)
         ]
+
         rows = []
         for n in nodes:
             facts = await db.get_facts(n.pubkey)
@@ -136,7 +167,10 @@ async def _dispatch(
             "ok": True,
             "data": {
                 "nodes": rows,
-                "issues": len(drifted) + len(bad_state) + len(ghosts) + len(open_nodes),
+                "drifted": drifted,
+                "bad_state": bad_state,
+                "ghosts": ghosts,
+                "open_nodes": open_nodes,
             },
         }
 

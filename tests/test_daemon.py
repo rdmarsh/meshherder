@@ -114,8 +114,8 @@ async def test_issues_dispatch_no_open_node_when_default_password(db, wq, config
     assert resp["data"]["open_nodes"] == []
 
 
-async def test_status_dispatch_no_open_node_count_when_default_password(db, wq, config):
-    """status issues count does not include nodes covered by the default password."""
+async def test_status_dispatch_no_open_nodes_when_default_password(db, wq, config):
+    """status open_nodes is empty when a fleet-wide default password is configured."""
     node = Node(
         pubkey="aabbccdd" * 8,
         name="Fleet Node",
@@ -130,7 +130,7 @@ async def test_status_dispatch_no_open_node_count_when_default_password(db, wq, 
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["issues"] == 0
+    assert resp["data"]["open_nodes"] == []
 
 
 async def test_node_dispatch_full_pubkey_returns_facts(db, wq, config):
@@ -383,8 +383,8 @@ async def test_logs_dispatch_filtered_by_pubkey_prefix(db, wq, config):
 # status command
 # ------------------------------------------------------------------
 
-async def test_status_dispatch_returns_node_list_and_issue_count(db, wq, config):
-    """status command returns node list and a count of issues."""
+async def test_status_dispatch_returns_node_list_and_issue_arrays(db, wq, config):
+    """status returns node list plus drifted/bad_state/ghosts/open_nodes arrays."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED, auth_cached=True)
     await db.upsert_node(node)
 
@@ -395,11 +395,14 @@ async def test_status_dispatch_returns_node_list_and_issue_count(db, wq, config)
     assert len(data["nodes"]) == 1
     assert data["nodes"][0]["pubkey"] == node.pubkey
     assert data["nodes"][0]["state"] == "configured"
-    assert data["issues"] == 0
+    assert data["drifted"] == []
+    assert data["bad_state"] == []
+    assert data["ghosts"] == []
+    assert data["open_nodes"] == []
 
 
-async def test_status_dispatch_counts_issues(db, wq, config):
-    """status issues count aggregates drifted settings, bad-state nodes, and ghosts."""
+async def test_status_dispatch_returns_drifted_array(db, wq, config):
+    """status drifted array includes settings that have drifted from desired."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
     setting = SettingRecord(
@@ -414,8 +417,8 @@ async def test_status_dispatch_counts_issues(db, wq, config):
 
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
-    assert "issues" in resp["data"]
-    assert resp["data"]["issues"] >= 1
+    assert len(resp["data"]["drifted"]) == 1
+    assert resp["data"]["drifted"][0]["key"] == "owner.info"
 
 
 async def test_status_dispatch_includes_label(db, wq, config):
@@ -682,8 +685,8 @@ async def test_issues_dispatch_no_open_node_when_auth_required(db, wq, config):
     assert resp["data"]["open_nodes"] == []
 
 
-async def test_status_dispatch_counts_open_nodes_in_issues(db, wq, config):
-    """status issues count includes open nodes (no ACL protection)."""
+async def test_status_dispatch_open_nodes_in_array(db, wq, config):
+    """status open_nodes array includes nodes with no ACL protection."""
     node = Node(
         pubkey="aabbccdd" * 8,
         name="Open Node",
@@ -698,4 +701,4 @@ async def test_status_dispatch_counts_open_nodes_in_issues(db, wq, config):
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["issues"] >= 1
+    assert len(resp["data"]["open_nodes"]) == 1
