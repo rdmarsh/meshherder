@@ -370,8 +370,8 @@ async def test_commission_new_returns_pubkey_prefix():
 
 
 @pytest.mark.asyncio
-async def test_commission_new_sends_generated_prv_key_before_password():
-    """'new' mode sets the generated private key before password/name/radio changes."""
+async def test_commission_new_sends_password_and_prv_key_late():
+    """'new' mode sends session-invalidating password/key changes after normal settings."""
     from mch.commission import handle_commission
 
     factory_pubkey = "a1" * 32
@@ -389,7 +389,69 @@ async def test_commission_new_sends_generated_prv_key_before_password():
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
-    assert sent[:2] == [f"set prv.key {GENERATED_PRV_KEY}", "password hunter2"]
+    assert sent == [
+        "set name TestNode",
+        "password hunter2",
+        f"set prv.key {GENERATED_PRV_KEY}",
+        "set radio 915.075,125,9,5",
+        "reboot",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_commission_new_treats_cli_error_response_as_failure():
+    """CLI error text is a failed command even when it arrives as a normal response."""
+    from mch.commission import handle_commission
+
+    factory_pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="ok"),
+        CommandResult(success=True, text="ERR_CODE_INVALID_STATE"),
+    ])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "hunter2",
+        "name": "TestNode",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    assert "password <redacted>" in resp["error"]
+    assert "ERR_CODE_INVALID_STATE" in resp["error"]
+    assert "hunter2" not in resp["error"]
+
+
+@pytest.mark.asyncio
+async def test_commission_new_redacts_prv_key_on_failure():
+    """Private keys are not leaked in command failure errors."""
+    from mch.commission import handle_commission
+
+    factory_pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="ok"),
+        CommandResult(success=True, text="ok"),
+        CommandResult(success=False, error="timeout"),
+    ])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "hunter2",
+        "name": "TestNode",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    assert "set prv.key <redacted>" in resp["error"]
+    assert GENERATED_PRV_KEY not in resp["error"]
 
 
 # ---------------------------------------------------------------------------
