@@ -714,7 +714,7 @@ def _prompt_radio_freq(default: str = "") -> str:
                 return val
         except ValueError:
             pass
-        click.echo("  enter a frequency between 400 and 928 MHz, e.g. 915.800")
+        click.echo("  enter a frequency between 400 and 928 MHz, e.g. 915.075")
 
 
 def _prompt_radio_bw(default: str = "") -> str:
