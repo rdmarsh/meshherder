@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from mch.cli import _filter_contacts, _filter_drift, _filter_nodes, cli
@@ -530,6 +531,25 @@ def test_exec_blocked_command_refuses():
     assert "blocked" in result.output.lower() or "blocked" in (result.stderr or "").lower()
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("set", "prv.key", "deadbeef"),
+        ("set", "guest.password", "guest"),
+        ("start", "ota"),
+        ("SET", "PRV.KEY", "deadbeef"),
+    ],
+)
+def test_exec_multi_word_blocked_command_refuses(command):
+    """exec blocks dangerous multi-word commands before contacting the daemon."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "exec", "site-a", *command])
+    mock_rpc.assert_not_called()
+    assert result.exit_code != 0
+    assert "blocked" in result.output.lower() or "blocked" in (result.stderr or "").lower()
+
+
 def test_exec_free_command_shows_output():
     """exec with a free command (ver) calls daemon and prints the response."""
     runner = CliRunner()
@@ -564,6 +584,23 @@ def test_exec_confirm_prompts_and_accepts_correct_prefix():
             input=pubkey[:8] + "\n",
         )
     assert result.exit_code == 0
+
+
+def test_exec_multi_word_confirm_prompts_and_accepts_correct_prefix():
+    """exec prompts for dangerous multi-word commands like clear stats."""
+    pubkey = "aabbccdd" * 8
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[
+        _NODE_RESP,
+        {"ok": True, "data": "ok"},
+    ]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "exec", "site-a", "clear", "stats"],
+            input=pubkey[:8] + "\n",
+        )
+    assert result.exit_code == 0
+    assert mock_rpc.call_count == 2
 
 
 def test_exec_confirm_wrong_prefix_cancels():
