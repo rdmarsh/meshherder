@@ -43,7 +43,7 @@ def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
         side_effect=lambda ni: {"public_key": ni["pubkey"], "adv_name": ""}
     )
     gw.login = AsyncMock(return_value=True)
-    gw.info = {"radio_freq": 915.075, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5}
+    gw.info = {"radio_freq": 915.800, "radio_bw": 250.0, "radio_sf": 10, "radio_cr": 5}
     return gw
 
 
@@ -240,7 +240,7 @@ async def test_commission_new_sends_password():
     await handle_commission({
         "cmd": "commission", "mode": "new",
         "admin_password": "hunter2",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -261,7 +261,7 @@ async def test_commission_new_sends_name():
 
     await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "Quakers Hill North", "target_freq": "915.075,125,9,5",
+        "name": "Quakers Hill North", "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -282,12 +282,12 @@ async def test_commission_new_sends_radio():
 
     await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
-    assert any("set radio 915.075,125,9,5" in c for c in sent)
+    assert any("set radio 915.800,250,10,5" in c for c in sent)
 
 
 @pytest.mark.asyncio
@@ -304,7 +304,7 @@ async def test_commission_new_sends_guest_password():
     await handle_commission({
         "cmd": "commission", "mode": "new",
         "admin_password": "admin", "guest_password": "guest",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -326,7 +326,7 @@ async def test_commission_new_sends_reboot_last():
     await handle_commission({
         "cmd": "commission", "mode": "new",
         "admin_password": "admin",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -348,12 +348,12 @@ async def test_commission_new_waits_for_radio_then_reboots_without_waiting():
     await handle_commission({
         "cmd": "commission", "mode": "new",
         "admin_password": "admin",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
     calls_by_command = {call.args[1]: call for call in gw.send_command.call_args_list}
-    assert calls_by_command["set radio 915.075,125,9,5"].kwargs["await_response"] is True
+    assert calls_by_command["set radio 915.800,250,10,5"].kwargs["await_response"] is True
     assert calls_by_command["reboot"].kwargs["await_response"] is False
 
 
@@ -370,7 +370,7 @@ async def test_commission_new_returns_pubkey_prefix():
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -394,7 +394,7 @@ async def test_commission_new_sends_password_and_prv_key_late():
         "cmd": "commission", "mode": "new",
         "admin_password": "hunter2",
         "name": "TestNode",
-        "target_freq": "915.075,125,9,5",
+        "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -403,7 +403,7 @@ async def test_commission_new_sends_password_and_prv_key_late():
         "set name TestNode",
         "password hunter2",
         f"set prv.key {GENERATED_PRV_KEY}",
-        "set radio 915.075,125,9,5",
+        "set radio 915.800,250,10,5",
         "reboot",
     ]
 
@@ -483,7 +483,7 @@ async def test_commission_new_fails_when_generated_identity_not_discovered():
         "cmd": "commission", "mode": "new",
         "admin_password": "hunter2",
         "name": "TestNode",
-        "target_freq": "915.075,125,9,5",
+        "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -512,7 +512,7 @@ async def test_commission_new_returns_config_snippet():
         "label": "Test Node",
         "group": "testgroup",
         "name": "Test Node",
-        "target_freq": "915.075,125,9,5",
+        "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -521,7 +521,7 @@ async def test_commission_new_returns_config_snippet():
     assert f"pubkey_prefix: {GENERATED_PUBKEY[:8]}" in snippet
     assert "label: Test Node" in snippet
     assert "group: testgroup" in snippet
-    assert "via: 915.075,125,9,5" in snippet
+    assert "via: 915.800,250,10,5" in snippet
 
 
 @pytest.mark.asyncio
@@ -539,7 +539,7 @@ async def test_commission_new_returns_secrets_snippet():
         "cmd": "commission", "mode": "new",
         "admin_password": "testpass",
         "name": "Test Node",
-        "target_freq": "915.075,125,9,5",
+        "target_freq": "915.800,250,10,5",
         "prv_key": GENERATED_PRV_KEY,
     }, wq, db, cfg)
 
@@ -656,7 +656,7 @@ async def test_commission_replace_sends_radio_from_config_via():
     cfg = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
-            via=RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5),
+            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
         )],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
@@ -667,7 +667,7 @@ async def test_commission_replace_sends_radio_from_config_via():
     }, wq, db, cfg)
 
     sent = [call.args[1] for call in gw.send_command.call_args_list]
-    assert any("set radio 915.075" in c for c in sent)
+    assert any("set radio 915.800" in c for c in sent)
 
 
 @pytest.mark.asyncio
@@ -705,7 +705,7 @@ async def test_commission_replace_waits_for_radio_then_reboots_without_waiting()
     cfg = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
-            via=RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5),
+            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
         )],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
@@ -716,7 +716,7 @@ async def test_commission_replace_waits_for_radio_then_reboots_without_waiting()
     }, wq, db, cfg)
 
     calls_by_command = {call.args[1]: call for call in gw.send_command.call_args_list}
-    assert calls_by_command["set radio 915.075,125.0,9,5"].kwargs["await_response"] is True
+    assert calls_by_command["set radio 915.800,250.0,10,5"].kwargs["await_response"] is True
     assert calls_by_command["reboot"].kwargs["await_response"] is False
 
 
@@ -800,12 +800,12 @@ async def test_commission_scan_returns_gateway_radio_string():
     gw = make_gateway(discovered=[])
     wq = make_wq(gateway=gw)
     db = make_db()
-    cfg = Config(gateway=GatewayConfig(radio=RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5)))
+    cfg = Config(gateway=GatewayConfig(radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5)))
 
     resp = await handle_commission({"cmd": "commission", "mode": "scan"}, wq, db, cfg)
 
     assert resp["ok"] is True
-    assert resp["data"]["gateway_radio"] == "915.075,125,9,5"
+    assert resp["data"]["gateway_radio"] == "915.800,250,10,5"
 
 
 @pytest.mark.asyncio
@@ -841,7 +841,7 @@ async def test_commission_new_adds_contact_before_commands():
 
     await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
     }, wq, db, cfg)
 
     gw.add_commission_contact.assert_called_once()
@@ -863,7 +863,7 @@ async def test_commission_new_rehops_to_factory_before_commands():
 
     await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
     }, wq, db, cfg)
 
     gw.hop_radio.assert_called_once_with(*Gateway.FACTORY_FREQ)
@@ -882,10 +882,10 @@ async def test_commission_new_restores_home_radio_after_commissioning():
 
     await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
     }, wq, db, cfg)
 
-    gw.restore_radio.assert_called_once_with(915.075, 125.0, 9, 5)
+    gw.restore_radio.assert_called_once_with(915.800, 250.0, 10, 5)
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +905,7 @@ async def test_commission_new_logins_with_factory_password():
 
     await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
     }, wq, db, cfg)
 
     gw.login.assert_called_once()
@@ -927,7 +927,7 @@ async def test_commission_new_login_failure_returns_error():
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
-        "name": "TestNode", "target_freq": "915.075,125,9,5",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
     }, wq, db, cfg)
 
     assert resp["ok"] is False

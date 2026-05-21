@@ -104,3 +104,12 @@
 - Follow-up code direction:
   - Wait for the `set radio` response during commissioning.
   - Keep only the final `reboot` as fire-and-forget.
+
+## 2026-05-21 - Test Frequency Guardrail
+
+- Operator rule:
+  - Production frequency is `915.075,125,9,5`; do not use it for local/live testing.
+  - Test mesh frequency is `915.800,250,10,5`.
+  - Factory discovery/configuration frequency remains `869.618,62.5,8,5`.
+- Updated examples and unit-test fixtures so test commissioning paths use `915.800,250,10,5`.
+- Left `src/mch/data/profiles.yaml` unchanged because it is regional preset data, not a test target.

@@ -468,7 +468,7 @@ def _hint_node(label="site-a", name="Tower", count=5):
         "neighbour_count": count,
         "profile": {"name": "rooftop", "txdelay": "1.0", "direct_txdelay": "0.5",
                     "description": "few neighbours"},
-        "universal": [{"key": "radio", "value": "915.075,125,9,5",
+        "universal": [{"key": "radio", "value": "915.800,250,10,5",
                        "description": "home freq"}],
     }
 
@@ -633,9 +633,9 @@ def test_exec_daemon_error_exits_nonzero():
 # scan returns exactly one unmanaged node + gateway_radio
 _SCAN_RESP_ONE = {"ok": True, "data": {
     "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
-    "gateway_radio": "915.075,125,9,5",
+    "gateway_radio": "915.800,250,10,5",
 }}
-_SCAN_RESP_NONE = {"ok": True, "data": {"nodes": [], "gateway_radio": "915.075,125,9,5"}}
+_SCAN_RESP_NONE = {"ok": True, "data": {"nodes": [], "gateway_radio": "915.800,250,10,5"}}
 
 
 def _commission_input(*lines: str) -> str:
@@ -650,7 +650,7 @@ def test_commission_new_happy_path():
         "label": "Test Site",
         "name": "Test Site",
         "group": None,
-        "target_freq": "915.075,125,9,5",
+        "target_freq": "915.800,250,10,5",
     }}
     inp = _commission_input(
         "n",          # mode: new (after scan)
@@ -696,7 +696,7 @@ def test_commission_new_admin_password_defaults_to_password():
         "label": "Test Site",
         "name": "Test Site",
         "group": None,
-        "target_freq": "915.075,125,9,5",
+        "target_freq": "915.800,250,10,5",
     }}
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
@@ -738,7 +738,7 @@ def test_commission_new_edit_at_summary_re_enters_values():
         "label": "Test Site",
         "name": "Test Site",
         "group": None,
-        "target_freq": "915.075,125,9,5",
+        "target_freq": "915.800,250,10,5",
     }}
     inp = _commission_input(
         "n",          # mode: new

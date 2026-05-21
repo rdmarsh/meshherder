@@ -80,13 +80,13 @@ def test_gateway_radio_still_works(tmp_path):
     p = _write_config(tmp_path, """\
         gateway:
           radio:
-            freq: 915.075
-            bw: 125
-            sf: 9
+            freq: 915.800
+            bw: 250
+            sf: 10
             cr: 5
     """)
     cfg = load(p)
-    assert cfg.gateway.radio == RadioConfig(freq=915.075, bw=125, sf=9, cr=5)
+    assert cfg.gateway.radio == RadioConfig(freq=915.800, bw=250, sf=10, cr=5)
 
 
 # ------------------------------------------------------------------
