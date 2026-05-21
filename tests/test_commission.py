@@ -25,8 +25,18 @@ def make_node(pubkey: str, **kwargs) -> Node:
 
 def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
     gw = MagicMock()
-    gw.discover = AsyncMock(return_value=discovered or [])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+
+    async def _discover(*args, **kwargs) -> list[dict]:
+        if gw.discover.call_count == 1:
+            return discovered or []
+        for call in gw.send_command.call_args_list:
+            command = call.args[1]
+            if command.startswith("set prv.key "):
+                return [discover_payload(derive_public_key(command.split()[-1]))]
+        return discovered or []
+
+    gw.discover = AsyncMock(side_effect=_discover)
     gw.hop_radio = AsyncMock(return_value=None)
     gw.restore_radio = AsyncMock(return_value=None)
     gw.add_commission_contact = AsyncMock(
@@ -452,6 +462,34 @@ async def test_commission_new_redacts_prv_key_on_failure():
     assert resp["ok"] is False
     assert "set prv.key <redacted>" in resp["error"]
     assert GENERATED_PRV_KEY not in resp["error"]
+
+
+@pytest.mark.asyncio
+async def test_commission_new_fails_when_generated_identity_not_discovered():
+    """'new' mode does not print snippets unless the generated pubkey appears after reboot."""
+    from mch.commission import handle_commission
+
+    factory_pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
+    gw.discover = AsyncMock(side_effect=[
+        [discover_payload(factory_pubkey)],
+        [discover_payload(factory_pubkey)],
+    ])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "hunter2",
+        "name": "TestNode",
+        "target_freq": "915.075,125,9,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    assert "verification failed" in resp["error"]
+    assert GENERATED_PUBKEY[:12] in resp["error"]
 
 
 # ---------------------------------------------------------------------------
