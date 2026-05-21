@@ -278,7 +278,7 @@ def _chunk(text: str, size: int) -> list[str]:
     return chunks
 
 
-def _find_node(nodes, query: str):
+def _find_node(nodes: list[Any], query: str) -> Any:
     query_lower = query.lower()
     # exact name match first
     for n in nodes:

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from mch.config import Config, GatewayConfig, NodeConfig, NodeSecrets, RadioConfig
 from mch.gateway import CommandResult
-from mch.models import Node, NodeState
-
+from mch.models import Node
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -540,7 +538,6 @@ async def test_commission_replace_sends_reboot_last():
 def test_workqueue_starts_unpaused():
     """WorkQueue._paused event is set (unpaused) on init."""
     from mch.queue import WorkQueue
-    from mch.config import SchedulerConfig
 
     cfg = make_config()
     wq = WorkQueue(cfg, MagicMock(), MagicMock())
@@ -644,7 +641,7 @@ async def test_commission_scan_returns_none_gateway_radio_when_not_configured():
 
 @pytest.mark.asyncio
 async def test_commission_new_adds_contact_before_commands():
-    """handle_commission adds discovered node to the gateway contact store before sending commands."""
+    """handle_commission adds discovered node to the contact store before sending commands."""
     from mch.commission import handle_commission
 
     pubkey = "a1" * 32

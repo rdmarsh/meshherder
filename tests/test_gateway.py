@@ -6,11 +6,10 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from meshcore.events import Event, EventType
 
 from mch.config import GatewayConfig
-from mch.gateway import CommandResult, Gateway, GatewayError
+from mch.gateway import Gateway, GatewayError
 
 
 def make_event(etype: EventType, payload: object, **attrs) -> Event:

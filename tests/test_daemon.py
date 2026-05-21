@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from mch.config import Config, NodeSecrets
 from mch.daemon import _dispatch
@@ -185,8 +185,12 @@ async def test_node_dispatch_name_substring_match(db, wq, config):
 
 async def test_node_dispatch_ambiguous_returns_error(db, wq, config):
     """node command returns an error when the query matches more than one node."""
-    node1 = Node(pubkey="aabbccdd" * 8, name="Wip Node A", label="wip 01", state=NodeState.CONFIGURED)
-    node2 = Node(pubkey="11223344" * 8, name="Wip Node B", label="wip 02", state=NodeState.CONFIGURED)
+    node1 = Node(
+        pubkey="aabbccdd" * 8, name="Wip Node A", label="wip 01", state=NodeState.CONFIGURED
+    )
+    node2 = Node(
+        pubkey="11223344" * 8, name="Wip Node B", label="wip 02", state=NodeState.CONFIGURED
+    )
     await db.upsert_node(node1)
     await db.upsert_node(node2)
 
@@ -225,7 +229,9 @@ async def test_logs_dispatch_ambiguous_returns_error(db, wq, config):
 
 async def test_hint_dispatch_label_match(db, wq, config):
     """hint command should match by label when pubkey prefix lookup fails."""
-    node = Node(pubkey="aabbccdd" * 8, name="Tower Node", label="QH Test", state=NodeState.CONFIGURED)
+    node = Node(
+        pubkey="aabbccdd" * 8, name="Tower Node", label="QH Test", state=NodeState.CONFIGURED
+    )
     await db.upsert_node(node)
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="5"))
 
@@ -286,7 +292,7 @@ async def test_sync_dispatch_no_prefix_starts_background_cycle(db, wq, config):
 async def test_sync_dispatch_with_prefix_runs_node(db, wq, config):
     """sync with a prefix runs a single node inline and returns the result."""
     from unittest.mock import AsyncMock
-    from mch.models import Node as _Node
+
     node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
     wq.run_node = AsyncMock(return_value=node)
 
@@ -314,7 +320,7 @@ async def test_sync_dispatch_bad_prefix_returns_error(db, wq, config):
 
 async def test_contacts_dispatch_returns_unfiled_rep_contacts(db, wq, config):
     """contacts returns REP nodes visible to the gateway but not in config."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock
     rep_contact = {
         "public_key": "aabbccdd11223344" + "aa" * 24,
         "adv_name": "Millbrook",
@@ -332,8 +338,9 @@ async def test_contacts_dispatch_returns_unfiled_rep_contacts(db, wq, config):
 
 async def test_contacts_dispatch_excludes_already_managed(db, wq, config):
     """contacts excludes nodes whose pubkey_prefix is already in config."""
-    from mch.config import NodeConfig
     from unittest.mock import AsyncMock
+
+    from mch.config import NodeConfig
     rep_contact = {
         "public_key": "aabbccdd11223344" + "aa" * 24,
         "adv_name": "Millbrook",
@@ -385,7 +392,10 @@ async def test_logs_dispatch_filtered_by_pubkey_prefix(db, wq, config):
 
 async def test_status_dispatch_returns_node_list_and_issue_arrays(db, wq, config):
     """status returns node list plus drifted/bad_state/ghosts/open_nodes arrays."""
-    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED, auth_cached=True)
+    node = Node(
+        pubkey="aabbccdd" * 8, name="Tower", label="site-a",
+        state=NodeState.CONFIGURED, auth_cached=True
+    )
     await db.upsert_node(node)
 
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
@@ -459,7 +469,10 @@ async def test_status_dispatch_includes_group_and_facts(db, wq, config):
 
 async def test_issues_dispatch_no_issues(db, wq, config):
     """issues returns empty sections when everything is clean."""
-    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED, auth_cached=True)
+    node = Node(
+        pubkey="aabbccdd" * 8, name="Tower", label="site-a",
+        state=NodeState.CONFIGURED, auth_cached=True
+    )
     await db.upsert_node(node)
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
@@ -537,7 +550,9 @@ async def test_dispatch_unknown_command_returns_error(db, wq, config):
 
 async def test_exec_dispatch_blocked_command_returns_error(db, wq, config):
     """exec with a blocked command (erase) returns an error without touching the gateway."""
-    resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "erase"}, wq, db, config)
+    resp = await _dispatch(
+        {"cmd": "exec", "pubkey": "aabbccdd", "command": "erase"}, wq, db, config
+    )
     assert resp["ok"] is False
     assert "blocked" in resp["error"]
 
@@ -587,7 +602,9 @@ async def test_exec_dispatch_fire_and_forget_timeout_returns_ok(db, wq, config):
     wq._gateway = MagicMock()
     wq._gateway.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
 
-    resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "reboot"}, wq, db, config)
+    resp = await _dispatch(
+        {"cmd": "exec", "pubkey": "aabbccdd", "command": "reboot"}, wq, db, config
+    )
 
     assert resp["ok"] is True
 

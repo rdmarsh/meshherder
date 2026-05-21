@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
@@ -159,7 +160,7 @@ class Database:
         await db.commit()
 
     async def get_due_node(self) -> Node | None:
-        """Return the node with the earliest next_sync_at that is now due (or NULL = immediately due)."""
+        """Return the node with the earliest next_sync_at that is now due."""
         db = self._db_required()
         now = _dt(datetime.now(UTC))
         async with db.execute(
@@ -280,8 +281,10 @@ class Database:
         db = self._db_required()
         await db.execute(
             """
-            INSERT INTO operations (node_pubkey, command, every_hours, status, queued_at, run_at, response)
-            VALUES (:node_pubkey, :command, :every_hours, :status, :queued_at, :run_at, :response)
+            INSERT INTO operations
+                (node_pubkey, command, every_hours, status, queued_at, run_at, response)
+            VALUES
+                (:node_pubkey, :command, :every_hours, :status, :queued_at, :run_at, :response)
             ON CONFLICT DO NOTHING
             """,
             {
@@ -296,7 +299,7 @@ class Database:
         )
         await db.commit()
 
-    async def get_last_operation(self, node_pubkey: str, command: str) -> "OperationRecord | None":
+    async def get_last_operation(self, node_pubkey: str, command: str) -> OperationRecord | None:
         """Return the most recent record for (node, command), or None if never run."""
         db = self._db_required()
         async with db.execute(
@@ -310,7 +313,8 @@ class Database:
     async def get_pending_operations(self, node_pubkey: str) -> list[OperationRecord]:
         db = self._db_required()
         async with db.execute(
-            "SELECT * FROM operations WHERE node_pubkey = ? AND status = 'pending' ORDER BY queued_at",
+            "SELECT * FROM operations"
+            " WHERE node_pubkey = ? AND status = 'pending' ORDER BY queued_at",
             (node_pubkey,),
         ) as cur:
             rows = await cur.fetchall()
@@ -338,7 +342,7 @@ class Database:
 
     async def get_logs(
         self, node_pubkey: str | None = None, limit: int = 100
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         db = self._db_required()
         if node_pubkey:
             async with db.execute(

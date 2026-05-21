@@ -5,13 +5,19 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
+from mch.models import SettingPolicy
+
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
+# pubkey_prefix must be even-length lowercase hex (full bytes only).
+_HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 
 
 class _NoDuplicateKeysLoader(yaml.SafeLoader):
@@ -20,9 +26,9 @@ class _NoDuplicateKeysLoader(yaml.SafeLoader):
     yaml.safe_load silently overwrites duplicate keys with the last value.
     Operators who accidentally paste the same prefix twice would lose one entry silently.
     """
-    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Hashable, Any]:
         if isinstance(node, yaml.MappingNode):
-            seen: set = set()
+            seen: set[str] = set()
             for key_node, _ in node.value:
                 key = key_node.value  # raw string before type coercion
                 if key in seen:
@@ -31,8 +37,6 @@ class _NoDuplicateKeysLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 log = logging.getLogger(__name__)
-
-from mch.models import SettingPolicy
 
 
 @dataclass
@@ -47,7 +51,7 @@ class GatewayConfig:
     device: str = "/dev/meshcore0"
     baud: int = 115200
     name: str | None = None  # if set, mchd applies this name to the gateway on startup
-    radio: "RadioConfig | None" = None  # if set, gateway is forced to this freq on startup and restored to it after every hop
+    radio: RadioConfig | None = None  # if set, forced to home freq on startup; restored per hop
     advert_on_start: str = "never"  # "never" | "zerohop" — send advert after daemon restart
 
     def __post_init__(self) -> None:
@@ -140,6 +144,10 @@ class Config:
 def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     raw = yaml.safe_load(config_path.read_text())
 
+    if not isinstance(raw, dict):
+        kind = type(raw).__name__ if raw is not None else "empty file"
+        raise ValueError(f"config file must be a YAML mapping, got {kind}")
+
     gw_raw = raw.get("gateway", {})
     gw_radio = _parse_radio(gw_raw.pop("radio", None))
     sched_raw = raw.get("scheduler", {})
@@ -165,15 +173,25 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     dup_labels = {lbl for lbl in labels if labels.count(lbl) > 1}
     if dup_labels:
         raise ValueError(
-            f"duplicate node labels in config: {', '.join(sorted(dup_labels))} - each label must be unique"
+            f"duplicate node labels in config: {', '.join(sorted(dup_labels))}"
+            " - each label must be unique"
         )
 
     prefixes = [n.pubkey_prefix for n in cfg.nodes]
     dup_prefixes = {p for p in prefixes if prefixes.count(p) > 1}
     if dup_prefixes:
         raise ValueError(
-            f"duplicate pubkey_prefix in config: {', '.join(sorted(dup_prefixes))} - each node must be unique"
+            f"duplicate pubkey_prefix in config: {', '.join(sorted(dup_prefixes))}"
+            " - each node must be unique"
         )
+
+    group_names = {g.name for g in cfg.groups}
+    for n in cfg.nodes:
+        if n.group and n.group not in group_names:
+            raise ValueError(
+                f"node {n.pubkey_prefix!r} references unknown group {n.group!r}"
+                f" - defined groups: {sorted(group_names) or '(none)'}"
+            )
 
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
     if secrets_path is None:
@@ -184,7 +202,7 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     return cfg
 
 
-def _parse_setting(raw: dict) -> SettingConfig:
+def _parse_setting(raw: dict[str, Any]) -> SettingConfig:
     policy = raw.get("policy")
     return SettingConfig(
         desired=raw.get("desired"),
@@ -193,7 +211,7 @@ def _parse_setting(raw: dict) -> SettingConfig:
     )
 
 
-def _parse_radio(raw) -> RadioConfig | None:
+def _parse_radio(raw: Any) -> RadioConfig | None:
     """Parse a via/radio value: either a mapping or a "freq,bw,sf,cr" string.
 
     Frequencies are rounded to 3 decimal places (1 kHz resolution) so that
@@ -205,10 +223,30 @@ def _parse_radio(raw) -> RadioConfig | None:
     if isinstance(raw, str):
         freq, bw, sf, cr = raw.split(",")
         return RadioConfig(freq=round(float(freq), 3), bw=float(bw), sf=int(sf), cr=int(cr))
-    return RadioConfig(freq=round(float(raw["freq"]), 3), **{k: v for k, v in raw.items() if k != "freq"})
+    return RadioConfig(
+        freq=round(float(raw["freq"]), 3), **{k: v for k, v in raw.items() if k != "freq"}
+    )
 
 
-def _parse_node(raw: dict) -> NodeConfig:
+def _parse_node(raw: dict[str, Any]) -> NodeConfig:
+    if "radio" in raw:
+        raise ValueError(
+            f"node {raw.get('pubkey_prefix')!r}: 'radio:' is no longer supported"
+            " - use 'via:' instead (same format)"
+        )
+
+    pubkey_prefix = str(raw["pubkey_prefix"])
+    if not _HEX_RE.match(pubkey_prefix):
+        raise ValueError(
+            f"pubkey_prefix {pubkey_prefix!r} contains non-hex characters"
+            " - must be lowercase hex digits only"
+        )
+    if len(pubkey_prefix) % 2 != 0:
+        raise ValueError(
+            f"pubkey_prefix {pubkey_prefix!r} has odd length ({len(pubkey_prefix)} chars)"
+            " - prefix must represent whole bytes (even number of hex chars)"
+        )
+
     policy = raw.get("default_policy")
     settings = {
         k: _parse_setting(v if isinstance(v, dict) else {"desired": v})
@@ -230,7 +268,7 @@ def _parse_node(raw: dict) -> NodeConfig:
         )
 
     return NodeConfig(
-        pubkey_prefix=str(raw["pubkey_prefix"]),
+        pubkey_prefix=pubkey_prefix,
         group=raw.get("group"),
         label=label,
         default_policy=SettingPolicy(policy) if policy else None,
@@ -240,7 +278,7 @@ def _parse_node(raw: dict) -> NodeConfig:
     )
 
 
-def _parse_group(raw: dict) -> GroupConfig:
+def _parse_group(raw: dict[str, Any]) -> GroupConfig:
     policy = raw.get("default_policy")
     settings = {
         k: _parse_setting(v if isinstance(v, dict) else {"desired": v})

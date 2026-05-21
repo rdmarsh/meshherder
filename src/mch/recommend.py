@@ -6,6 +6,7 @@ import logging
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -62,7 +63,7 @@ def load_profiles(
     3. profiles_url if given — fetch, write cache, use it
     4. Bundled default
     """
-    raw: dict | None = None
+    raw: dict[str, Any] | None = None
 
     if profiles_file:
         raw = _load_yaml(profiles_file)
@@ -91,24 +92,26 @@ def load_profiles(
     return _parse(raw)
 
 
-def _load_yaml(path: Path) -> dict | None:
+def _load_yaml(path: Path) -> dict[str, Any] | None:
     try:
-        return yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text())
+        return data if isinstance(data, dict) else None
     except Exception as exc:
         log.warning("could not load profiles from %s: %s", path, exc)
         return None
 
 
-def _fetch_url(url: str) -> dict | None:
+def _fetch_url(url: str) -> dict[str, Any] | None:
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:
-            return yaml.safe_load(resp.read().decode())
+            data = yaml.safe_load(resp.read().decode())
+            return data if isinstance(data, dict) else None
     except Exception as exc:
         log.warning("could not fetch profiles from %s: %s", url, exc)
         return None
 
 
-def _parse(raw: dict) -> tuple[list[Profile], list[UniversalSetting]]:
+def _parse(raw: dict[str, Any]) -> tuple[list[Profile], list[UniversalSetting]]:
     profiles = [
         Profile(
             name=p["name"],

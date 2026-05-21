@@ -19,13 +19,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from mch.config import Config, NodeConfig, GroupConfig, OperationConfig, SettingConfig
+from mch.config import Config, GroupConfig, NodeConfig, OperationConfig
 from mch.db import Database
-from mch.gateway import CommandResult, Gateway, GatewayError
+from mch.gateway import CommandResult, Gateway
 
 if TYPE_CHECKING:
     from mch.messenger import Messenger
@@ -170,7 +170,7 @@ class WorkQueue:
         self._db = db
         self._messenger = messenger
         self._running = False
-        self._current_task: asyncio.Task | None = None
+        self._current_task: asyncio.Task[None] | None = None
         self._contacts: list[dict[str, Any]] = []  # cached at startup; refreshed by run_cycle
         self._paused: asyncio.Event = asyncio.Event()
         self._paused.set()  # starts unpaused — event set means "OK to proceed"
@@ -213,7 +213,7 @@ class WorkQueue:
         """Allow the queue to resume processing nodes."""
         self._paused.set()
 
-    async def _run_next_due(self, contacts: list[dict]) -> None:
+    async def _run_next_due(self, contacts: list[dict[str, Any]]) -> None:
         """Find the next due node, sleep until it's time, and process it."""
         node = await self._db.get_due_node()
         if node is None:
@@ -228,7 +228,7 @@ class WorkQueue:
             # sleep interruptibly so stop() can cancel us
             try:
                 await asyncio.wait_for(asyncio.shield(asyncio.sleep(wait)), timeout=wait + 1)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 if not self._running:
                     return
 
@@ -266,7 +266,8 @@ class WorkQueue:
 
         interval_s = self._config.scheduler.sync_interval_days * 86400
         jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
-        await self._db.set_next_sync(node.pubkey, datetime.now(UTC) + timedelta(seconds=interval_s + jitter))
+        next_sync = datetime.now(UTC) + timedelta(seconds=interval_s + jitter)
+        await self._db.set_next_sync(node.pubkey, next_sync)
 
     async def _seed_from_config(self) -> None:
         """Seed DB entries for config nodes visible to the gateway.
@@ -305,7 +306,11 @@ class WorkQueue:
                     state=NodeState.UNKNOWN,
                 )
                 await self._db.upsert_node(node)
-                log.info("seeded node '%s' from config (%s)", node_cfg.label or pubkey[:12], pubkey[:12])
+                log.info(
+                    "seeded node '%s' from config (%s)",
+                    node_cfg.label or pubkey[:12],
+                    pubkey[:12],
+                )
 
             # auto-favourite: guard against eviction on a dense mesh
             if not contact.get("flags", 0) & 1:
@@ -361,7 +366,9 @@ class WorkQueue:
         or matches more than one contact.
         """
         if len(prefix) % 2 != 0:
-            raise ValueError(f"prefix must have an even number of hex chars (got {len(prefix)!r} — {prefix!r})")
+            raise ValueError(
+                f"prefix must have an even number of hex chars (got {len(prefix)!r} - {prefix!r})"
+            )
 
         # use cached contacts — calling get_contacts() concurrently with the receive loop
         # races on meshcore_py's dispatcher and causes timeouts
@@ -396,7 +403,8 @@ class WorkQueue:
 
         interval_s = self._config.scheduler.sync_interval_days * 86400
         jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
-        await self._db.set_next_sync(pubkey, datetime.now(UTC) + timedelta(seconds=interval_s + jitter))
+        next_sync = datetime.now(UTC) + timedelta(seconds=interval_s + jitter)
+        await self._db.set_next_sync(pubkey, next_sync)
 
         return result
 
@@ -461,7 +469,7 @@ class WorkQueue:
     def _find_contact(
         self,
         pubkey_prefix: str,
-        by_pubkey: dict[str, Any],
+        by_pubkey: dict[str, dict[str, Any]],
     ) -> dict[str, Any] | None:
         if pubkey_prefix in by_pubkey:
             return by_pubkey[pubkey_prefix]
@@ -502,9 +510,8 @@ class WorkQueue:
         # hop the gateway radio if this node lives on a different frequency
         node_radio = node_cfg.via
         gw_freq = self._gateway.info.get("radio_freq")
-        need_hop = node_radio is not None and node_radio.freq != gw_freq
-        saved_radio: tuple | None = None
-        if need_hop:
+        saved_radio: tuple[float, float, int, int] | None = None
+        if node_radio is not None and node_radio.freq != gw_freq:
             log.info(
                 "  hopping to %.3f/%d/SF%d for %r",
                 node_radio.freq, node_radio.bw, node_radio.sf, name,
@@ -574,7 +581,7 @@ class WorkQueue:
 
     async def _send_authed(
         self,
-        contact: dict,
+        contact: dict[str, Any],
         command: str,
         node: Node,
         node_cfg: NodeConfig,
@@ -601,7 +608,7 @@ class WorkQueue:
 
             ns = next(
                 (ns for prefix, ns in self._config.secrets.items()
-                 if prefix != "default" and node_cfg.pubkey_prefix.startswith(prefix)),
+                 if prefix != "default" and node.pubkey.startswith(prefix)),
                 None,
             ) or self._config.secrets.get("default")
             password = ns.password if ns else None
@@ -619,7 +626,9 @@ class WorkQueue:
 
         return result
 
-    async def _collect_facts(self, pubkey: str, contact: dict, node: Node, node_cfg: NodeConfig) -> int:
+    async def _collect_facts(
+        self, pubkey: str, contact: dict[str, Any], node: Node, node_cfg: NodeConfig
+    ) -> int:
         """Run all declared fact commands and store results."""
         collected = 0
         for key in self._config.facts:
@@ -646,7 +655,7 @@ class WorkQueue:
     async def _process_settings(
         self,
         pubkey: str,
-        contact: dict,
+        contact: dict[str, Any],
         node_cfg: NodeConfig,
         group_cfg: GroupConfig | None,
         node: Node,
@@ -686,7 +695,9 @@ class WorkQueue:
                 drifted += 1
                 if policy == SettingPolicy.ENFORCE:
                     log.info("  enforcing %s: observed=%r desired=%r", key, observed, desired)
-                    set_res = await self._send_authed(contact, f"set {key} {desired}", node, node_cfg)
+                    set_res = await self._send_authed(
+                        contact, f"set {key} {desired}", node, node_cfg
+                    )
                     if set_res.success:
                         enforced += 1
                         drifted -= 1  # enforcement fixed it — don't count as residual drift
@@ -742,7 +753,7 @@ class WorkQueue:
     async def _run_operations(
         self,
         pubkey: str,
-        contact: dict,
+        contact: dict[str, Any],
         node_cfg: NodeConfig,
         node: Node,
     ) -> tuple[int, int]:
@@ -764,7 +775,9 @@ class WorkQueue:
                 run += 1
                 if faf and not res.success:
                     log.info("  operation sent (fire-and-forget): %r", op.command)
-                    await self._db.write_log(pubkey, "INFO", f"operation sent (fire-and-forget): {op.command!r}")
+                    await self._db.write_log(
+                        pubkey, "INFO", f"operation sent (fire-and-forget): {op.command!r}"
+                    )
                 else:
                     await self._db.write_log(pubkey, "INFO", f"operation ok: {op.command!r}")
             else:

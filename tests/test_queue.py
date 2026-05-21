@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -34,7 +34,6 @@ from mch.queue import (
     resolve_desired,
     resolve_policy,
 )
-
 
 # ---------------------------------------------------------------------------
 # policy resolution
@@ -259,7 +258,7 @@ async def test_permission_error_login_failure_marks_offline(db):
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
     wq = WorkQueue(cfg, gw, db)
 
-    results = await wq.run_cycle()
+    await wq.run_cycle()
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.OFFLINE
 
@@ -331,7 +330,7 @@ async def test_permission_error_relogin_fails_marks_node_offline(db):
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
     wq = WorkQueue(cfg, gw, db)
 
-    results = await wq.run_cycle()
+    await wq.run_cycle()
     gw.login.assert_awaited_once()
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.OFFLINE
@@ -344,7 +343,6 @@ async def test_permission_error_relogin_fails_marks_node_offline(db):
 
 async def test_config_operations_seeded_on_first_run(db):
     """Operations in config are queued as pending when they have never run."""
-    from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24)
     node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -360,7 +358,6 @@ async def test_config_operations_seeded_on_first_run(db):
 
 async def test_config_operations_not_reseeded_if_recent(db):
     """Operations that ran within every_hours are not re-queued."""
-    from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24)
     node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -382,7 +379,6 @@ async def test_config_operations_not_reseeded_if_recent(db):
 
 async def test_config_operations_reseeded_when_due(db):
     """Operations that ran longer than every_hours ago are re-queued."""
-    from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24)
     node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -430,7 +426,6 @@ async def test_operation_row_updated_not_duplicated(db):
 
 async def test_fire_and_forget_op_marked_success_on_timeout(db):
     """An op with fire_and_forget=True is marked SUCCESS even when send_command fails."""
-    from mch.config import OperationConfig
     op_cfg = OperationConfig(command="reboot", every_hours=168, fire_and_forget=True)
     node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -453,7 +448,6 @@ async def test_fire_and_forget_op_marked_success_on_timeout(db):
 
 async def test_fire_and_forget_false_still_fails_on_timeout(db):
     """A normal op (fire_and_forget=False) is still marked FAILED when send_command fails."""
-    from mch.config import OperationConfig
     op_cfg = OperationConfig(command="clock sync", every_hours=24, fire_and_forget=False)
     node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
     cfg = _make_config(node_cfgs=[node_cfg])
@@ -545,7 +539,6 @@ async def test_cycle_skips_favourite_if_already_set(db):
 
 async def test_run_node_forces_immediate_sync(db):
     """run_node processes a node regardless of its next_sync_at."""
-    from datetime import timedelta
     node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
@@ -926,7 +919,9 @@ async def test_seed_from_config_already_in_db_no_duplicate(db):
     """Config node already in DB → not re-inserted, but still auto-favourited."""
     cfg = _make_config(node_cfgs=[_node(pubkey="aabbccdd", label="My Node")])
     contact = _contact("aabbccdd11223344556677889900aabb", flags=0)
-    existing = Node(pubkey="aabbccdd11223344556677889900aabb", name="My Node", state=NodeState.CONFIGURED)
+    existing = Node(
+        pubkey="aabbccdd11223344556677889900aabb", name="My Node", state=NodeState.CONFIGURED
+    )
     await db.upsert_node(existing)
 
     gw = _make_gateway_with_favourite(contacts=[contact])
@@ -1084,7 +1079,10 @@ async def test_relogin_prefers_per_node_password_over_default(db):
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
-    cfg.secrets = {"aabbcc": NodeSecrets(password="nodespecific"), "default": NodeSecrets(password="fleetpassword")}
+    cfg.secrets = {
+        "aabbcc": NodeSecrets(password="nodespecific"),
+        "default": NodeSecrets(password="fleetpassword"),
+    }
 
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="SpecialNode", auth_cached=True))
 
@@ -1102,3 +1100,38 @@ async def test_relogin_prefers_per_node_password_over_default(db):
     await wq.run_cycle()
 
     gw.login.assert_awaited_once_with(contact, "nodespecific")
+
+
+async def test_relogin_matches_secret_longer_than_config_prefix(db):
+    """Secret lookup uses the full node pubkey, not just the config prefix.
+
+    When secrets.yaml has a longer key (e.g. "aabbccdd") than the node_cfg
+    prefix (e.g. "aabb"), the current node pubkey ("aabbccdd1122") should
+    still match and the password should be found.
+    """
+    node_cfg = _node(
+        pubkey="aabb", label="ShortPrefix",  # short config prefix
+        settings={"name": SettingConfig(desired="ShortPrefix", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    # secret key is longer than the config prefix — bug: startswith on config prefix fails
+    cfg.secrets = {"aabbccdd": NodeSecrets(password="correctpassword")}
+
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="ShortPrefix", auth_cached=True))
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.login = AsyncMock(return_value=True)
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="no permission"),  # permission error
+        CommandResult(success=True, text="ShortPrefix"),    # retry get name
+        CommandResult(success=True, text="ok"),             # set name
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    gw.login.assert_awaited_once_with(contact, "correctpassword")
+    assert results[0].reachable is True

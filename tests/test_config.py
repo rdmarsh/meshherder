@@ -4,9 +4,8 @@ import textwrap
 from pathlib import Path
 
 import pytest
-import yaml
 
-from mch.config import NodeSecrets, RadioConfig, load
+from mch.config import RadioConfig, load
 
 
 def _write_config(tmp_path: Path, text: str) -> Path:
@@ -57,8 +56,8 @@ def test_node_via_absent(tmp_path):
     assert cfg.nodes[0].via is None
 
 
-def test_node_radio_key_ignored(tmp_path):
-    """Old radio: key on a node is silently ignored (does not populate via)."""
+def test_node_radio_key_raises(tmp_path):
+    """Old radio: key on a node raises ValueError with a hint to use via:."""
     p = _write_config(tmp_path, """\
         nodes:
           - pubkey_prefix: aabbccdd
@@ -68,8 +67,8 @@ def test_node_radio_key_ignored(tmp_path):
               sf: 7
               cr: 8
     """)
-    cfg = load(p)
-    assert cfg.nodes[0].via is None
+    with pytest.raises(ValueError, match="via"):
+        load(p)
 
 
 # ------------------------------------------------------------------
@@ -333,3 +332,74 @@ def test_pubkey_prefix_numeric_yaml_coerced_to_str(tmp_path):
     cfg = load(p)
     assert cfg.nodes[0].pubkey_prefix == "123456"
     assert isinstance(cfg.nodes[0].pubkey_prefix, str)
+
+
+# ------------------------------------------------------------------
+# top-level structure validation
+# ------------------------------------------------------------------
+
+def test_empty_config_raises(tmp_path):
+    """An empty config file (None from YAML) raises ValueError at load time."""
+    p = tmp_path / "config.yaml"
+    p.write_text("")
+    with pytest.raises(ValueError, match="mapping"):
+        load(p)
+
+
+def test_list_config_raises(tmp_path):
+    """A config file that is a YAML list (not mapping) raises ValueError."""
+    p = tmp_path / "config.yaml"
+    p.write_text("- just a list\n")
+    with pytest.raises(ValueError, match="mapping"):
+        load(p)
+
+
+# ------------------------------------------------------------------
+# pubkey prefix hex validation
+# ------------------------------------------------------------------
+
+def test_pubkey_prefix_odd_length_raises(tmp_path):
+    """An odd-length pubkey_prefix (not full bytes) raises ValueError."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbc
+    """)
+    with pytest.raises(ValueError, match="pubkey_prefix"):
+        load(p)
+
+
+def test_pubkey_prefix_non_hex_raises(tmp_path):
+    """A pubkey_prefix containing non-hex characters raises ValueError."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: zz1234
+    """)
+    with pytest.raises(ValueError, match="pubkey_prefix"):
+        load(p)
+
+
+def test_pubkey_prefix_valid_hex_accepted(tmp_path):
+    """A valid even-length hex pubkey_prefix is accepted."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+    """)
+    cfg = load(p)
+    assert cfg.nodes[0].pubkey_prefix == "aabbccdd"
+
+
+# ------------------------------------------------------------------
+# group reference validation
+# ------------------------------------------------------------------
+
+def test_unknown_group_reference_raises(tmp_path):
+    """A node referencing a group not in groups: raises ValueError at load time."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            group: nonexistent-group
+        groups:
+          - name: real-group
+    """)
+    with pytest.raises(ValueError, match="group"):
+        load(p)
