@@ -2,8 +2,8 @@
 Commission a fresh MeshCore node into the fleet.
 
 Two modes:
-  new     — node has a factory-generated identity; set password/name/radio and write
-             a config entry so the daemon picks it up.
+  new     — node starts with a factory-generated identity; generate and set a
+             managed identity, then set password/name/radio and print snippets.
   replace — restore a known node identity from a prv_key in secrets.yaml, then push
              password, radio, and other config from the existing entry.
 
@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from mch.config import Config
 from mch.gateway import Gateway
+from mch.meshkey import derive_public_key, generate_private_key
 
 if TYPE_CHECKING:
     from mch.db import Database
@@ -198,11 +199,9 @@ async def _commission_new(
     """
     Commission a brand-new node.
 
-    Sets password, name, and radio on the node, then triggers a reboot.
-    The factory pubkey is the permanent identity — no key change needed.
-
-    Saves the admin password to secrets.yaml under the factory pubkey prefix
-    so the daemon can authenticate on subsequent syncs.
+    Generates a MeshCore identity, sets that private key on the factory node,
+    then applies password, name, and radio. The factory-generated identity is
+    discarded so mch can print the private key needed for future replacement.
     """
     # Always set an admin password; fall back to 'password' if not provided.
     admin_password = req.get("admin_password") or "password"
@@ -212,13 +211,15 @@ async def _commission_new(
     group = req.get("group")
     target_freq_str = req.get("target_freq")
 
-    pubkey = contact["public_key"]
+    prv_key = req.get("prv_key") or generate_private_key()
+    pubkey = derive_public_key(prv_key)
     pubkey_prefix = pubkey[:8]
 
     # Commands in order: (command, fire_and_forget)
-    # 'set radio' triggers an immediate node reboot, so it goes last.
-    # The explicit 'reboot' is a fallback if set radio didn't trigger one.
+    # set prv.key requires a reboot to take effect. 'set radio' also requires
+    # reboot to apply, so it goes near the end before the explicit reboot.
     cmds: list[tuple[str, bool]] = []
+    cmds.append((f"set prv.key {prv_key}", False))
     cmds.append((f"password {admin_password}", False))
     if guest_password:
         cmds.append((f"set guest.password {guest_password}", False))
@@ -229,10 +230,11 @@ async def _commission_new(
     cmds.append(("reboot", True))
 
     _cmd_labels = {
+        f"set prv.key {prv_key}": "setting generated private key",
         f"password {admin_password}": "setting password",
         f"set guest.password {guest_password}": "setting guest password",
         f"set name {name}": "setting name",
-        f"set radio {target_freq_str}": "setting radio (node will reboot)",
+        f"set radio {target_freq_str}": "setting radio",
         "reboot": "rebooting",
     }
     for cmd, faf in cmds:
@@ -245,13 +247,16 @@ async def _commission_new(
             return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
 
     config_snippet = _build_config_snippet(pubkey_prefix, label, group, target_freq_str)
-    secrets_snippet = _build_secrets_snippet(pubkey_prefix, admin_password, guest_password)
+    secrets_snippet = _build_secrets_snippet(
+        pubkey_prefix, admin_password, guest_password, prv_key
+    )
 
     log.info("commissioned new node %s label=%r", pubkey_prefix, label or name)
     return {
         "ok": True,
         "data": {
             "pubkey_prefix": pubkey_prefix,
+            "public_key": pubkey,
             "label": label,
             "name": name,
             "group": group,
@@ -347,6 +352,7 @@ def _build_secrets_snippet(
     pubkey_prefix: str,
     password: str | None,
     guest_password: str | None,
+    prv_key: str | None = None,
 ) -> str:
     """Return a ready-to-paste secrets.yaml node entry (indented for under nodes:)."""
     lines = [f"  {pubkey_prefix}:"]
@@ -354,4 +360,6 @@ def _build_secrets_snippet(
         lines.append(f"    password: {password}")
     if guest_password:
         lines.append(f"    guest_password: {guest_password}")
+    if prv_key:
+        lines.append(f"    prv_key: {prv_key}")
     return "\n".join(lines)
