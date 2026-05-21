@@ -138,3 +138,34 @@
     the test mesh can answer first.
 - Follow-up code direction:
   - Retry post-commission identity discovery before returning failure.
+
+## 2026-05-22 - Fresh Flash Commission Success
+
+- Flashed `/Users/davidmarsh/Downloads/Heltec_v3_repeater-v1.15.0-dee3e26-merged.bin` to the
+  attached Heltec V3 at `/dev/cu.usbserial-0001`.
+  - Used `esptool` v5.2.0.
+  - Confirmed ESP32-S3, erased flash, wrote merged image at `0x0`, and verified hash.
+- Post-flash direct serial baseline:
+  - Board: `Heltec V3`.
+  - Firmware: `v1.15.0-dee3e26`.
+  - Factory public key: `4D36AFEB8C018F186A368CADBC849DE4404EDAB73700BC10C3C494552176DF42`.
+  - Factory radio: `869.6179809,62.5,8,5`.
+- Ran `commission new` through `mchd` on `luna` with target radio `915.800,250,10,5`.
+  - Found factory node `4d36afeb8c01...`.
+  - Login succeeded with factory password.
+  - Set name, password, generated private key, radio, reboot.
+  - Verification passed on attempt 2 of 3.
+- Commission result:
+  - Generated public key: `487131f1a188c4bb1e3580790a931a9f8ecca84ab4e9f16789b33e09a942ed27`.
+  - Generated private key:
+    `a07bb5f868cad11b71cd7a7cef6b9245eae0a912a4d2ef763f16dd43b2071d7974a30ee496c18cda75338cc0e680ea63b53e2d5a293b9325dd2765dc8ac416f9`.
+  - Config snippet:
+    `pubkey_prefix: 487131f1`, label `mch-test`, group `QH`, via `915.800,250,10,5`.
+- Direct serial verification after commission:
+  - `get public.key` returned `487131F1A188C4BB1E3580790A931A9F8ECCA84AB4E9F16789B33E09A942ED27`.
+  - `get prv.key` returned the generated private key above.
+  - `get name` returned `mch test`.
+  - `get radio` returned `915.7999877,250,10,5`.
+- Conclusion:
+  - Fresh flash -> `mch commission new` works end-to-end on Heltec V3 / v1.15.0 with the current
+    command order and retrying identity verifier.
