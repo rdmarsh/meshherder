@@ -300,7 +300,8 @@ async def _commission_new(
     # Commands in order: (command, fire_and_forget)
     # Password and identity changes go late because either may invalidate the
     # current admin session or contact identity on some firmware builds.
-    # 'set radio' and 'reboot' may make the node disappear, so they are no-wait.
+    # v1.15-era firmware replies to 'set radio' with OK and applies it on reboot.
+    # Wait for that reply so the following no-wait reboot cannot race past it.
     cmds: list[tuple[str, bool]] = []
     if name:
         cmds.append((f"set name {name}", False))
@@ -309,7 +310,7 @@ async def _commission_new(
     cmds.append((f"password {admin_password}", False))
     cmds.append((f"set prv.key {prv_key}", False))
     if target_freq_str:
-        cmds.append((f"set radio {target_freq_str}", True))  # triggers reboot; faf
+        cmds.append((f"set radio {target_freq_str}", False))
     cmds.append(("reboot", True))
 
     _cmd_labels = {
@@ -393,7 +394,7 @@ async def _commission_replace(
     cmds.append((f"set prv.key {ns.prv_key}", False))
     if node_cfg.via:
         v = node_cfg.via
-        cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", True))  # triggers reboot; faf
+        cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", False))
     cmds.append(("reboot", True))
 
     for cmd, faf in cmds:
