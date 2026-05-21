@@ -666,6 +666,9 @@ def test_commission_new_happy_path():
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
     assert result.exit_code == 0, result.output
     assert "a695e2be" in result.output  # pubkey_prefix shown
+    assert "Restart or reload mchd" in result.output
+    assert "mch status a695e2be" in result.output
+    assert "Optional: mch sync a695e2be" in result.output
 
 
 def test_commission_new_cancel_aborts():
