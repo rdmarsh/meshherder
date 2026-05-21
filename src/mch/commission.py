@@ -13,6 +13,7 @@ ensuring gateway.discover() is called with the right dwell time.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -95,14 +96,22 @@ async def _verify_commissioned_identity(
     expected_pubkey: str,
     radio: tuple[float, float, int, int],
     progress: Callable[[str], Awaitable[None]] | None = None,
+    *,
+    attempts: int = 3,
+    retry_delay: float = 5.0,
 ) -> str | None:
     """Confirm the node advertises with the generated identity after reboot/radio change."""
-    if progress is not None:
-        await progress("verifying identity")
-    discovered = await gateway.discover(factory_freq=radio, dwell=8.0)
-    found = [str(node.get("pubkey", "")).lower() for node in discovered]
-    if expected_pubkey.lower() in found:
-        return None
+    found: list[str] = []
+    for attempt in range(1, attempts + 1):
+        if progress is not None:
+            suffix = "" if attempts == 1 else f" ({attempt}/{attempts})"
+            await progress(f"verifying identity{suffix}")
+        discovered = await gateway.discover(factory_freq=radio, dwell=8.0)
+        found = [str(node.get("pubkey", "")).lower() for node in discovered]
+        if expected_pubkey.lower() in found:
+            return None
+        if attempt < attempts:
+            await asyncio.sleep(retry_delay)
     short_found = ", ".join(pubkey[:12] for pubkey in found) or "none"
     return (
         "commission verification failed: expected new public key "
