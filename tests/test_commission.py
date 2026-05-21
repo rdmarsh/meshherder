@@ -465,13 +465,17 @@ async def test_commission_new_redacts_prv_key_on_failure():
 
 
 @pytest.mark.asyncio
-async def test_commission_new_fails_when_generated_identity_not_discovered():
+async def test_commission_new_fails_when_generated_identity_not_discovered(monkeypatch):
     """'new' mode does not print snippets unless the generated pubkey appears after reboot."""
+    import mch.commission as commission
     from mch.commission import handle_commission
 
+    monkeypatch.setattr(commission.asyncio, "sleep", AsyncMock())
     factory_pubkey = "a1" * 32
     gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
     gw.discover = AsyncMock(side_effect=[
+        [discover_payload(factory_pubkey)],
+        [discover_payload(factory_pubkey)],
         [discover_payload(factory_pubkey)],
         [discover_payload(factory_pubkey)],
     ])
@@ -490,6 +494,37 @@ async def test_commission_new_fails_when_generated_identity_not_discovered():
     assert resp["ok"] is False
     assert "verification failed" in resp["error"]
     assert GENERATED_PUBKEY[:12] in resp["error"]
+
+
+@pytest.mark.asyncio
+async def test_commission_new_retries_identity_verification(monkeypatch):
+    """'new' mode tolerates a rebooting node missing from the first verification scan."""
+    import mch.commission as commission
+    from mch.commission import handle_commission
+
+    monkeypatch.setattr(commission.asyncio, "sleep", AsyncMock())
+    factory_pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
+    gw.discover = AsyncMock(side_effect=[
+        [discover_payload(factory_pubkey)],
+        [discover_payload("75ab85174506" + "0" * 52)],
+        [discover_payload(GENERATED_PUBKEY)],
+    ])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "hunter2",
+        "name": "TestNode",
+        "target_freq": "915.800,250,10,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    assert resp["ok"] is True
+    assert resp["data"]["public_key"] == GENERATED_PUBKEY
+    assert gw.discover.await_count == 3
 
 
 # ---------------------------------------------------------------------------

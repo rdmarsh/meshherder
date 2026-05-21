@@ -115,3 +115,26 @@
   - Factory discovery/configuration frequency remains `869.618,62.5,8,5`.
 - Updated unit-test fixtures so test commissioning paths use `915.800,250,10,5`.
 - Left `src/mch/data/profiles.yaml` unchanged because it is regional preset data, not a test target.
+
+## 2026-05-21 - Commission Verification Needs Retry
+
+- Restored the attached Heltec V3 to a factory-like baseline over direct serial:
+  - Factory public/private key restored.
+  - Name restored to `Heltec Repeater`.
+  - Admin password restored to `password`.
+  - Radio restored to factory `869.618,62.5,8,5`.
+- Ran `commission new` through `mchd` on `luna` with target radio `915.800,250,10,5`.
+- Daemon progress completed commands but verification failed:
+  - Expected generated key prefix `68a85cd82403...`.
+  - Verification discovery saw `75ab85174506...`.
+- Direct serial immediately after showed the node actually had the expected generated identity:
+  - `get public.key` returned `68A85CD82403...`.
+  - `get prv.key` returned the matching generated private key.
+  - `get name` returned `mch test`.
+  - `get radio` returned `915.7999877,250,10,5`.
+- Conclusion:
+  - Commissioning now applies the generated identity correctly.
+  - The verification scan can run before the rebooted node is visible to `luna`, and another node on
+    the test mesh can answer first.
+- Follow-up code direction:
+  - Retry post-commission identity discovery before returning failure.
