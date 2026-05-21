@@ -28,6 +28,60 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _redact_command(command: str) -> str:
+    """Return a command label safe for progress/error text."""
+    if command.startswith("set prv.key "):
+        return "set prv.key <redacted>"
+    if command.startswith("password "):
+        return "password <redacted>"
+    if command.startswith("set guest.password "):
+        return "set guest.password <redacted>"
+    return command
+
+
+def _looks_like_cli_error_response(text: str | None) -> bool:
+    """Detect firmware CLI error replies that still arrived as normal messages."""
+    if not text:
+        return False
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    if "err_code_" in normalized:
+        return True
+    return normalized.startswith((
+        "err",
+        "error",
+        "failed",
+        "invalid",
+        "unknown",
+        "not supported",
+        "permission denied",
+        "unauthorized",
+        "unauthorised",
+    ))
+
+
+async def _send_commission_command(
+    gateway: Gateway,
+    contact: dict[str, Any],
+    command: str,
+    *,
+    fire_and_forget: bool,
+) -> str | None:
+    """Send one commissioning command and return an operator-safe error if it failed."""
+    result = await gateway.send_command(
+        contact, command, timeout=30.0, await_response=not fire_and_forget
+    )
+    if not result.success and not fire_and_forget:
+        return f"commission failed at {_redact_command(command)!r}: {result.error}"
+    if not fire_and_forget and _looks_like_cli_error_response(result.text):
+        return (
+            f"commission failed at {_redact_command(command)!r}: "
+            f"node replied {result.text!r}"
+        )
+    return None
+
+
 # ---------------------------------------------------------------------------
 # discovery
 # ---------------------------------------------------------------------------
@@ -216,15 +270,16 @@ async def _commission_new(
     pubkey_prefix = pubkey[:8]
 
     # Commands in order: (command, fire_and_forget)
-    # set prv.key requires a reboot to take effect. 'set radio' also requires
-    # reboot to apply, so it goes near the end before the explicit reboot.
+    # Password and identity changes go late because either may invalidate the
+    # current admin session or contact identity on some firmware builds.
+    # 'set radio' and 'reboot' may make the node disappear, so they are no-wait.
     cmds: list[tuple[str, bool]] = []
-    cmds.append((f"set prv.key {prv_key}", False))
-    cmds.append((f"password {admin_password}", False))
-    if guest_password:
-        cmds.append((f"set guest.password {guest_password}", False))
     if name:
         cmds.append((f"set name {name}", False))
+    if guest_password:
+        cmds.append((f"set guest.password {guest_password}", False))
+    cmds.append((f"password {admin_password}", False))
+    cmds.append((f"set prv.key {prv_key}", False))
     if target_freq_str:
         cmds.append((f"set radio {target_freq_str}", True))  # triggers reboot; faf
     cmds.append(("reboot", True))
@@ -240,11 +295,11 @@ async def _commission_new(
     for cmd, faf in cmds:
         if progress is not None:
             await progress(_cmd_labels.get(cmd, cmd))
-        result = await gateway.send_command(
-            contact, cmd, timeout=30.0, await_response=not faf
+        error = await _send_commission_command(
+            gateway, contact, cmd, fire_and_forget=faf
         )
-        if not result.success and not faf:
-            return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
+        if error:
+            return {"ok": False, "error": error}
 
     config_snippet = _build_config_snippet(pubkey_prefix, label, group, target_freq_str)
     secrets_snippet = _build_secrets_snippet(
@@ -294,14 +349,14 @@ async def _commission_replace(
     if not ns or not ns.prv_key:
         return {"ok": False, "error": f"no prv_key in secrets for {pubkey_prefix!r}"}
 
-    # set prv.key works over the mesh (Serial Only = No per firmware docs).
-    # It requires a reboot to take effect — set radio triggers that reboot.
+    # Password and identity changes go late because either may invalidate the
+    # current admin session or contact identity on some firmware builds.
     cmds: list[tuple[str, bool]] = []
-    cmds.append((f"set prv.key {ns.prv_key}", False))
-    if ns.password:
-        cmds.append((f"password {ns.password}", False))
     if ns.guest_password:
         cmds.append((f"set guest.password {ns.guest_password}", False))
+    if ns.password:
+        cmds.append((f"password {ns.password}", False))
+    cmds.append((f"set prv.key {ns.prv_key}", False))
     if node_cfg.via:
         v = node_cfg.via
         cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", True))  # triggers reboot; faf
@@ -311,11 +366,11 @@ async def _commission_replace(
         if progress is not None:
             label = cmd.split()[0] if " " in cmd else cmd
             await progress(f"{label}...")
-        result = await gateway.send_command(
-            contact, cmd, timeout=30.0, await_response=not faf
+        error = await _send_commission_command(
+            gateway, contact, cmd, fire_and_forget=faf
         )
-        if not result.success and not faf:
-            return {"ok": False, "error": f"commission failed at {cmd!r}: {result.error}"}
+        if error:
+            return {"ok": False, "error": error}
 
     log.info("replaced node identity for %s (%s)", pubkey_prefix, node_cfg.label or "")
     return {
