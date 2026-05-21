@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+# Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
+_LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +144,13 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
         profiles_file=raw.get("profiles_file"),
     )
 
+    labels = [n.label for n in cfg.nodes if n.label]
+    duplicates = {lbl for lbl in labels if labels.count(lbl) > 1}
+    if duplicates:
+        raise ValueError(
+            f"duplicate node labels in config: {', '.join(sorted(duplicates))} - each label must be unique"
+        )
+
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
     if secrets_path is None:
         secrets_path = Path(raw.get("secrets_file", config_path.parent / "secrets.yaml"))
@@ -185,10 +196,19 @@ def _parse_node(raw: dict) -> NodeConfig:
     ]
     via = _parse_radio(raw.get("via"))
 
+    label = raw.get("label", "")
+    if label and not _LABEL_RE.match(label):
+        suggested = re.sub(r"[^a-zA-Z0-9_\-.]", "-", label).strip("-") or "my-node"
+        raise ValueError(
+            f"node label {label!r} contains invalid characters - "
+            f"use letters, digits, dashes, underscores, or dots only "
+            f"(e.g. {suggested!r})"
+        )
+
     return NodeConfig(
         pubkey_prefix=str(raw["pubkey_prefix"]),
         group=raw.get("group"),
-        label=raw.get("label", ""),
+        label=label,
         default_policy=SettingPolicy(policy) if policy else None,
         settings=settings,
         operations=operations,
