@@ -36,10 +36,10 @@ gateway:
   # Check the MeshCore app preset list for your region, or ask on the MeshCore
   # community channels to find out what your local mesh is using.
   radio:
-    freq: 915.075   # MHz - must match the mesh
-    bw: 125         # kHz bandwidth (common values: 62.5, 125, 250)
+    freq: 915.800   # MHz - must match the mesh
+    bw: 250         # kHz bandwidth (common values: 62.5, 125, 250)
                     # must match the mesh
-    sf: 9           # spreading factor (7-12); lower is faster, higher reaches further
+    sf: 10           # spreading factor (7-12); lower is faster, higher reaches further
                     # must match the mesh
     cr: 5           # coding rate (5=4/5, 6=4/6, 7=4/7, 8=4/8); higher adds more
                     # redundancy at the cost of airtime; can differ from other nodes
