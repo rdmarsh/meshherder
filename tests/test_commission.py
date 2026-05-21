@@ -335,8 +335,8 @@ async def test_commission_new_sends_reboot_last():
 
 
 @pytest.mark.asyncio
-async def test_commission_new_fire_and_forget_commands_do_not_wait_for_response():
-    """'new' mode sends radio/reboot without waiting for replies from a rebooting node."""
+async def test_commission_new_waits_for_radio_then_reboots_without_waiting():
+    """'new' mode waits for set radio before sending the no-wait reboot."""
     from mch.commission import handle_commission
 
     pubkey = "a1" * 32
@@ -353,7 +353,7 @@ async def test_commission_new_fire_and_forget_commands_do_not_wait_for_response(
     }, wq, db, cfg)
 
     calls_by_command = {call.args[1]: call for call in gw.send_command.call_args_list}
-    assert calls_by_command["set radio 915.075,125,9,5"].kwargs["await_response"] is False
+    assert calls_by_command["set radio 915.075,125,9,5"].kwargs["await_response"] is True
     assert calls_by_command["reboot"].kwargs["await_response"] is False
 
 
@@ -694,8 +694,8 @@ async def test_commission_replace_sends_reboot_last():
 
 
 @pytest.mark.asyncio
-async def test_commission_replace_fire_and_forget_commands_do_not_wait_for_response():
-    """'replace' mode sends radio/reboot without waiting for replies from a rebooting node."""
+async def test_commission_replace_waits_for_radio_then_reboots_without_waiting():
+    """'replace' mode waits for set radio before sending the no-wait reboot."""
     from mch.commission import handle_commission
 
     pubkey = "cc" * 32
@@ -716,7 +716,7 @@ async def test_commission_replace_fire_and_forget_commands_do_not_wait_for_respo
     }, wq, db, cfg)
 
     calls_by_command = {call.args[1]: call for call in gw.send_command.call_args_list}
-    assert calls_by_command["set radio 915.075,125.0,9,5"].kwargs["await_response"] is False
+    assert calls_by_command["set radio 915.075,125.0,9,5"].kwargs["await_response"] is True
     assert calls_by_command["reboot"].kwargs["await_response"] is False
 
 

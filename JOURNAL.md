@@ -83,3 +83,24 @@
 - Follow-up code direction:
   - Add post-commission discovery verification for the generated public key on the target radio.
   - Do not trust `set prv.key` success unless the expected key is actually observed.
+
+## 2026-05-21 - Verification Exposed Radio/Reboot Race
+
+- Deployed commit `c4ac899 commission: verify generated identity` to `luna`.
+- Restored the test node radio/name/password over direct serial and rebooted.
+- Next commission attempt discovered the previous generated identity `f14257729a72...`, which means the
+  earlier `set prv.key` eventually applied after a later explicit reboot.
+- The run generated a new expected public key `a8d09bd775cd...`, then failed verification:
+  - Error: `commission verification failed: expected new public key a8d09bd775cd..., discovered 2fd9c7bbc93d`.
+  - Direct serial still showed stored public key `F14257729A729D2FA9A94DE5754180A9A270ECC0BD91F7F50294A5B0195E8928`.
+  - Direct serial still showed stored private key from the previous generated identity.
+- Updated conclusion:
+  - `set prv.key` can work on this Heltec V3 / v1.15.0 node, but it only becomes visible after a
+    reliable reboot.
+  - `set radio` on this firmware returns `OK - reboot to apply`; it should not be treated as
+    fire-and-forget.
+  - Sending no-wait `reboot` immediately after no-wait `set radio` can race, leaving private-key
+    changes unapplied until a later reboot.
+- Follow-up code direction:
+  - Wait for the `set radio` response during commissioning.
+  - Keep only the final `reboot` as fire-and-forget.
