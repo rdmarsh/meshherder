@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-mch (Mesh Config Herder) is a tool for managing fleets of MeshCore repeater nodes — think Ansible/Salt but over the mesh itself. The daemon is `mchd`; the control CLI is `mch`. A locally attached node (USB serial) — called the **gateway** — connects mchd to the mesh. mchd sends remote CLI commands across the mesh to bring administered nodes into a declared desired state, then leaves them alone. ("Companion node" is meshcore_py's internal term for this; mchd calls it the gateway everywhere.)
+mch (Mesh Herder) is a tool for managing fleets of MeshCore repeater nodes — think Ansible/Salt but over the mesh itself. The daemon is `mchd`; the control CLI is `mch`. A locally attached node (USB serial) — called the **gateway** — connects mchd to the mesh. mchd sends remote CLI commands across the mesh to bring administered nodes into a declared desired state, then leaves them alone. ("Companion node" is meshcore_py's internal term for this; mchd calls it the gateway everywhere.)
 
 Target audience: operators with dozens of nodes who need consistent, verifiable configuration without logging into each one individually.
 
