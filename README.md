@@ -233,6 +233,9 @@ nodes:
 Run `mch contacts` to list repeater nodes visible to the gateway that are not yet in your config,
 with pubkey prefixes ready to paste in.
 
+Settings default to `audit`: mchd reads and reports drift, but does not write to a node unless the
+setting, node, or group explicitly says `policy: enforce` or `default_policy: enforce`.
+
 **Passwords:** nodes that require a login go in `secrets.yaml` (mode 0600):
 
 ```yaml
@@ -281,7 +284,8 @@ labels cause mchd to refuse to start with a clear error.
 
 `settings.name.desired:` is what gets **enforced on the hardware** and broadcast across the mesh —
 visible to anyone scanning. If you don't want your deployment location appearing on the mesh, set a
-neutral name here and keep the descriptive one in `label:`:
+neutral name here and keep the descriptive one in `label:`. The example below opts in to writes with
+`default_policy: enforce`:
 
 ```yaml
 nodes:

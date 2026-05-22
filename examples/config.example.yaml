@@ -115,6 +115,9 @@ messenger:
 #   skip    - do not read or write this key at all. Use for settings you want
 #             to leave completely alone.
 #
+# The global default is audit. mchd only writes when a setting, node, or group
+# explicitly says policy: enforce or default_policy: enforce.
+#
 # The 'default_policy' on a group or node applies to every key that does not
 # have its own explicit policy. Individual keys can override the default.
 

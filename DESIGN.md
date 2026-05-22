@@ -82,6 +82,10 @@ so daemon restarts never cause a sync storm.
 The `mch sync <prefix>` command bypasses the schedule for an immediate operator-triggered sync.
 `mch sync` (no arg) runs a full pass through all config nodes immediately.
 
+The global setting policy fallback is `audit`. A desired setting is read and compared by default,
+but mchd only writes to a node when the setting, node, or group explicitly opts in with
+`policy: enforce` or `default_policy: enforce`.
+
 ## Authentication
 
 MeshCore nodes require login before accepting CLI commands. After the first successful login, the

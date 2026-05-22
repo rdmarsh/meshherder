@@ -71,7 +71,7 @@ def test_resolve_policy_group_default():
 
 
 def test_resolve_policy_global_default():
-    assert resolve_policy("tx", _node(), None) == SettingPolicy.ENFORCE
+    assert resolve_policy("tx", _node(), None) == SettingPolicy.AUDIT
 
 
 def test_resolve_policy_specificity_order():
@@ -256,6 +256,27 @@ async def test_cycle_audit_does_not_set(db):
     assert results[0].settings_drifted == 1
     assert results[0].settings_enforced == 0
     # set command must NOT have been called
+    calls = [str(c) for c in gw.send_command.call_args_list]
+    assert not any("set " in c for c in calls)
+
+
+async def test_cycle_desired_setting_without_policy_audits_only(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on")},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="off"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_drifted == 1
+    assert results[0].settings_enforced == 0
     calls = [str(c) for c in gw.send_command.call_args_list]
     assert not any("set " in c for c in calls)
 
