@@ -1,6 +1,6 @@
-# mch — Mesh Config Herder
+# mch — Mesh Herder
 
-Herding config across MeshCore nodes.
+Herding MeshCore nodes.
 
 mch manages fleets of [MeshCore](https://meshcore.io) repeater nodes from a single host. You declare
 the desired state for each node in a YAML config file; mchd (the daemon) connects to a
@@ -84,7 +84,7 @@ sudo ln -sf /opt/mch/.venv/bin/mch  /usr/local/bin/mch
 ```bash
 # Dedicated system account — no home dir, no login shell
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
-    --comment "Mesh Config Herder" mch
+    --comment "Mesh Herder" mch
 # Grant serial port access
 sudo usermod -aG dialout mch
 

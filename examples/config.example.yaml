@@ -1,4 +1,4 @@
-# mch - Mesh Config Herder
+# mch - Mesh Herder
 # Configuration reference — copy to /usr/local/etc/mch/config.yaml and trim to what you need.
 #
 # mch is a daemon (mchd) that manages fleets of MeshCore repeater nodes.

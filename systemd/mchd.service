@@ -1,5 +1,5 @@
 [Unit]
-Description=mchd — Mesh Config Herder
+Description=mchd — Mesh Herder
 After=network.target
 # Wait for the USB gateway device if it has a udev rule
 After=dev-meshcore0.device
@@ -8,7 +8,7 @@ Wants=dev-meshcore0.device
 [Service]
 Type=simple
 # Recommended: create a dedicated system account with no login shell:
-#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Mesh Config Herder" mch
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin --comment "Mesh Herder" mch
 #   sudo usermod -aG dialout mch
 # Users who need mch CLI access must be in the mch group:
 #   sudo usermod -aG mch <username>

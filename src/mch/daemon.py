@@ -630,7 +630,7 @@ class Daemon:
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="mchd — Mesh Config Herder node management daemon")
+    parser = argparse.ArgumentParser(description="mchd — Mesh Herder node management daemon")
     parser.add_argument("-c", "--config", default="config.yaml", help="path to config.yaml")
     parser.add_argument(
         "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
