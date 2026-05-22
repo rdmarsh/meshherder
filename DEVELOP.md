@@ -51,3 +51,31 @@ Hash of data verified.
 Hard resetting via RTS pin...
 Fri May 22 09:40:02 dm-mini mch $
 ```
+
+## Direct MeshCore CLI Checks
+
+For one-off bench checks, prefer documenting the `meshcore-cli` command being run over adding local
+helper scripts. Local scripts tend to bake in one developer's serial path, firmware assumptions, and
+test frequency.
+
+On this Mac, the local wrapper is `~/.local/bin/meshcli`; upstream help reports the command as
+`meshcore-cli`. Use the serial device attached to the bench node:
+
+```bash
+~/.local/bin/meshcli -s /dev/cu.usbserial-0001 -b 115200 -r ver
+~/.local/bin/meshcli -s /dev/cu.usbserial-0001 -b 115200 -r board
+~/.local/bin/meshcli -s /dev/cu.usbserial-0001 -b 115200 -r get radio
+~/.local/bin/meshcli -s /dev/cu.usbserial-0001 -b 115200 -r get public.key
+```
+
+Factory-frequency discovery can be done manually by hopping the attached node, discovering, then
+restoring the test mesh frequency. Be careful: `set radio` changes the attached node's radio.
+
+```bash
+~/.local/bin/meshcli -s /dev/cu.usbserial-0001 -b 115200 -r set radio 869.618,62.5,8,5
+~/.local/bin/meshcli -s /dev/cu.usbserial-0001 -b 115200 node_discover 15 sleep 8
+~/.local/bin/meshcli -s /dev/cu.usbserial-0001 -b 115200 -r set radio 915.800,250,10,5
+```
+
+For local tests, use `915.800,250,10,5` as the primary test mesh and `916.575,62.5,7,8` only when a
+second test frequency is needed. Do not use the production frequency for bench tests.
