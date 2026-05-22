@@ -187,5 +187,22 @@ Install the service unit to `/etc/systemd/system/mchd.service`. The `mch start/s
 
 - TDD: write the failing test first, confirm it fails for the expected reason, then implement.
 - Keep changes small and verify at each step.
+- Prefer low-maintenance code over fragile cleverness. Avoid designs that require future readers to
+  remember hidden context, ordering assumptions, or bench-specific behavior.
+- Leave concise comments explaining why something non-obvious is done, especially when the reason
+  comes from live MeshCore behavior, safety constraints, or a decision not to take an obvious path.
 - Preserve all debug logging and comments — they are intentional.
 - When a mistake reveals a missing rule, update this file and the project journal.
+
+## Code reviews
+
+- Prefer simple, boring fixes over clever or expansive changes.
+- Review for real operator impact: bugs, regressions, confusing behavior, missing validation, and
+  missing tests.
+- Treat high-maintenance or fragile code as a review risk even when it currently works.
+- Ask for "why" comments when code depends on non-obvious firmware behavior, ordering constraints,
+  safety tradeoffs, or previous debugging lessons.
+- Keep speculative improvements out of review findings unless they block correctness or
+  maintainability.
+- Do not turn "we could also..." ideas into required work without a clear benefit and low
+  maintenance cost.
