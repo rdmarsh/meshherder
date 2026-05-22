@@ -16,7 +16,7 @@ import click
 
 from mch.command_safety import blocked_exec_command, confirm_exec_command
 
-DEFAULT_SOCKET = "/run/mch/mchd.sock"
+DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
 
 
 def _wlen(s: str) -> int:

@@ -1,5 +1,5 @@
 # mch - Mesh Herder
-# Configuration reference — copy to /usr/local/etc/mch/config.yaml and trim to what you need.
+# Configuration reference — copy to /etc/meshherder/config.yaml and trim to what you need.
 #
 # mch is a daemon (mchd) that manages fleets of MeshCore repeater nodes.
 # It connects via a locally attached gateway node (USB serial), sends remote CLI
@@ -59,19 +59,19 @@ scheduler:
   # many nodes or a busy channel.
   inter_node_delay_seconds: 120
 
-db_path: /var/lib/mch/mch.db
-socket_path: /run/mch/mchd.sock
-secrets_file: /usr/local/etc/mch/secrets.yaml   # optional; defaults to secrets.yaml in the same directory as config.yaml
+db_path: /var/lib/meshherder/mch.db
+socket_path: /run/meshherder/mchd.sock
+secrets_file: /etc/meshherder/secrets.yaml   # optional; defaults to secrets.yaml in the same directory as config.yaml
 
 # Profiles file for 'mch suggest'. Three options (in priority order):
 #
-#   profiles_file: /usr/local/etc/mch/profiles.yaml   # use a local override file
+#   profiles_file: /etc/meshherder/profiles.yaml   # use a local override file
 #   profiles_url:  https://example.com/profiles.yaml  # fetch on startup, cached 24h
 #   (neither)                                          # use the bundled default
 #
 # The bundled default covers AU/NZ 915 MHz settings. Override if your region uses
 # different RF settings or you want to tune the neighbour-count thresholds.
-# profiles_file: /usr/local/etc/mch/profiles.yaml
+# profiles_file: /etc/meshherder/profiles.yaml
 # profiles_url:  https://raw.githubusercontent.com/rdmarsh/meshherder/main/src/mch/data/profiles.yaml
 
 # Facts collected from every node each sync cycle (read-only CMDB data).

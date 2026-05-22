@@ -41,8 +41,8 @@ Still open or only partially fixed:
   when sync/exec/commission would overlap.
 - Database migrations are still ad hoc (`ALTER TABLE nodes ADD COLUMN label ...`) rather than named
   versions.
-- The profile URL cache still writes to `/var/lib/mch/profiles.yaml` unconditionally.
-- The systemd unit now keeps `/usr/local/etc/mch` read-only and says config files are
+- The profile URL cache still writes to `/var/lib/meshherder/profiles.yaml` unconditionally.
+- The systemd unit now keeps `/etc/meshherder` read-only and says config files are
   operator-owned.
 
 New findings from this recheck:
@@ -329,7 +329,7 @@ New findings from this recheck:
 
 13. Improve URL profile cache behavior.
 
-   `recommend.py` writes to `/var/lib/mch/profiles.yaml` unconditionally. That path is fine for the
+   `recommend.py` writes to `/var/lib/meshherder/profiles.yaml` unconditionally. That path is fine for the
    service, but awkward for development and tests. Consider deriving the cache path from config or
    the DB directory, and validate downloaded YAML before replacing a known-good cache.
 
@@ -358,7 +358,7 @@ New findings from this recheck:
 17. Keep examples aligned with implementation.
 
    Done:
-   - The systemd unit no longer grants write access to `/usr/local/etc/mch`.
+   - The systemd unit no longer grants write access to `/etc/meshherder`.
    - Comments now state that mchd reads config files but never writes `config.yaml` or
      `secrets.yaml`.
 

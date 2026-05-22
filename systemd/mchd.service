@@ -18,8 +18,8 @@ Group=mch
 # dialout group is required for serial port access
 SupplementaryGroups=dialout
 
-WorkingDirectory=/usr/local/etc/mch
-ExecStart=/usr/local/bin/mchd --config /usr/local/etc/mch/config.yaml
+WorkingDirectory=/etc/meshherder
+ExecStart=/usr/local/bin/mchd --config /etc/meshherder/config.yaml
 Restart=on-failure
 RestartSec=10
 
@@ -29,15 +29,15 @@ ProtectSystem=strict
 # read-only rather than yes so a venv under /home can be used as ExecStart
 ProtectHome=read-only
 # DB and socket directories need write access. Config files stay operator-owned:
-# mchd reads /usr/local/etc/mch but never writes config.yaml or secrets.yaml.
-ReadWritePaths=/var/lib/mch /run/mch
+# mchd reads /etc/meshherder but never writes config.yaml or secrets.yaml.
+ReadWritePaths=/var/lib/meshherder /run/meshherder
 # Serial port access
 DeviceAllow=/dev/meshcore0 rw
 DeviceAllow=char-tty rw
 
-# Creates /run/mch/ with 0750 and cleans it on stop.
-# socket_path in config.yaml must be /run/mch/mchd.sock
-RuntimeDirectory=mch
+# Creates /run/meshherder/ with 0750 and cleans it on stop.
+# socket_path in config.yaml must be /run/meshherder/mchd.sock
+RuntimeDirectory=meshherder
 RuntimeDirectoryMode=0750
 
 StandardOutput=journal

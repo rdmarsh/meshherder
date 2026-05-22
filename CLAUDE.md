@@ -57,7 +57,7 @@ node secrets.
 
 ```
 mchd (daemon)                      mch (CLI)
-    ↕ Unix socket (/run/mch/mchd.sock)  ↕
+    ↕ Unix socket (/run/meshherder/mchd.sock)  ↕
     ↕
 meshcore_py (async serial, /dev/meshcore0)
     ↕
@@ -88,7 +88,7 @@ Managed repeater nodes
 
 ### Data layer
 
-**SQLite** (`/var/lib/mch/mch.db`) — actual state and history:
+**SQLite** (`/var/lib/meshherder/mch.db`) — actual state and history:
 - `nodes` table: pubkey (PK), name, last_seen, last_connected, auth_required, auth_cached, config_state, deployment_state.
 - `commands` table: node_pubkey, command, queued_at, run_at, response, success.
 - `logs` table: node_pubkey, timestamp, level, message.
