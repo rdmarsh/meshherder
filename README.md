@@ -90,7 +90,7 @@ sudo usermod -aG dialout mch
 sudo install -d -o root -g mch -m 750 /etc/meshherder
 
 # Config and secrets
-sudo install -o mch -g mch -m 640 examples/config.example.yaml /etc/meshherder/config.yaml
+sudo install -o root -g mch -m 640 examples/config.example.yaml /etc/meshherder/config.yaml
 sudo install -o mch -g mch -m 600 examples/secrets.example.yaml /etc/meshherder/secrets.yaml
 
 # Database directory
@@ -234,7 +234,7 @@ with pubkey prefixes ready to paste in.
 Settings default to `audit`: mchd reads and reports drift, but does not write to a node unless the
 setting, node, or group explicitly says `policy: enforce` or `default_policy: enforce`.
 
-**Passwords:** nodes that require a login go in `secrets.yaml` (mode 0600):
+**Passwords:** nodes that require a login go in `secrets.yaml` (owned by `mch:mch`, mode 0600):
 
 ```yaml
 nodes:
