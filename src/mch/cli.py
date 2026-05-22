@@ -830,7 +830,7 @@ def commission(ctx: click.Context) -> None:
 def _run_commission_wizard(socket: str) -> None:
     """Interactive wizard: scans for nodes, asks mode, collects params, sends RPC, prints result."""
     click.echo("")
-    click.echo("Commission a MeshCore node")
+    click.echo("Commission a MeshCore Node")
     click.echo("=" * 26)
     click.echo("")
 
