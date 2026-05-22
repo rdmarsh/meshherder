@@ -1,5 +1,8 @@
 # Codebase Suggestions
 
+This file is historical review material. The canonical working backlog is now `BACKLOG.md`.
+Move new todo, wishlist, deferred, and won't-do items there so progress is not split across files.
+
 Generated after reviewing the repository structure, docs, source, examples, systemd unit, and
 test suite.
 

@@ -3,6 +3,9 @@
 This file collects bench and development workflows that are useful while building mch, but too
 detailed for the main README.
 
+Use `BACKLOG.md` for active development todos, wishlist items, deferred ideas, and explicit
+non-goals. Keep this file limited to repeatable bench and development procedures.
+
 ## Bench Reflash Commands
 
 For a clean factory-style reset before testing `mch commission`, erase flash first, then write the

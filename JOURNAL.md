@@ -2,6 +2,7 @@
 
 This journal records project decisions and lessons learned without preserving private bench
 details, node identities, generated private keys, local hostnames, or operator passwords.
+Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
 ## 2026-05-21 - Commissioning Identity Model
 

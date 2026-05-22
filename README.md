@@ -9,6 +9,17 @@ compliance — one node at a time, without hammering the mesh.
 
 Think Ansible for your nodes, running continuously in the background.
 
+## Project Docs
+
+| File | Role |
+|---|---|
+| [`README.md`](README.md) | User-facing install, configuration, and command reference. |
+| [`BACKLOG.md`](BACKLOG.md) | Canonical active todo list, wishlist, deferred ideas, and non-goals. |
+| [`DESIGN.md`](DESIGN.md) | Stable architecture notes and design rationale. |
+| [`DEVELOP.md`](DEVELOP.md) | Repeatable bench and development procedures. |
+| [`JOURNAL.md`](JOURNAL.md) | Dated implementation decisions and lessons learned. |
+| [`SUGGEST.md`](SUGGEST.md) | Historical codebase review notes; move active items to `BACKLOG.md`. |
+
 ## Features
 
 - **Desired-state config** — declare `owner.info`, `powersaving`, TX power, and any other
