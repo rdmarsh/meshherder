@@ -53,7 +53,7 @@ Think Ansible for your nodes, running continuously in the background.
 ### Development
 
 ```bash
-git clone https://github.com/rdmarsh/mch
+git clone https://github.com/rdmarsh/meshherder
 cd mch
 python3 -m venv .venv
 source .venv/bin/activate
@@ -67,7 +67,7 @@ pip install -e ".[dev]"
 Clone to a permanent location, create a venv, and install into it:
 
 ```bash
-sudo git clone https://github.com/rdmarsh/mch /opt/mch
+sudo git clone https://github.com/rdmarsh/meshherder /opt/mch
 sudo python3 -m venv /opt/mch/.venv
 sudo /opt/mch/.venv/bin/pip install /opt/mch
 ```
