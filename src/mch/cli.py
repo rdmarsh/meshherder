@@ -36,7 +36,7 @@ def _pk(pubkey: str | None, length: int = 12) -> str:
 
 
 def _ago(iso: str | None) -> str:
-    """Format an ISO datetime string as a compact relative time ('5m ago', '2h ago', etc.)."""
+    """Format an ISO datetime string as a compact relative time ('  5m ago', '  2h ago')."""
     if not iso:
         return "never"
     try:
@@ -47,12 +47,12 @@ def _ago(iso: str | None) -> str:
         if secs < 0:
             return "just now"
         if secs < 120:
-            return f"{secs}s ago"
+            return f"{secs:>3}s ago"
         if secs < 3600:
-            return f"{secs // 60}m ago"
+            return f"{secs // 60:>3}m ago"
         if secs < 86400:
-            return f"{secs // 3600}h ago"
-        return f"{secs // 86400}d ago"
+            return f"{secs // 3600:>3}h ago"
+        return f"{secs // 86400:>3}d ago"
     except (ValueError, TypeError):
         return iso[:16].replace("T", " ")
 

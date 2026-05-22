@@ -25,10 +25,10 @@ CONTACTS = [
 def test_ago_formats_relative_times():
     now = datetime.now(UTC)
     assert _ago(None) == "never"
-    assert _ago((now - timedelta(seconds=42)).isoformat()) == "42s ago"
-    assert _ago((now - timedelta(minutes=5)).isoformat()) == "5m ago"
-    assert _ago((now - timedelta(hours=3)).isoformat()) == "3h ago"
-    assert _ago((now - timedelta(days=2)).isoformat()) == "2d ago"
+    assert _ago((now - timedelta(seconds=42)).isoformat()) == " 42s ago"
+    assert _ago((now - timedelta(minutes=5)).isoformat()) == "  5m ago"
+    assert _ago((now - timedelta(hours=3)).isoformat()) == "  3h ago"
+    assert _ago((now - timedelta(days=2)).isoformat()) == "  2d ago"
 
 
 def test_ago_treats_future_times_as_just_now():
@@ -40,7 +40,7 @@ def test_status_lists_relative_last_seen():
     seen = (datetime.now(UTC) - timedelta(minutes=7)).isoformat()
     result = _run(["status"], _status_resp(nodes=[{**_summary(), "last_seen": seen}]))
     assert result.exit_code == 0
-    assert "7m ago" in result.output
+    assert "  7m ago" in result.output
 
 
 def test_filter_contacts_no_query_returns_all():
