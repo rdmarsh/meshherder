@@ -319,8 +319,8 @@ nodes:
   aabbccdd: ""     # add password if required, or leave blank
 ```
 
-3. Copy the snippets you want into your config files, fill in any passwords, then restart mchd:
-   `sudo systemctl restart mchd`
+3. Copy the snippets you want into your config files and fill in any passwords. mchd hot-reloads
+   the files shortly after save; you can also send `SIGHUP` or restart mchd to force a reload.
 4. Run `mch status` to confirm the node is now known, then `mch sync <prefix>` to sync it
    immediately without waiting for the scheduler.
 

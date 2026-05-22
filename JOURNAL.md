@@ -271,3 +271,14 @@
   - A desired setting with no explicit policy now reports drift but does not write.
 - Parked next step:
   - Add a plan/dry-run view before broad real-mesh use.
+
+## 2026-05-22 - Config File Write Access Removed
+
+- Rechecked whether mchd edits config files:
+  - No daemon code writes `config.yaml` or `secrets.yaml`.
+  - Commissioning returns paste-ready snippets only.
+- Found stale systemd hardening text that still granted `/usr/local/etc/mch` write access because
+  an older idea had commissioning writing `secrets.yaml` atomically.
+- Removed `/usr/local/etc/mch` from `ReadWritePaths`.
+- Updated comments to make the contract explicit: mchd reads operator-owned config files and never
+  writes them.

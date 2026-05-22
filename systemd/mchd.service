@@ -28,11 +28,9 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 # read-only rather than yes so a venv under /home can be used as ExecStart
 ProtectHome=read-only
-# DB and socket directories need write access; config dir needs write access
-# because commissioning writes secrets.yaml atomically via a .tmp sibling file.
-# ProtectSystem=strict makes /usr read-only, so /usr/local/etc/mch must be
-# listed explicitly.
-ReadWritePaths=/usr/local/etc/mch /var/lib/mch /run/mch
+# DB and socket directories need write access. Config files stay operator-owned:
+# mchd reads /usr/local/etc/mch but never writes config.yaml or secrets.yaml.
+ReadWritePaths=/var/lib/mch /run/mch
 # Serial port access
 DeviceAllow=/dev/meshcore0 rw
 DeviceAllow=char-tty rw
