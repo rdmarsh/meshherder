@@ -142,18 +142,18 @@ def status(ctx: click.Context, query: str | None) -> None:
         state_w = max(len("STATE"), max((len(n["state"]) for n in nodes), default=0))
         group_w = max(len("GROUP"), max((len(n.get("group") or "-") for n in nodes), default=0))
         label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in nodes), default=0))
-        name_w = max(_wlen("NAME"), max((_wlen(n["name"]) for n in nodes), default=0))
+        name_w = max(_wlen("MESH NAME"), max((_wlen(n["name"]) for n in nodes), default=0))
         nbrs_w = max(len("NBRS"), max((len(n.get("neighbors") or "-") for n in nodes), default=0))
         ver_w = max(len("VER"), max((len(_short_ver(n.get("ver"))) for n in nodes), default=0))
 
         row = "  {:<12}  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}"
         click.echo(row.format(
-            "PUBKEY", "STATE", _wpad("LABEL", label_w), "GROUP", _wpad("NAME", name_w),
+            "PUBKEY", "STATE", _wpad("LABEL", label_w), "GROUP", _wpad("MESH NAME", name_w),
             "NBRS", "VER", "LAST SEEN",
             sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
         click.echo(row.format(
-            "------", "-----", _wpad("-----", label_w), "-----", _wpad("----", name_w),
+            "------", "-----", _wpad("-----", label_w), "-----", _wpad("---------", name_w),
             "----", "---", "---------",
             sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
@@ -241,7 +241,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
 
     click.echo(f"label:       {data.get('label') or '-'}")
     click.echo(f"group:       {data.get('group') or '-'}")
-    click.echo(f"name:        {data['name']}")
+    click.echo(f"mesh name:   {data['name']}")
     click.echo(f"state:       {data['state']}")
     click.echo(f"last seen:   {_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ts(data.get('last_connected'))}")
@@ -519,7 +519,7 @@ def _hint_detail(n: dict[str, Any]) -> None:
     profile = n["profile"]
 
     click.echo(f"label:      {n.get('label') or '-'}")
-    click.echo(f"name:       {n['name']}")
+    click.echo(f"mesh name:  {n['name']}")
     click.echo("")
 
     if count is None:

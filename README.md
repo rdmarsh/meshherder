@@ -201,6 +201,11 @@ Set the `device` path in `/usr/local/etc/mch/config.yaml` to `/dev/meshcore0`.
 Copy `examples/config.example.yaml` to `/usr/local/etc/mch/config.yaml` and edit it. The example file
 documents every available option with comments.
 
+`config.yaml` and `secrets.yaml` are the source of truth for desired state. The SQLite database is
+observed state: last seen times, facts, command history, and sync schedule. `mchd` watches both YAML
+files and reloads them automatically shortly after they change. You can also send `SIGHUP` to the
+daemon to force a reload. Invalid YAML is rejected and the previous in-memory config stays active.
+
 A minimal working config:
 
 ```yaml

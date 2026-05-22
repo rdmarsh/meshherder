@@ -139,9 +139,13 @@ class Config:
     profiles_url: str | None = None
     # profiles_file: use this local file instead of the bundled default
     profiles_file: str | None = None
+    # Absolute paths used by mchd for hot-reload watches.
+    config_path: str | None = None
+    secrets_path: str | None = None
 
 
 def load(config_path: Path, secrets_path: Path | None = None) -> Config:
+    config_path = config_path.resolve()
     raw = yaml.safe_load(config_path.read_text())
 
     if not isinstance(raw, dict):
@@ -196,8 +200,12 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
     if secrets_path is None:
         secrets_path = Path(raw.get("secrets_file", config_path.parent / "secrets.yaml"))
+    if not secrets_path.is_absolute():
+        secrets_path = config_path.parent / secrets_path
 
     cfg.secrets = _load_secrets(secrets_path)
+    cfg.config_path = str(config_path)
+    cfg.secrets_path = str(secrets_path.resolve())
 
     return cfg
 

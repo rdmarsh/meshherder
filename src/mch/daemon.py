@@ -18,6 +18,8 @@ import logging
 import os
 import signal
 import sys
+from contextlib import suppress
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,9 @@ from mch.models import NodeState
 from mch.queue import WorkQueue
 
 log = logging.getLogger(__name__)
+
+FileSignature = tuple[int, int] | None
+CONFIG_WATCH_INTERVAL_SECONDS = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +418,9 @@ class Daemon:
         self._wq: WorkQueue | None = None
         self._messenger: Messenger | None = None
         self._server: asyncio.Server | None = None
+        self._config_snapshot: dict[Path, FileSignature] = {}
+        self._config_watch_task: asyncio.Task[None] | None = None
+        self._reload_lock = asyncio.Lock()
 
     async def run(self) -> None:
         config = self._config
@@ -442,6 +450,8 @@ class Daemon:
         self._messenger.start()
 
         self._wq = WorkQueue(config, self._gateway, self._db, messenger=self._messenger)
+        self._config_snapshot = self._snapshot_config_files()
+        self._config_watch_task = asyncio.create_task(self._watch_config_files())
 
         # Unix socket server for mch CLI
         sock_path = config.socket_path
@@ -465,12 +475,87 @@ class Daemon:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
+        sighup = getattr(signal, "SIGHUP", None)
+        if sighup is not None:
+            loop.add_signal_handler(
+                sighup,
+                lambda: asyncio.create_task(self._reload_config("SIGHUP")),
+            )
 
         log.info("mchd started")
         await self._wq.run()
 
+    def _watched_config_paths(self) -> list[Path]:
+        paths: list[Path] = []
+        for raw_path in (self._config.config_path, self._config.secrets_path):
+            if raw_path is None:
+                continue
+            path = Path(raw_path)
+            if path not in paths:
+                paths.append(path)
+        return paths
+
+    def _snapshot_config_files(self) -> dict[Path, FileSignature]:
+        snapshot: dict[Path, FileSignature] = {}
+        for path in self._watched_config_paths():
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                snapshot[path] = None
+            else:
+                snapshot[path] = (stat.st_mtime_ns, stat.st_size)
+        return snapshot
+
+    async def _watch_config_files(self) -> None:
+        while True:
+            await asyncio.sleep(CONFIG_WATCH_INTERVAL_SECONDS)
+            snapshot = self._snapshot_config_files()
+            if snapshot != self._config_snapshot:
+                log.info("config/secrets file change detected")
+                await self._reload_config("file change")
+
+    async def _reload_config(self, reason: str) -> None:
+        async with self._reload_lock:
+            if self._config.config_path is None:
+                log.warning("cannot reload config: original config path unknown")
+                return
+
+            try:
+                new_config = load_config(Path(self._config.config_path))
+            except Exception as exc:
+                log.exception(
+                    "config reload from %s failed; keeping previous config: %s",
+                    reason,
+                    exc,
+                )
+                self._config_snapshot = self._snapshot_config_files()
+                return
+
+            for field in fields(Config):
+                setattr(self._config, field.name, getattr(new_config, field.name))
+
+            if self._messenger:
+                msg_cfg = self._config.messenger
+                self._messenger.update_config(
+                    allowed_prefixes=msg_cfg.allowed_prefixes,
+                    announce_channel=msg_cfg.announce_channel,
+                )
+            if self._wq:
+                await self._wq.refresh_config_state()
+
+            self._config_snapshot = self._snapshot_config_files()
+            log.info(
+                "config reloaded from %s (%d node(s))",
+                self._config.config_path,
+                len(self._config.nodes),
+            )
+
     async def _shutdown(self) -> None:
         log.info("shutting down")
+        if self._config_watch_task:
+            self._config_watch_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._config_watch_task
         if self._wq:
             await self._wq.stop()
         if self._messenger:

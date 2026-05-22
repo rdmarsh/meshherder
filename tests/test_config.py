@@ -56,6 +56,19 @@ def test_node_via_absent(tmp_path):
     assert cfg.nodes[0].via is None
 
 
+def test_load_records_config_and_secrets_paths(tmp_path):
+    """mchd uses these paths to watch YAML files for hot reload."""
+    p = _write_config(tmp_path, "gateway: {}\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes: {}\n")
+    secrets.chmod(0o600)
+
+    cfg = load(p)
+
+    assert cfg.config_path == str(p.resolve())
+    assert cfg.secrets_path == str(secrets.resolve())
+
+
 def test_node_radio_key_raises(tmp_path):
     """Old radio: key on a node raises ValueError with a hint to use via:."""
     p = _write_config(tmp_path, """\
