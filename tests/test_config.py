@@ -4,6 +4,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mch.config import RadioConfig, load
 
@@ -497,3 +498,15 @@ def test_unknown_group_reference_raises(tmp_path):
     """)
     with pytest.raises(ValueError, match="group"):
         load(p)
+
+
+def test_example_config_omits_legacy_region_allowf():
+    """The shipped example should match v1.15+ region command requirements."""
+    example = Path(__file__).resolve().parents[1] / "examples" / "config.example.yaml"
+    raw = yaml.safe_load(example.read_text())
+    commands = [
+        op.get("command", "")
+        for node in raw.get("nodes", [])
+        for op in node.get("operations", [])
+    ]
+    assert all(not command.startswith("region allowf ") for command in commands)

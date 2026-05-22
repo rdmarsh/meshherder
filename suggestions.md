@@ -166,6 +166,66 @@ New findings from this recheck:
     reboot to apply. Do not change commissioning behavior until this is live-tested on current
     firmware. If confirmed, it may reduce commissioning disruption and avoid reboot timing races.
 
+37. Validate `set` field input against type and range constraints before sending it.
+
+    Current desired-state handling assumes user-provided values are already valid. Add validation so
+    the CLI/config layer rejects obvious mistakes before they reach a node, including:
+
+    - non-numeric input for numeric fields
+    - values outside the firmware's accepted range
+    - malformed `set` payloads that would otherwise fail only at runtime
+
+    Prefer field-aware validation using the command metadata or firmware docs where possible, so we
+    can fail fast with a useful error instead of sending bad values over the mesh.
+
+38. Support variable desired values derived from observed node state.
+
+    Some settings should depend on runtime facts rather than being fixed constants. A concrete case
+    is zero-hop advert control: turn zero-hop advert off once node uptime exceeds `X` days. Add a way
+    to express a desired value as a function of returned state, while keeping the default model
+    simple and predictable.
+
+    Possible directions:
+
+    - per-field rules based on facts returned by `mchd`
+    - thresholds or predicates tied to uptime, role, or other observed data
+    - a safe fallback when the derived value cannot be computed
+
+    Keep this distinct from ordinary static desired-state enforcement so it does not complicate the
+    common case.
+
+39. Validate config and secrets values against field-specific rules, with different startup and
+    reload behavior.
+
+    The current loader already rejects malformed YAML and some structural mistakes. Extend that to
+    field-level value validation so bad config does not reach a node, including type mismatches,
+    out-of-range numbers, and invalid enum-like values.
+
+    Recommended behavior:
+
+    - refuse to start if the initial config or secrets file is invalid, because there is no known
+      good baseline yet
+    - if a file changes while mchd is running, log the validation error and keep the last known
+      good in-memory config/secrets
+
+    That matches the existing hot-reload model and avoids dropping a running daemon because an
+    operator saved a bad edit. It also keeps bad values from being partially applied during sync or
+    commissioning.
+
+40. Add `mch validate` as a preflight check for config and secrets files.
+
+    A dedicated validation command would let operators check `config.yaml` before restarting or
+    reloading mchd, rather than waiting for the daemon to discover a bad edit indirectly.
+
+    Suggested behavior:
+
+    - load the active config/secrets files or explicit paths
+    - run the same validation rules used by the daemon
+    - print clear field-level errors
+    - exit `0` when valid and nonzero when invalid
+
+    That makes config edits safer and gives operators a quick `mch validate` step after changes.
+
 30. Document the bench reset/reflash commands.
 
     A separate "reset node to factory" command is not needed yet. A short operator note with the
