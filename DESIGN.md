@@ -130,6 +130,9 @@ direct serial verification that `public.key`, `prv.key`, name, and radio all mat
 
 ## Known design gaps
 
+For the current prioritized todo list, wishlist, and explicit non-goals, see `BACKLOG.md`. This
+section only records stable design gaps that affect the architecture.
+
 - **No node decommissioning**: removing a node from config.yaml leaves a ghost in the DB.
   A `mch forget <prefix>` command to purge the DB record is not yet implemented.
 - **Ghost resolution is one-directional**: `mch issues` shows ghosts but provides no CLI action
