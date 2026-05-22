@@ -510,3 +510,18 @@ def test_example_config_omits_legacy_region_allowf():
         for op in node.get("operations", [])
     ]
     assert all(not command.startswith("region allowf ") for command in commands)
+
+
+def test_example_config_includes_region_hierarchy_examples():
+    """The shipped example should show the common AU region naming pattern."""
+    example = Path(__file__).resolve().parents[1] / "examples" / "config.example.yaml"
+    raw = yaml.safe_load(example.read_text())
+    commands = [
+        op.get("command", "")
+        for node in raw.get("nodes", [])
+        for op in node.get("operations", [])
+    ]
+    assert "region put au" in commands
+    assert "region put au-nsw" in commands
+    assert "region put au-nsw-syd" in commands
+    assert "region put au-vic" in commands
