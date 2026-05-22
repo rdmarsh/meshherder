@@ -127,6 +127,10 @@ New findings from this recheck:
 
 34. Add stale/lost node handling and explicit DB pruning.
 
+    **2026-05-22 status:** partially done. `mch prune` lists DB nodes no longer present in
+    `config.yaml`, and `mch prune --yes` deletes their local DB state. A single-node
+    `mch remove <node>` command and stale/lost node status are still future work.
+
     Nodes removed from `config.yaml` currently remain in the SQLite database and still appear in
     `mch status`, although the scheduler no longer syncs them. Add an explicit cleanup flow rather
     than deleting automatically on config removal:
@@ -141,6 +145,26 @@ New findings from this recheck:
     threshold under `scheduler` or a future `status` section, with a conservative default such as
     `lost_after_days: 30`. Display old nodes as `lost` with a capped age such as `>99d ago` rather
     than letting very large day counts dominate the table.
+
+35. Improve blank and sentinel-value handling in commissioning prompts.
+
+    The commissioning wizard currently uses Enter to accept defaults and `-` as a sentinel for
+    "no group" or "no guest password". That works, but it is easy to confuse with a literal blank
+    field or an intentional empty value. Revisit prompt semantics so optional fields have explicit,
+    documented actions. Possible directions:
+
+    - Keep Enter as "accept default".
+    - Use a named sentinel such as `none` or `clear` instead of `-`.
+    - Show clearer prompt help for optional fields.
+    - Ensure config/secrets snippets never accidentally persist placeholder sentinel values.
+
+36. Test `tempradio` plus `set radio` as a no-reboot commissioning radio switch.
+
+    Operator lore suggests sending `tempradio <freq>,<bw>,<sf>,<cr>,<minutes>` followed by
+    `set radio <freq>,<bw>,<sf>,<cr>` may make the new frequency stick without requiring a reboot.
+    Official docs say `tempradio` is temporary and not saved, while `set radio` normally requires
+    reboot to apply. Do not change commissioning behavior until this is live-tested on current
+    firmware. If confirmed, it may reduce commissioning disruption and avoid reboot timing races.
 
 30. Document the bench reset/reflash commands.
 

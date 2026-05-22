@@ -78,6 +78,18 @@ details, node identities, generated private keys, local hostnames, or operator p
 - `MESH NAME` is observed MeshCore state from the node/contact store.
 - A config edit alone should not change the observed mesh name; a successful sync must apply
   `settings.name.desired`.
+
+## 2026-05-22 - MeshCore CLI References
+
+- Keep these references handy when validating command semantics:
+  - https://docs.meshcore.io/cli_commands/
+  - https://github.com/meshcore-dev/MeshCore/wiki/Repeater-&-Room-Server-CLI-Reference/83961784b86ef23a55ca7cf621bd9381efa9f535
+- Important units/details confirmed from the wiki reference:
+  - `set advert.interval {minutes}`
+  - `set flood.advert.interval {hours}`
+  - `set radio {freq},{bw},{sf},{cr}` requires reboot to apply
+  - `region put`, `region allowf`, and `region save` are raw region-management commands, not
+    `set <key> <value>` settings
 - After successful `set name`, the DB node name is updated immediately to avoid stale display.
 
 ## 2026-05-22 - Desired vs Known Safety Model

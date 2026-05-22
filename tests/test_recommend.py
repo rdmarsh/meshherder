@@ -107,6 +107,17 @@ def test_load_profiles_universal_has_path_hash_mode():
     keys = {u.key for u in universal}
     assert "path.hash.mode" in keys
 
+
+def test_load_profiles_universal_has_advert_settings():
+    _, universal = load_profiles()
+    values = {u.key: u.value for u in universal}
+    assert values["radio"] == "915.075,125,9,5"
+    assert values["flood.advert.interval"] == "47"
+    assert values["advert.interval"] == "238"
+    assert values["multi.acks"] == "1"
+    assert values["path.hash.mode"] == "1"
+
+
 def test_load_profiles_from_custom_file(tmp_path):
     custom = tmp_path / "profiles.yaml"
     custom.write_text(

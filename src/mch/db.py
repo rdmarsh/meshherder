@@ -187,6 +187,16 @@ class Database:
             rows = await cur.fetchall()
         return [_row_to_node(r) for r in rows]
 
+    async def delete_node(self, pubkey: str) -> None:
+        """Delete one node and its local DB state."""
+        db = self._db_required()
+        await db.execute("DELETE FROM settings WHERE node_pubkey = ?", (pubkey,))
+        await db.execute("DELETE FROM node_facts WHERE node_pubkey = ?", (pubkey,))
+        await db.execute("DELETE FROM operations WHERE node_pubkey = ?", (pubkey,))
+        await db.execute("DELETE FROM logs WHERE node_pubkey = ?", (pubkey,))
+        await db.execute("DELETE FROM nodes WHERE pubkey = ?", (pubkey,))
+        await db.commit()
+
     # ------------------------------------------------------------------
     # settings
     # ------------------------------------------------------------------

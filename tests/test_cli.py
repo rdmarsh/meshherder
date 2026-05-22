@@ -8,7 +8,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from mch.cli import _ago, _filter_contacts, _filter_drift, _filter_nodes, cli
+from mch.cli import (
+    _ago,
+    _default_commission_label,
+    _filter_contacts,
+    _filter_drift,
+    _filter_nodes,
+    cli,
+)
+from mch.meshkey import derive_public_key
 
 
 def _contact(pubkey: str, name: str) -> dict:
@@ -423,6 +431,47 @@ def test_status_filtered_footer_says_shown():
     assert "2 of 3 nodes shown" in result.output
 
 
+# ------ prune ------
+
+def _prune_resp(candidates=None, deleted=0):
+    return {"ok": True, "data": {"candidates": candidates or [], "deleted": deleted}}
+
+
+def test_prune_no_candidates():
+    result = _run(["prune"], _prune_resp())
+    assert result.exit_code == 0
+    assert "no DB nodes outside config.yaml" in result.output
+    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+
+
+def test_prune_lists_candidates_without_deleting():
+    result = _run(["prune"], _prune_resp(candidates=[{
+        "pubkey": "aabbccdd" * 8,
+        "label": "old-site",
+        "name": "Old Site",
+        "state": "configured",
+        "last_seen": None,
+    }]))
+    assert result.exit_code == 0
+    assert "DB nodes outside config.yaml" in result.output
+    assert "old-site" in result.output
+    assert "run 'mch prune --yes'" in result.output
+    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+
+
+def test_prune_yes_reports_deleted_count():
+    result = _run(["prune", "--yes"], _prune_resp(candidates=[{
+        "pubkey": "aabbccdd" * 8,
+        "label": "old-site",
+        "name": "Old Site",
+        "state": "configured",
+        "last_seen": None,
+    }], deleted=1))
+    assert result.exit_code == 0
+    assert "deleted 1 node(s)" in result.output
+    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+
+
 # ------ plan ------
 
 def _plan_resp(writes=None, audits=None, unknown=None):
@@ -814,7 +863,7 @@ def test_commission_new_cancel_aborts():
 
 
 def test_commission_new_admin_password_defaults_to_password():
-    """Admin password defaults to 'password' when user presses Enter."""
+    """New node wizard has useful defaults when user presses Enter."""
     runner = CliRunner()
     success_resp = {"ok": True, "data": {
         "pubkey_prefix": "a695e2be",
@@ -832,6 +881,43 @@ def test_commission_new_admin_password_defaults_to_password():
     commission_call = mock_rpc.call_args_list[1]
     req = commission_call[0][1]
     assert req["admin_password"] == "password"
+    assert req["group"] == "default"
+    assert req["guest_password"] == "guest"
+
+
+def test_default_commission_label_uses_managed_pubkey_prefix():
+    assert _default_commission_label("fa5a4515607e") == "fa5a4515607e"
+    assert _default_commission_label(None) == "node01"
+
+
+def test_commission_new_defaults_label_from_generated_identity():
+    """Pressing Enter for label uses the generated managed pubkey."""
+    runner = CliRunner()
+    prv_key = "10" * 64
+    pubkey = derive_public_key(prv_key)
+    label = _default_commission_label(pubkey)
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": pubkey[:8],
+        "label": label,
+        "name": label,
+        "group": "default",
+        "target_freq": "915.800,250,10,5",
+    }}
+    with patch("mch.cli.generate_private_key", return_value=prv_key), \
+         patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "", "", "", "", "", "", "y",
+                # mode, label, name, group, admin_pw, guest_pw, radio, confirm
+            ),
+        )
+    assert result.exit_code == 0, result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["label"] == label
+    assert req["name"] == label
+    assert req["prv_key"] == prv_key
 
 
 def test_commission_new_daemon_error_shows_retry_prompt():
@@ -904,6 +990,18 @@ def test_commission_scan_no_nodes_retry_then_quit():
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
     assert "no unmanaged nodes" in result.output.lower()
     assert result.exit_code == 0
+
+
+def test_commission_scan_busy_explains_wait_and_recovery():
+    """A busy commission scan tells the operator what is happening."""
+    runner = CliRunner()
+    busy = {"ok": False, "error": "busy: commission"}
+    with patch("mch.cli._rpc", side_effect=[busy]):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
+    assert result.exit_code == 0
+    assert "still finishing or cancelling" in result.output
+    assert "Wait about 10-30 seconds" in result.output
+    assert "restart mchd" in result.output
 
 
 def test_commission_replace_no_replaceable_nodes():

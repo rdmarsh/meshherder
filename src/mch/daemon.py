@@ -44,6 +44,10 @@ FileSignature = tuple[int, int] | None
 CONFIG_WATCH_INTERVAL_SECONDS = 10.0
 
 
+class ClientDisconnected(Exception):
+    """Raised when a long-running RPC client disappears before completion."""
+
+
 # ---------------------------------------------------------------------------
 # socket protocol
 # ---------------------------------------------------------------------------
@@ -104,6 +108,10 @@ async def _resolve_node(query: str, db: Database) -> Any:
         labels = ", ".join(repr(n.label or n.pubkey[:8]) for n in matches)
         raise ValueError(f"ambiguous: {len(matches)} nodes match {query!r} ({labels})")
     return None
+
+
+def _is_configured_node(pubkey: str, config: Config) -> bool:
+    return any(pubkey.startswith(nc.pubkey_prefix) for nc in config.nodes)
 
 
 async def _dispatch(
@@ -328,6 +336,31 @@ async def _dispatch(
     if cmd == "contacts":
         return {"ok": True, "data": await wq.unfiled_contacts()}
 
+    if cmd == "prune":
+        dry_run = bool(req.get("dry_run", True))
+        nodes = await db.get_all_nodes()
+        candidates = [
+            {
+                "pubkey": n.pubkey,
+                "label": n.label,
+                "name": n.name,
+                "state": n.state.value,
+                "last_seen": n.last_seen.isoformat() if n.last_seen else None,
+            }
+            for n in nodes
+            if not _is_configured_node(n.pubkey, config)
+        ]
+        if not dry_run:
+            for item in candidates:
+                await db.delete_node(item["pubkey"])
+        return {
+            "ok": True,
+            "data": {
+                "candidates": candidates,
+                "deleted": 0 if dry_run else len(candidates),
+            },
+        }
+
     if cmd == "logs":
         pubkey = req.get("pubkey")
         limit = int(req.get("limit", 50))
@@ -454,11 +487,14 @@ async def _dispatch(
                     writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
                     await writer.drain()
                 except (ConnectionResetError, BrokenPipeError):
-                    pass
+                    raise ClientDisconnected("commission client disconnected") from None
         try:
             async with wq.operation("commission", wait=False):
                 return await handle_commission(req, wq, db, config, progress=progress_cb)
         except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ClientDisconnected as exc:
+            log.info("%s", exc)
             return {"ok": False, "error": str(exc)}
 
     return {"ok": False, "error": f"unknown command: {cmd!r}"}

@@ -219,6 +219,7 @@ async def handle_commission(
             )
 
             await _prog("switching to factory frequency...")
+            await _prog("discovering factory nodes for about 8 seconds...")
             unknown = await discover_unmanaged(gateway, db, config)
 
             if len(unknown) == 0:
