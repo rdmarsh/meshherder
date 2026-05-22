@@ -194,86 +194,82 @@ async def handle_commission(
         if progress is not None:
             await progress(msg)
 
-    gateway = wq._gateway
-
     if mode == "scan":
         # Discover unmanaged nodes and return them with the gateway's home radio string.
-        wq.pause()
+        async with wq.commission_session() as gateway:
+            try:
+                unknown = await discover_unmanaged(gateway, db, config)
+                r = config.gateway.radio
+                gateway_radio = (
+                    f"{r.freq:.3f},{r.bw:g},{r.sf},{r.cr}" if r else None
+                )
+                return {"ok": True, "data": {"nodes": unknown, "gateway_radio": gateway_radio}}
+            except Exception as exc:
+                log.exception("commission scan error: %s", exc)
+                return {"ok": False, "error": str(exc)}
+
+    async with wq.commission_session() as gateway:
         try:
-            unknown = await discover_unmanaged(gateway, db, config)
-            r = config.gateway.radio
-            gateway_radio = (
-                f"{r.freq:.3f},{r.bw:g},{r.sf},{r.cr}" if r else None
+            # Save home radio state before discover() hops and restores it.
+            home_radio: tuple[float, float, int, int] = (
+                float(gateway.info.get("radio_freq") or 0),
+                float(gateway.info.get("radio_bw") or 0),
+                int(gateway.info.get("radio_sf") or 0),
+                int(gateway.info.get("radio_cr") or 0),
             )
-            return {"ok": True, "data": {"nodes": unknown, "gateway_radio": gateway_radio}}
-        except Exception as exc:
-            log.exception("commission scan error: %s", exc)
-            return {"ok": False, "error": str(exc)}
-        finally:
-            wq.resume()
 
-    wq.pause()
-    try:
-        # Save home radio state before discover() hops and restores it.
-        home_radio: tuple[float, float, int, int] = (
-            float(gateway.info.get("radio_freq") or 0),
-            float(gateway.info.get("radio_bw") or 0),
-            int(gateway.info.get("radio_sf") or 0),
-            int(gateway.info.get("radio_cr") or 0),
-        )
+            await _prog("switching to factory frequency...")
+            unknown = await discover_unmanaged(gateway, db, config)
 
-        await _prog("switching to factory frequency...")
-        unknown = await discover_unmanaged(gateway, db, config)
-
-        if len(unknown) == 0:
-            return {
-                "ok": False,
-                "error": "no unmanaged nodes found - is it powered on, in range, with an antenna?",
-            }
-        if len(unknown) > 1:
-            pubkeys = ", ".join(n["pubkey"][:12] for n in unknown)
-            return {
-                "ok": False,
-                "error": (
-                    f"found {len(unknown)} unmanaged nodes — commission one at a time ({pubkeys})"
-                ),
-            }
-
-        node_info = unknown[0]
-        await _prog(f"found node {node_info['pubkey'][:12]}")
-
-        # discover() restored home freq; re-hop to factory so commissioning commands reach the node.
-        await gateway.hop_radio(*Gateway.FACTORY_FREQ)
-        try:
-            # DISCOVER_RESPONSE does not add the node to the gateway's contact store.
-            # add_commission_contact() inserts it with flood routing so send_command() succeeds.
-            contact = await gateway.add_commission_contact(node_info)
-
-            # discover() uses prefix_only=False so we have the full 32-byte pubkey.
-            # Login with the factory default password before sending CLI commands.
-            await _prog("logging in...")
-            if not await gateway.login(contact, "password"):
+            if len(unknown) == 0:
                 return {
                     "ok": False,
                     "error": (
-                        "could not authenticate to factory node — "
-                        "ensure it is factory-fresh (default password 'password') and retry"
+                        "no unmanaged nodes found - is it powered on, in range, with an antenna?"
                     ),
                 }
-            await _prog("login OK")
+            if len(unknown) > 1:
+                pubkeys = ", ".join(n["pubkey"][:12] for n in unknown)
+                return {
+                    "ok": False,
+                    "error": (
+                        f"found {len(unknown)} unmanaged nodes — "
+                        f"commission one at a time ({pubkeys})"
+                    ),
+                }
 
-            if mode == "new":
-                return await _commission_new(req, gateway, config, contact, _prog)
-            else:
+            node_info = unknown[0]
+            await _prog(f"found node {node_info['pubkey'][:12]}")
+
+            # discover() restored home freq; re-hop to factory so commands reach the node.
+            await gateway.hop_radio(*Gateway.FACTORY_FREQ)
+            try:
+                # DISCOVER_RESPONSE does not add the node to the gateway's contact store.
+                # add_commission_contact() inserts it with flood routing so send_command() succeeds.
+                contact = await gateway.add_commission_contact(node_info)
+
+                # discover() uses prefix_only=False so we have the full 32-byte pubkey.
+                # Login with the factory default password before sending CLI commands.
+                await _prog("logging in...")
+                if not await gateway.login(contact, "password"):
+                    return {
+                        "ok": False,
+                        "error": (
+                            "could not authenticate to factory node — "
+                            "ensure it is factory-fresh (default password 'password') and retry"
+                        ),
+                    }
+                await _prog("login OK")
+
+                if mode == "new":
+                    return await _commission_new(req, gateway, config, contact, _prog)
                 return await _commission_replace(req, gateway, config, contact, _prog)
-        finally:
-            await gateway.restore_radio(*home_radio)
+            finally:
+                await gateway.restore_radio(*home_radio)
 
-    except Exception as exc:
-        log.exception("commission error: %s", exc)
-        return {"ok": False, "error": str(exc)}
-    finally:
-        wq.resume()
+        except Exception as exc:
+            log.exception("commission error: %s", exc)
+            return {"ok": False, "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------

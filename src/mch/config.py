@@ -16,8 +16,31 @@ from mch.models import SettingPolicy
 
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
-# pubkey_prefix must be even-length lowercase hex (full bytes only).
+# pubkey_prefix must be even-length hex (full bytes only); values are normalized to lowercase.
 _HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+_MIN_PREFIX_LEN = 8
+
+_TOP_LEVEL_KEYS = {
+    "gateway",
+    "scheduler",
+    "db_path",
+    "socket_path",
+    "secrets_file",
+    "facts",
+    "profiles_url",
+    "profiles_file",
+    "messenger",
+    "groups",
+    "nodes",
+}
+_GATEWAY_KEYS = {"device", "baud", "name", "radio", "advert_on_start"}
+_SCHEDULER_KEYS = {"inter_node_delay_seconds", "sync_interval_days"}
+_MESSENGER_KEYS = {"allowed_prefixes", "announce_channel"}
+_NODE_KEYS = {"pubkey_prefix", "group", "label", "default_policy", "settings", "operations", "via"}
+_GROUP_KEYS = {"name", "default_policy", "settings", "setting_overrides"}
+_SETTING_KEYS = {"desired", "policy", "poll_hours"}
+_OPERATION_KEYS = {"command", "every_hours", "fire_and_forget"}
+_RADIO_KEYS = {"freq", "bw", "sf", "cr"}
 
 
 class _NoDuplicateKeysLoader(yaml.SafeLoader):
@@ -151,22 +174,34 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     if not isinstance(raw, dict):
         kind = type(raw).__name__ if raw is not None else "empty file"
         raise ValueError(f"config file must be a YAML mapping, got {kind}")
+    _reject_unknown_keys("config", raw, _TOP_LEVEL_KEYS)
 
-    gw_raw = raw.get("gateway", {})
+    gw_raw = _mapping(raw.get("gateway", {}), "gateway")
+    _reject_unknown_keys("gateway", gw_raw, _GATEWAY_KEYS)
     gw_radio = _parse_radio(gw_raw.pop("radio", None))
-    sched_raw = raw.get("scheduler", {})
+    sched_raw = _mapping(raw.get("scheduler", {}), "scheduler")
+    _reject_unknown_keys("scheduler", sched_raw, _SCHEDULER_KEYS)
+    msg_raw = _mapping(raw.get("messenger", {}), "messenger")
+    _reject_unknown_keys("messenger", msg_raw, _MESSENGER_KEYS)
+    nodes_raw = _list(raw.get("nodes", []), "nodes")
+    groups_raw = _list(raw.get("groups", []), "groups")
+    facts_raw = _list(raw.get("facts", ["ver", "board", "role"]), "facts")
 
-    msg_raw = raw.get("messenger", {})
     cfg = Config(
         gateway=GatewayConfig(**gw_raw, radio=gw_radio),
         scheduler=SchedulerConfig(**sched_raw),
         db_path=raw.get("db_path", "/var/lib/mch/mch.db"),
         socket_path=raw.get("socket_path", "/run/mch/mchd.sock"),
-        facts=raw.get("facts", ["ver", "board", "role"]),
-        nodes=[_parse_node(n) for n in raw.get("nodes", [])],
-        groups=[_parse_group(g) for g in raw.get("groups", [])],
+        facts=[str(f) for f in facts_raw],
+        nodes=[_parse_node(n, f"nodes[{i}]") for i, n in enumerate(nodes_raw)],
+        groups=[_parse_group(g, f"groups[{i}]") for i, g in enumerate(groups_raw)],
         messenger=MessengerConfig(
-            allowed_prefixes=msg_raw.get("allowed_prefixes", []),
+            allowed_prefixes=[
+                _normalize_pubkey_prefix(p, f"messenger.allowed_prefixes[{i}]")
+                for i, p in enumerate(
+                    _list(msg_raw.get("allowed_prefixes", []), "messenger.allowed_prefixes")
+                )
+            ],
             announce_channel=msg_raw.get("announce_channel"),
         ),
         profiles_url=raw.get("profiles_url"),
@@ -210,7 +245,49 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     return cfg
 
 
-def _parse_setting(raw: dict[str, Any]) -> SettingConfig:
+def _mapping(raw: Any, context: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{context} must be a YAML mapping, got {type(raw).__name__}")
+    return dict(raw)
+
+
+def _list(raw: Any, context: str) -> list[Any]:
+    if not isinstance(raw, list):
+        raise ValueError(f"{context} must be a YAML list, got {type(raw).__name__}")
+    return raw
+
+
+def _reject_unknown_keys(context: str, raw: dict[str, Any], allowed: set[str]) -> None:
+    unknown = set(raw) - allowed
+    if unknown:
+        key = sorted(unknown)[0]
+        noun = "node key" if context.startswith("nodes[") else f"{context} key"
+        raise ValueError(f"unknown {noun} {key!r}")
+
+
+def _normalize_pubkey_prefix(raw: Any, context: str) -> str:
+    prefix = str(raw).lower()
+    if not _HEX_RE.match(prefix):
+        raise ValueError(
+            f"{context} {prefix!r} contains non-hex characters"
+            " - must be hex digits only"
+        )
+    if len(prefix) < _MIN_PREFIX_LEN:
+        raise ValueError(
+            f"{context} {prefix!r} is too short"
+            f" - use at least {_MIN_PREFIX_LEN} hex characters"
+        )
+    if len(prefix) % 2 != 0:
+        raise ValueError(
+            f"{context} {prefix!r} has odd length ({len(prefix)} chars)"
+            " - prefix must represent whole bytes (even number of hex chars)"
+        )
+    return prefix
+
+
+def _parse_setting(raw: dict[str, Any], context: str = "setting") -> SettingConfig:
+    raw = _mapping(raw, context)
+    _reject_unknown_keys(context, raw, _SETTING_KEYS)
     policy = raw.get("policy")
     return SettingConfig(
         desired=raw.get("desired"),
@@ -231,38 +308,34 @@ def _parse_radio(raw: Any) -> RadioConfig | None:
     if isinstance(raw, str):
         freq, bw, sf, cr = raw.split(",")
         return RadioConfig(freq=round(float(freq), 3), bw=float(bw), sf=int(sf), cr=int(cr))
+    raw = _mapping(raw, "radio")
+    _reject_unknown_keys("radio", raw, _RADIO_KEYS)
     return RadioConfig(
         freq=round(float(raw["freq"]), 3), **{k: v for k, v in raw.items() if k != "freq"}
     )
 
 
-def _parse_node(raw: dict[str, Any]) -> NodeConfig:
+def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
+    raw = _mapping(raw, context)
     if "radio" in raw:
         raise ValueError(
             f"node {raw.get('pubkey_prefix')!r}: 'radio:' is no longer supported"
             " - use 'via:' instead (same format)"
         )
+    _reject_unknown_keys(context, raw, _NODE_KEYS)
 
-    pubkey_prefix = str(raw["pubkey_prefix"])
-    if not _HEX_RE.match(pubkey_prefix):
-        raise ValueError(
-            f"pubkey_prefix {pubkey_prefix!r} contains non-hex characters"
-            " - must be lowercase hex digits only"
-        )
-    if len(pubkey_prefix) % 2 != 0:
-        raise ValueError(
-            f"pubkey_prefix {pubkey_prefix!r} has odd length ({len(pubkey_prefix)} chars)"
-            " - prefix must represent whole bytes (even number of hex chars)"
-        )
+    pubkey_prefix = _normalize_pubkey_prefix(raw["pubkey_prefix"], "pubkey_prefix")
 
     policy = raw.get("default_policy")
+    settings_raw = _mapping(raw.get("settings", {}), f"{context}.settings")
     settings = {
-        k: _parse_setting(v if isinstance(v, dict) else {"desired": v})
-        for k, v in raw.get("settings", {}).items()
+        k: _parse_setting(v if isinstance(v, dict) else {"desired": v}, f"{context}.settings.{k}")
+        for k, v in settings_raw.items()
     }
+    operations_raw = _list(raw.get("operations", []), f"{context}.operations")
     operations = [
-        OperationConfig(**op) if isinstance(op, dict) else OperationConfig(command=op)
-        for op in raw.get("operations", [])
+        _parse_operation(op, f"{context}.operations[{i}]")
+        for i, op in enumerate(operations_raw)
     ]
     via = _parse_radio(raw.get("via"))
 
@@ -286,15 +359,30 @@ def _parse_node(raw: dict[str, Any]) -> NodeConfig:
     )
 
 
-def _parse_group(raw: dict[str, Any]) -> GroupConfig:
+def _parse_operation(raw: Any, context: str) -> OperationConfig:
+    if not isinstance(raw, dict):
+        return OperationConfig(command=str(raw))
+    raw = _mapping(raw, context)
+    _reject_unknown_keys(context, raw, _OPERATION_KEYS)
+    return OperationConfig(**raw)
+
+
+def _parse_group(raw: Any, context: str = "group") -> GroupConfig:
+    raw = _mapping(raw, context)
+    _reject_unknown_keys(context, raw, _GROUP_KEYS)
     policy = raw.get("default_policy")
+    settings_raw = _mapping(raw.get("settings", {}), f"{context}.settings")
     settings = {
-        k: _parse_setting(v if isinstance(v, dict) else {"desired": v})
-        for k, v in raw.get("settings", {}).items()
+        k: _parse_setting(v if isinstance(v, dict) else {"desired": v}, f"{context}.settings.{k}")
+        for k, v in settings_raw.items()
     }
+    overrides_raw = _mapping(raw.get("setting_overrides", {}), f"{context}.setting_overrides")
     overrides = {
-        k: _parse_setting(v if isinstance(v, dict) else {"policy": v})
-        for k, v in raw.get("setting_overrides", {}).items()
+        k: _parse_setting(
+            v if isinstance(v, dict) else {"policy": v},
+            f"{context}.setting_overrides.{k}",
+        )
+        for k, v in overrides_raw.items()
     }
     return GroupConfig(
         name=raw["name"],
@@ -321,11 +409,16 @@ def _load_secrets(path: Path) -> dict[str, NodeSecrets]:
         raise ValueError("secrets.nodes must be a mapping of pubkey_prefix: password")
     result: dict[str, NodeSecrets] = {}
     for k, v in nodes.items():
+        prefix = (
+            str(k)
+            if str(k) == "default"
+            else _normalize_pubkey_prefix(k, f"secrets.nodes.{k}")
+        )
         if isinstance(v, str):
             # old flat format: migrate to NodeSecrets
-            result[str(k)] = NodeSecrets(password=v)
+            result[prefix] = NodeSecrets(password=v)
         elif isinstance(v, dict):
-            result[str(k)] = NodeSecrets(
+            result[prefix] = NodeSecrets(
                 password=v.get("password"),
                 guest_password=v.get("guest_password"),
                 prv_key=v.get("prv_key"),

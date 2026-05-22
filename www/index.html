@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesh Herder — mch</title>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+
+<header>
+  <div class="logo">mch</div>
+  <h1>Mesh Herder</h1>
+  <p class="tagline">Fleet management for MeshCore repeater nodes.</p>
+  <a class="gh-link" href="https://github.com/rdmarsh/meshherder">github.com/rdmarsh/meshherder</a>
+</header>
+
+<main>
+
+  <section id="pitch">
+    <p>You have 30 MeshCore nodes. Logging into each one manually is not a workflow.</p>
+    <p>
+      mch is a daemon that connects to a locally-attached gateway node over USB serial,
+      walks your mesh, and brings every managed node into a declared desired state —
+      one node at a time, without hammering the mesh.
+    </p>
+    <p>Think Ansible for your nodes, running continuously in the background.</p>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <pre><code>git clone https://github.com/rdmarsh/meshherder
+cd meshherder
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .</code></pre>
+    <p>Requires Python 3.11+. Linux (Raspberry Pi OS / Ubuntu); macOS for development.</p>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <pre class="arch">
+ mch (CLI)
+    |
+    | Unix socket
+    |
+ mchd (daemon)
+    |
+    | USB serial (/dev/meshcore0)
+    |
+ Gateway node
+    |
+   mesh
+    |
+ Managed repeater nodes
+    </pre>
+    <ol>
+      <li>Declare desired state in <code>config.yaml</code> — settings, facts to collect, operations to run.</li>
+      <li>mchd connects to a locally-attached gateway node and reads the mesh contact list.</li>
+      <li>Each sync cycle: visit every managed node, collect facts, enforce settings, run operations.</li>
+      <li>Results, drift, and history go into a local SQLite database. <code>mch status</code> shows the fleet.</li>
+    </ol>
+  </section>
+
+  <section id="features">
+    <h2>What it does</h2>
+    <ul>
+      <li><strong>Desired-state enforcement</strong> — declare any <code>get</code>/<code>set</code> CLI setting; mchd enforces, audits, or ignores per configurable policy per setting, node, or group.</li>
+      <li><strong>Fact collection</strong> — firmware version, hardware name, role, battery, uptime, neighbours — collected each sync and stored in SQLite.</li>
+      <li><strong>Multi-frequency support</strong> — nodes on different radio settings? Add <code>via:</code> to the node entry; mchd hops the gateway, manages the node, and restores home frequency when done.</li>
+      <li><strong>Staggered scheduler</strong> — nodes are spread randomly across the sync window so mchd restarts never cause a surge.</li>
+      <li><strong>DM commands</strong> — send <code>sync &lt;pubkey&gt;</code> as a mesh DM from your device to trigger an immediate sync from the field.</li>
+      <li><strong>Rate limiting</strong> — one node at a time, configurable delay between nodes. Never hammers the mesh.</li>
+      <li><strong>Open-node detection</strong> — warns when a node syncs with no ACL protection. Flagged in the log and in <code>mch issues</code>.</li>
+      <li><strong>mch exec</strong> — run one-off MeshCore CLI commands on any managed node without touching config. Destructive commands require confirmation; irreversible ones are blocked.</li>
+      <li><strong>mch commission</strong> — guided wizard to take a freshly-flashed node to fully managed: generates or restores a private key, sets name/password/radio, verifies identity after reboot.</li>
+      <li><strong>Hot reload</strong> — mchd watches <code>config.yaml</code> and <code>secrets.yaml</code> and reloads on change. Invalid YAML is rejected; previous config stays active.</li>
+    </ul>
+  </section>
+
+  <section id="config">
+    <h2>Minimal config</h2>
+    <pre><code>gateway:
+  device: /dev/meshcore0
+  baud: 115200
+  radio:
+    freq: 915.075
+    bw: 125
+    sf: 9
+    cr: 5
+
+scheduler:
+  sync_interval_days: 1
+  inter_node_delay_seconds: 120
+
+nodes:
+  - pubkey_prefix: aabbccdd
+    label: MyRepeater
+    default_policy: enforce
+    settings:
+      owner.info: "Managed by mch"</code></pre>
+    <p>
+      Run <code>mch contacts</code> to list repeater nodes visible to the gateway
+      that are not yet in your config, with pubkey prefixes ready to paste in.
+    </p>
+  </section>
+
+  <section id="cli">
+    <h2>CLI reference</h2>
+    <pre><code>mch status                   # fleet overview: state, label, group, firmware, neighbours, last seen
+mch status &lt;label|prefix&gt;   # one match: node detail; multiple: filtered table
+mch plan                     # desired-vs-known diff, no mesh traffic, no writes
+mch plan &lt;label|prefix&gt;     # filter to one node
+mch sync                     # sweep all nodes in background
+mch sync &lt;prefix&gt;           # sync one node now; CLI waits for the result
+mch contacts                 # nodes visible to the gateway but not yet in config
+mch exec &lt;node&gt; &lt;command&gt;   # run a raw MeshCore CLI command on a managed node
+mch commission               # commission a fresh or replacement node (interactive)
+mch logs                     # recent per-node activity across all nodes
+mch logs &lt;prefix&gt;           # activity for one node
+mch hint                     # suggested txdelay per node based on neighbour count
+mch hint &lt;label|prefix&gt;     # full suggestions + paste-ready config block</code></pre>
+  </section>
+
+  <section id="requirements">
+    <h2>Requirements</h2>
+    <ul>
+      <li>Python 3.11+</li>
+      <li>Linux — tested on Raspberry Pi OS and Ubuntu. macOS works for development.</li>
+      <li>A MeshCore node attached over USB serial (the gateway node).</li>
+      <li>One or more MeshCore repeater nodes reachable via the gateway.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  <p>
+    <a href="https://github.com/rdmarsh/meshherder">github.com/rdmarsh/meshherder</a>
+    &nbsp;&mdash;&nbsp;
+    MIT License
+  </p>
+  <p>meshherder.com</p>
+</footer>
+
+</body>
+</html>

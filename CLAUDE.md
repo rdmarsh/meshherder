@@ -49,7 +49,9 @@ mch node <name>   # show detail for one node
 
 ## Testing
 
-Sync code to `luna` and use `/dev/meshcore0` as the serial device. The management node on luna has favourited repeaters that can be used to bootstrap the initial device list.
+Use local unit tests for normal development. Live mesh testing needs a host with a USB-attached
+gateway node and a private `config.yaml`/`secrets.yaml`; do not commit operator config or generated
+node secrets.
 
 ## Architecture
 

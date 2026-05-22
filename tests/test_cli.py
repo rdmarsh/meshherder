@@ -553,9 +553,9 @@ def test_sync_single_node():
     assert "synced" in result.output
 
 
-# ------ hint ------
+# ------ suggest ------
 
-def _hint_node(label="site-a", name="Tower", count=5):
+def _suggest_node(label="site-a", name="Tower", count=5):
     return {
         "pubkey": "aabbccdd" * 8,
         "label": label,
@@ -568,8 +568,11 @@ def _hint_node(label="site-a", name="Tower", count=5):
     }
 
 
-def test_hint_table_multiple_nodes():
-    result = _run(["hint"], {"ok": True, "data": [_hint_node("site-a"), _hint_node("site-b")]})
+def test_suggest_table_multiple_nodes():
+    result = _run(
+        ["suggest"],
+        {"ok": True, "data": [_suggest_node("site-a"), _suggest_node("site-b")]},
+    )
     assert result.exit_code == 0
     assert result.output.lstrip().startswith("PUBKEY")
     assert "TXDELAY" in result.output
@@ -577,24 +580,24 @@ def test_hint_table_multiple_nodes():
     assert "site-a" in result.output
 
 
-def test_hint_detail_single_node():
-    result = _run(["hint", "site-a"], {"ok": True, "data": [_hint_node("site-a")]})
+def test_suggest_detail_single_node():
+    result = _run(["suggest", "site-a"], {"ok": True, "data": [_suggest_node("site-a")]})
     assert result.exit_code == 0
     assert "neighbours:" in result.output
     assert "rooftop" in result.output
     assert "config.yaml" in result.output
 
 
-def test_hint_no_neighbour_data():
-    node = _hint_node(count=None)
+def test_suggest_no_neighbour_data():
+    node = _suggest_node(count=None)
     node["profile"] = None
-    result = _run(["hint"], {"ok": True, "data": [node]})
+    result = _run(["suggest"], {"ok": True, "data": [node]})
     assert result.exit_code == 0
     assert "-" in result.output  # NBRS column shows dash
 
 
-def test_hint_no_nodes():
-    result = _run(["hint"], {"ok": True, "data": []})
+def test_suggest_no_nodes():
+    result = _run(["suggest"], {"ok": True, "data": []})
     assert result.exit_code == 0
     assert "no nodes" in result.output
 

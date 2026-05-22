@@ -63,7 +63,7 @@ db_path: /var/lib/mch/mch.db
 socket_path: /run/mch/mchd.sock
 secrets_file: /usr/local/etc/mch/secrets.yaml   # optional; defaults to secrets.yaml in the same directory as config.yaml
 
-# Profiles file for 'mch recommend'. Three options (in priority order):
+# Profiles file for 'mch suggest'. Three options (in priority order):
 #
 #   profiles_file: /usr/local/etc/mch/profiles.yaml   # use a local override file
 #   profiles_url:  https://example.com/profiles.yaml  # fetch on startup, cached 24h
@@ -85,7 +85,7 @@ facts:
   - owner.name   # operator name set on the node
   - lat          # latitude - stored per-node for network planning and mapping tools
   - lon          # longitude
-  - neighbors    # neighbour count - used by 'mch recommend' to suggest txdelay settings
+  - neighbors    # neighbour count - used by 'mch suggest' to suggest txdelay settings
 
 # Messenger: incoming DM commands and cycle announcements.
 messenger:

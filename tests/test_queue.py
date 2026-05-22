@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -28,6 +29,7 @@ from mch.models import (
     SettingPolicy,
 )
 from mch.queue import (
+    OperationBusyError,
     WorkQueue,
     all_setting_keys,
     get_unfiled_contacts,
@@ -158,6 +160,97 @@ async def db(tmp_path):
 def _contact(pubkey="aabbccdd1122", name="TestNode", type_=2, flags=0):
     # type_ 2=REP, 1=CLI
     return {"public_key": pubkey, "adv_name": name, "type": type_, "flags": flags}
+
+
+async def test_exec_command_returns_gateway_text(db):
+    contact = _contact("aabbccdd11223344")
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+
+    result = await wq.exec_command("aabbccdd11223344", "ver")
+
+    assert result == "v1.14.1"
+    gw.send_command.assert_awaited_once_with(contact, "ver", timeout=60)
+
+
+async def test_exec_command_raises_when_contact_missing(db):
+    wq = WorkQueue(_make_config(), _make_gateway(), db)
+    wq._contacts = []
+
+    with pytest.raises(ValueError, match="no gateway contact"):
+        await wq.exec_command("aabbccdd11223344", "ver")
+
+
+async def test_exec_command_raises_gateway_error(db):
+    contact = _contact("aabbccdd11223344")
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="denied"))
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+
+    with pytest.raises(ValueError, match="denied"):
+        await wq.exec_command("aabbccdd11223344", "ver")
+
+
+async def test_exec_command_fire_and_forget_timeout_returns_sent(db):
+    contact = _contact("aabbccdd11223344")
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+
+    result = await wq.exec_command("aabbccdd11223344", "reboot")
+
+    assert result == "(sent - no response expected)"
+
+
+async def test_exec_command_returns_busy_during_other_operation(db):
+    contact = _contact("aabbccdd11223344")
+    gw = _make_gateway()
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+
+    async with wq.operation("scheduled sync aabbccdd", wait=False):
+        with pytest.raises(OperationBusyError, match="busy: scheduled sync aabbccdd"):
+            await wq.exec_command("aabbccdd11223344", "ver")
+
+    gw.send_command.assert_not_awaited()
+
+
+async def test_work_queue_unfiled_contacts_uses_config_and_gateway(db):
+    cfg = _make_config([_node("aabbccdd")])
+    gw = _make_gateway(contacts=[
+        _contact("aabbccdd1122", name="Managed"),
+        _contact("ff001122aabb", name="NewREP"),
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    result = await wq.unfiled_contacts()
+
+    assert [c["adv_name"] for c in result] == ["NewREP"]
+
+
+async def test_start_cycle_rejects_duplicate_manual_cycle(db):
+    wq = WorkQueue(_make_config(), _make_gateway(), db)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_run_cycle_body():
+        started.set()
+        await release.wait()
+        return []
+
+    wq._run_cycle_body = fake_run_cycle_body  # type: ignore[method-assign]
+
+    assert await wq.start_cycle() == "sync started"
+    await started.wait()
+    with pytest.raises(OperationBusyError, match="busy: sync cycle"):
+        await wq.start_cycle()
+
+    release.set()
+    await wq._manual_cycle_task
 
 
 # ------------------------------------------------------------------

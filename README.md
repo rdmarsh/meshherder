@@ -20,11 +20,9 @@ Think Ansible for your nodes, running continuously in the background.
   mchd hops the gateway, manages the node, and restores the home frequency when done.
 - **Staggered scheduler** — nodes are spread randomly across the sync window so mchd restarts never
   cause a sync surge.
-- **DM commands** — You can send commands to mchd over the mesh from your MeshCore device. Useful
-  in the field: just replaced a node and want to bring it into compliance immediately? Send `sync
-  <pubkey>` as a direct message to the gateway from wherever you are on the mesh. Note: the
-  replacement node must already be in the gateway's contact store — a brand-new node won't be
-  reachable until its advertisement has been received and it has been added to config.
+- **DM commands** — authorised MeshCore devices can ask mchd for field status over the mesh:
+  `status`, `nodes`, `node <name-or-prefix>`, `issues`, and `logs [n]`. Optional channel
+  announcements can post a short cycle summary after each sync.
 - **Rate limiting** — mchd never talks to more than one node at a time. After finishing each node
   it waits `inter_node_delay_seconds` before starting the next (skipped if there is only one node
   in the run). Each node is visited at most once per `sync_interval_days`, spread randomly across
@@ -372,8 +370,8 @@ snippet, add it to config, and restart mchd. If the node needs a login password,
 ```
 mch status                  # fleet view: state, label, group, firmware, neighbours, last seen
 mch status <label|prefix>   # one match → detail view; multiple matches → filtered table
-mch hint                    # suggested txdelay for every node based on neighbour count
-mch hint <label|prefix>     # full suggestions + paste-ready config block
+mch suggest                    # suggested txdelay for every node based on neighbour count
+mch suggest <label|prefix>     # full suggestions + paste-ready config block
 mch contacts                # nodes visible to the gateway but not yet in config
 ```
 
@@ -387,11 +385,20 @@ mch sync           # sweep all nodes in the background
 Use `mch sync <prefix>` after editing a node's desired settings in config — it applies the changes
 immediately rather than waiting for the next scheduled cycle.
 
-### Adding a node in the field
+### Checking status in the field
 
-If you have replaced a node or commissioned a new one in the field, send a DM to the gateway from
-your MeshCore device: `sync <pubkey-prefix>`. mchd will sync that node immediately. The node must
-already be in your config and visible to the gateway; brand-new nodes need to have advertised first.
+Authorised MeshCore devices can send a DM to the gateway for lightweight status while away from the
+host:
+
+```text
+status
+nodes
+node <name-or-prefix>
+issues
+logs 10
+```
+
+Configure authorised sender prefixes under `messenger.allowed_prefixes` in `config.yaml`.
 
 ### Changing a setting fleet-wide
 
@@ -405,8 +412,8 @@ mch status                    Fleet overview: state, label, group, firmware, nei
 mch status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
 mch plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch plan <label|prefix>       Filter planned writes/audit drift/unknown values
-mch hint                      Suggested txdelay for all nodes based on neighbour count
-mch hint <label|prefix>       Full suggestions + paste-ready config block for one node
+mch suggest                      Suggested txdelay for all nodes based on neighbour count
+mch suggest <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes
 mch logs <prefix>             Activity for one node
 mch contacts                  Repeater nodes visible to the gateway not yet in config
