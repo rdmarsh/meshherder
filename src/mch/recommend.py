@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 _BUNDLED = Path(__file__).parent / "data" / "profiles.yaml"
 _CACHE = Path("/var/lib/mch/profiles.yaml")
-_DEFAULT_URL = "https://raw.githubusercontent.com/rdmarsh/mch/main/src/mch/data/profiles.yaml"
+_DEFAULT_URL = "https://raw.githubusercontent.com/rdmarsh/meshherder/main/src/mch/data/profiles.yaml"
 
 _CACHE_MAX_AGE_SECONDS = 86400  # 24 hours
 

@@ -6,8 +6,8 @@
 # commands across the mesh, and keeps each managed node in its declared desired state.
 # Think Ansible for your nodes — without needing SSH or IP connectivity to any of them.
 #
-# Project: https://github.com/rdmarsh/mch
-# Docs:    https://github.com/rdmarsh/mch#readme
+# Project: https://github.com/rdmarsh/meshherder
+# Docs:    https://github.com/rdmarsh/meshherder#readme
 #
 # Node passwords go in a separate secrets file (mode 0600).
 # See examples/secrets.example.yaml for format.
@@ -72,7 +72,7 @@ secrets_file: /usr/local/etc/mch/secrets.yaml   # optional; defaults to secrets.
 # The bundled default covers AU/NZ 915 MHz settings. Override if your region uses
 # different RF settings or you want to tune the neighbour-count thresholds.
 # profiles_file: /usr/local/etc/mch/profiles.yaml
-# profiles_url:  https://raw.githubusercontent.com/rdmarsh/mch/main/src/mch/data/profiles.yaml
+# profiles_url:  https://raw.githubusercontent.com/rdmarsh/meshherder/main/src/mch/data/profiles.yaml
 
 # Facts collected from every node each sync cycle (read-only CMDB data).
 # All fact commands run within a single node session; inter_node_delay_seconds
