@@ -64,6 +64,16 @@ class Messenger:
     def stop(self) -> None:
         self._gateway.set_dm_callback(None)
 
+    def update_config(self, allowed_prefixes: list[str], announce_channel: int | None) -> None:
+        """Apply messenger config changes loaded from YAML."""
+        self._allowed_prefixes = [p.lower() for p in allowed_prefixes]
+        self._announce_channel = announce_channel
+        log.info(
+            "messenger reconfigured — %d authorised prefix(es), announce_channel=%s",
+            len(self._allowed_prefixes),
+            self._announce_channel,
+        )
+
     # ------------------------------------------------------------------
     # incoming DM handler
     # ------------------------------------------------------------------

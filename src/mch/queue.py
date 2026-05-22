@@ -213,6 +213,16 @@ class WorkQueue:
         """Allow the queue to resume processing nodes."""
         self._paused.set()
 
+    async def refresh_config_state(self) -> None:
+        """Refresh gateway contacts and reseed DB metadata after config reload."""
+        self.pause()
+        try:
+            self._contacts = await self._gateway.get_contacts(managed_only=False)
+            await self._seed_from_config()
+            await self._seed_node_labels()
+        finally:
+            self.resume()
+
     async def _run_next_due(self, contacts: list[dict[str, Any]]) -> None:
         """Find the next due node, sleep until it's time, and process it."""
         node = await self._db.get_due_node()
@@ -679,6 +689,8 @@ class WorkQueue:
 
             checked += 1
             observed = (res.text or "").strip()
+            if key == "name" and observed:
+                node.name = observed
             is_drift = desired is not None and observed != desired
 
             setting = SettingRecord(
@@ -703,6 +715,8 @@ class WorkQueue:
                         drifted -= 1  # enforcement fixed it — don't count as residual drift
                         setting.drift = False
                         setting.observed = desired  # update observed to reflect the new value
+                        if key == "name" and desired:
+                            node.name = desired
                         setting.last_set = datetime.now(UTC)
                         await self._db.write_log(
                             pubkey, "INFO", f"set {key}={desired!r} (was {observed!r})"

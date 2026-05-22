@@ -217,6 +217,28 @@ async def test_cycle_enforces_drifted_setting(db):
     assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
 
 
+async def test_cycle_updates_db_name_when_name_is_enforced(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"name": SettingConfig(desired="New Name", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122", name="Old Advert")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="Old Name"),  # get name
+        CommandResult(success=True, text="ok"),        # set name New Name
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.name == "New Name"
+
+
 async def test_cycle_audit_does_not_set(db):
     node_cfg = _node(
         pubkey="aabbcc",

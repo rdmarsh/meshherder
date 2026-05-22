@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mch.config import Config, NodeSecrets
-from mch.daemon import _dispatch
+from mch.config import Config, NodeSecrets, load
+from mch.daemon import Daemon, _dispatch
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
 
@@ -131,6 +131,46 @@ async def test_status_dispatch_no_open_nodes_when_default_password(db, wq, confi
 
     assert resp["ok"] is True
     assert resp["data"]["open_nodes"] == []
+
+
+async def test_daemon_reload_updates_existing_config_object(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    secrets_path = tmp_path / "secrets.yaml"
+    config_path.write_text(
+        "secrets_file: secrets.yaml\n"
+        "nodes:\n"
+        "  - pubkey_prefix: aabbccdd\n"
+        "    label: old\n"
+    )
+    secrets_path.write_text("nodes:\n  aabbccdd: oldpass\n")
+    secrets_path.chmod(0o600)
+
+    config = load(config_path)
+    daemon = Daemon(config)
+    daemon._wq = MagicMock()
+    daemon._wq.refresh_config_state = AsyncMock()
+    daemon._messenger = MagicMock()
+
+    config_path.write_text(
+        "secrets_file: secrets.yaml\n"
+        "messenger:\n"
+        "  allowed_prefixes: [aabbccdd]\n"
+        "nodes:\n"
+        "  - pubkey_prefix: aabbccdd\n"
+        "    label: new\n"
+    )
+    secrets_path.write_text("nodes:\n  aabbccdd: newpass\n")
+
+    await daemon._reload_config("test")
+
+    assert daemon._config is config
+    assert config.nodes[0].label == "new"
+    assert config.secrets["aabbccdd"].password == "newpass"
+    daemon._wq.refresh_config_state.assert_awaited_once()
+    daemon._messenger.update_config.assert_called_once_with(
+        allowed_prefixes=["aabbccdd"],
+        announce_channel=None,
+    )
 
 
 async def test_node_dispatch_full_pubkey_returns_facts(db, wq, config):

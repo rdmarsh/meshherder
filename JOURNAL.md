@@ -214,3 +214,58 @@
   - Make group prompt sentinel clearer: `Group label [- for none]`.
   - After successful commissioning, say "Add snippets, restart/reload mchd, then run
     `mch status <prefix>` to inspect or `mch sync <prefix>` to force sync."
+
+## 2026-05-22 - Config Reload Direction
+
+- User concern: SQLite can look like a second source of truth when `config.yaml` is edited but the
+  running daemon still has old desired state in memory.
+- Decision:
+  - `config.yaml` and `secrets.yaml` remain the source of truth for desired state.
+  - SQLite remains observed/cache/history state: last seen, facts, command history, sync schedule.
+  - mchd should detect YAML file changes and reload desired state without an operator restart.
+- Implemented reload behaviour:
+  - `mchd` records the resolved config and secrets file paths.
+  - It polls file metadata every 10 seconds and also reloads on SIGHUP.
+  - On a valid reload, it updates the existing in-memory `Config` object, refreshes messenger
+    allow-list/channel config, refreshes gateway contacts, and reseeds DB labels/groups from YAML.
+  - On invalid YAML or validation failure, it logs the error and keeps the last valid config active.
+- Related fix:
+  - Relative `secrets_file: secrets.yaml` now resolves relative to the config file directory, not the
+    daemon's current working directory.
+
+## 2026-05-22 - Name Display After Sync
+
+- Live output showed `LABEL` updating from config while `NAME` still showed the node's old
+  mesh-visible advertised name.
+- Clarification:
+  - `LABEL` is local-only desired metadata from `config.yaml`.
+  - `NAME` is observed MeshCore state from the node/contact store.
+  - A config edit alone should not make `NAME` change; a sync must successfully apply
+    `settings.name.desired`.
+- Bug found:
+  - After a successful `set name ...`, mchd kept the old contact advertisement in the DB until a
+    later contact refresh.
+- Fix:
+  - While syncing, update the DB node name from `get name`.
+  - After successful `set name`, update the DB node name immediately to the desired value.
+- UI wording:
+  - Rename CLI display text from `NAME` to `MESH NAME` so it is distinct from the local-only
+    `LABEL`.
+
+## 2026-05-22 - Desired vs Known Safety Model
+
+- User concern:
+  - SQLite can feel like a second source of truth, but its real job is known/observed state.
+  - The tool must not accidentally clobber the mesh.
+- Model:
+  - YAML is desired state.
+  - SQLite is known state: observations, command results, history, schedule.
+  - CLI output should make that distinction visible (`LABEL` local desired metadata, `MESH NAME`
+    known mesh-visible state, settings table desired vs observed).
+- Safety gap found:
+  - `resolve_policy()` currently falls back to `ENFORCE`.
+  - A safer operator posture is global fallback `AUDIT`, with writes only after explicit
+    `policy: enforce` or `default_policy: enforce`.
+- Parked next step:
+  - Consider changing the fallback to audit and adding a plan/dry-run view before broad real-mesh
+    use.

@@ -18,6 +18,11 @@ This matches the Ansible model: declare intent in files (version-controllable, r
 the tool record what it observed. Wiping the DB loses history but not configuration — mchd
 rebuilds from config.yaml on the next startup.
 
+mchd watches `config.yaml` and `secrets.yaml` and reloads them shortly after a file save. Reloading
+keeps the existing daemon process and gateway connection alive, updates the in-memory desired
+state, refreshes gateway contacts, and reseeds DB labels/groups from config. Invalid YAML is logged
+and ignored; the last valid in-memory config remains active.
+
 ## Node identity
 
 **The public key is the stable node identity.** Names can change. Labels are local-only (in
@@ -52,10 +57,10 @@ decide what to add to config. It is a read-only informational command.
 
 ## config.yaml is operator-managed
 
-mchd reads config.yaml once at startup. It does not modify it. When `mch commission` provisions
-a new node, it prints ready-to-paste YAML snippets for both config.yaml and secrets.yaml — the
-operator copies them in, puts them in git, and restarts mchd (or waits for hot-reload, once
-implemented).
+mchd reads config.yaml at startup and on hot reload. It does not modify it. When `mch commission`
+provisions a new node, it prints ready-to-paste YAML snippets for both config.yaml and
+secrets.yaml — the operator copies them in, puts them in git, then waits for hot reload or sends
+SIGHUP to mchd.
 
 Reasons for this constraint:
 - Config files belong in version control. Auto-writes bypass review, diff, and commit history.
@@ -104,8 +109,8 @@ daemon never caches passwords in the DB.
 8. Prints paste-ready `config.yaml` and `secrets.yaml` snippets.
 9. Returns the queue to normal.
 
-The operator then adds the snippets to their config files and restarts mchd (or waits for
-hot-reload). This keeps mchd read-only with respect to config files.
+The operator then adds the snippets to their config files and waits for hot reload (or sends
+SIGHUP). This keeps mchd read-only with respect to config files.
 
 Live testing on a Heltec V3 running `v1.15.0-dee3e26` confirmed the intended new-node path:
 fresh flash, factory discovery, generated private key, reboot onto the test mesh frequency, and
@@ -119,8 +124,8 @@ direct serial verification that `public.key`, `prv.key`, name, and radio all mat
   to resolve them — either add to config (paste block) or remove from DB.
 - **Commission idempotency**: running `mch commission` on a node already in config/DB has
   undefined behaviour. Should detect and reject.
-- **Config hot-reload**: config.yaml and secrets.yaml are read once at startup. Adding a new
-  node or changing a password requires a daemon restart.
+- **Limited hot-reload scope**: node/group/secrets/messenger changes reload live. Gateway device,
+  socket path, and DB path changes still require a daemon restart.
 - **Factory reset notes**: for bench testing and replacement drills, documentation with the exact
   `esptool` erase/write commands is enough for now. This should stay outside normal sync and
   commissioning automation.

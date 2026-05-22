@@ -237,21 +237,41 @@ New findings from this recheck:
 
 ## Product / Operator Experience
 
-5. Implement the known lifecycle gaps from `DESIGN.md`.
+5. Make read-only/audit the default safety posture before wider use.
+
+   Current `resolve_policy()` falls back to `ENFORCE` when a setting has no explicit policy and no
+   node/group default. That is powerful but risky for an operator who expects mch to observe first.
+
+   Recommended direction:
+   - Change the global fallback to `AUDIT`.
+   - Require explicit `policy: enforce` or `default_policy: enforce` before mch writes a setting.
+   - Add a clear `mch plan` / dry-run view that shows desired vs known state and the exact writes a
+     sync would perform.
+   - Keep dangerous identity/radio/reset commands outside normal settings unless they are part of a
+     deliberate commissioning or replacement flow.
+
+   This fits the desired-vs-known model: YAML declares desired state, SQLite records known/observed
+   state, and writes should only happen where the operator opted in.
+
+6. Implement the known lifecycle gaps from `DESIGN.md`.
 
    The most useful next CLI additions are:
    - `mch forget <node>` to remove a DB ghost after a node is decommissioned.
-   - Config/secrets hot reload via SIGHUP or a socket command.
    - Commissioning idempotency checks that reject nodes already present in config or DB.
 
-6. Reconcile DM command docs with implementation.
+   Done:
+   - Config/secrets hot reload via file polling and SIGHUP. A socket/CLI `mch reload` command may
+     still be useful later for operator feedback, but daemon restart is no longer required for
+     normal node/group/secrets edits.
+
+7. Reconcile DM command docs with implementation.
 
    The README says a field operator can send `sync <pubkey>` by DM, but
    `Messenger._handle_command()` currently returns `sync: not supported over DM`. Either implement
    DM-triggered sync through the work queue with the same authorization model, or update the README
    and feature list to avoid promising it.
 
-7. Rename or alias `mch hint` consistently.
+8. Rename or alias `mch hint` consistently.
 
    Docs and examples still refer to "recommend" in places (`profiles_file` comments and the module
    name), while the CLI command is `hint`. Consider adding `mch recommend` as an alias or standardize
