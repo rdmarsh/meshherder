@@ -65,16 +65,16 @@ pip install -e ".[dev]"
 Clone to a permanent location, create a venv, and install into it:
 
 ```bash
-sudo git clone https://github.com/rdmarsh/meshherder /opt/mch
-sudo python3 -m venv /opt/mch/.venv
-sudo /opt/mch/.venv/bin/pip install /opt/mch
+sudo git clone https://github.com/rdmarsh/meshherder /opt/meshherder
+sudo python3 -m venv /opt/meshherder/.venv
+sudo /opt/meshherder/.venv/bin/pip install /opt/meshherder
 ```
 
 Symlink the binaries onto the system PATH so the service file works as-is:
 
 ```bash
-sudo ln -sf /opt/mch/.venv/bin/mchd /usr/local/bin/mchd
-sudo ln -sf /opt/mch/.venv/bin/mch  /usr/local/bin/mch
+sudo ln -sf /opt/meshherder/.venv/bin/mchd /usr/local/bin/mchd
+sudo ln -sf /opt/meshherder/.venv/bin/mch  /usr/local/bin/mch
 ```
 
 #### Create the system user and directories
@@ -87,14 +87,14 @@ sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
 sudo usermod -aG dialout mch
 
 # Config directory
-sudo install -d -o root -g mch -m 750 /usr/local/etc/mch
+sudo install -d -o root -g mch -m 750 /etc/meshherder
 
 # Config and secrets
-sudo install -o mch -g mch -m 640 examples/config.example.yaml /usr/local/etc/mch/config.yaml
-sudo install -o mch -g mch -m 600 examples/secrets.example.yaml /usr/local/etc/mch/secrets.yaml
+sudo install -o mch -g mch -m 640 examples/config.example.yaml /etc/meshherder/config.yaml
+sudo install -o mch -g mch -m 600 examples/secrets.example.yaml /etc/meshherder/secrets.yaml
 
 # Database directory
-sudo install -d -o mch -g mch -m 755 /var/lib/mch
+sudo install -d -o mch -g mch -m 755 /var/lib/meshherder
 ```
 
 #### Add yourself to the mch group
@@ -192,11 +192,11 @@ sudo udevadm control --reload-rules
 ls -l /dev/meshcore0
 ```
 
-Set the `device` path in `/usr/local/etc/mch/config.yaml` to `/dev/meshcore0`.
+Set the `device` path in `/etc/meshherder/config.yaml` to `/dev/meshcore0`.
 
 ## Configuration
 
-Copy `examples/config.example.yaml` to `/usr/local/etc/mch/config.yaml` and edit it. The example file
+Copy `examples/config.example.yaml` to `/etc/meshherder/config.yaml` and edit it. The example file
 documents every available option with comments.
 
 `config.yaml` and `secrets.yaml` are the source of truth for desired state. The SQLite database is
@@ -490,7 +490,7 @@ In this case `reboot` timed out because the node rebooted before it could reply 
 ## Upgrading
 
 ```bash
-cd /opt/mch
+cd /opt/meshherder
 sudo git pull
 source .venv/bin/activate
 pip install .

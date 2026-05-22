@@ -155,8 +155,8 @@ class Config:
     groups: list[GroupConfig] = field(default_factory=list)
     messenger: MessengerConfig = field(default_factory=MessengerConfig)
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
-    db_path: str = "/var/lib/mch/mch.db"
-    socket_path: str = "/run/mch/mchd.sock"
+    db_path: str = "/var/lib/meshherder/mch.db"
+    socket_path: str = "/run/meshherder/mchd.sock"
     secrets: dict[str, NodeSecrets] = field(default_factory=dict)  # pubkey_prefix -> NodeSecrets
     # profiles_url: fetch profiles.yaml from this URL on startup (cached 24h)
     profiles_url: str | None = None
@@ -190,8 +190,8 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     cfg = Config(
         gateway=GatewayConfig(**gw_raw, radio=gw_radio),
         scheduler=SchedulerConfig(**sched_raw),
-        db_path=raw.get("db_path", "/var/lib/mch/mch.db"),
-        socket_path=raw.get("socket_path", "/run/mch/mchd.sock"),
+        db_path=raw.get("db_path", "/var/lib/meshherder/mch.db"),
+        socket_path=raw.get("socket_path", "/run/meshherder/mchd.sock"),
         facts=[str(f) for f in facts_raw],
         nodes=[_parse_node(n, f"nodes[{i}]") for i, n in enumerate(nodes_raw)],
         groups=[_parse_group(g, f"groups[{i}]") for i, g in enumerate(groups_raw)],

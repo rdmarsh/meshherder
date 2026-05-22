@@ -13,7 +13,7 @@ import yaml
 log = logging.getLogger(__name__)
 
 _BUNDLED = Path(__file__).parent / "data" / "profiles.yaml"
-_CACHE = Path("/var/lib/mch/profiles.yaml")
+_CACHE = Path("/var/lib/meshherder/profiles.yaml")
 _DEFAULT_URL = "https://raw.githubusercontent.com/rdmarsh/meshherder/main/src/mch/data/profiles.yaml"
 
 _CACHE_MAX_AGE_SECONDS = 86400  # 24 hours
@@ -59,7 +59,7 @@ def load_profiles(
 
     Resolution order:
     1. profiles_file if given (explicit operator override)
-    2. Cache at /var/lib/mch/profiles.yaml if fresh (< 24h)
+    2. Cache at /var/lib/meshherder/profiles.yaml if fresh (< 24h)
     3. profiles_url if given — fetch, write cache, use it
     4. Bundled default
     """
