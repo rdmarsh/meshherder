@@ -401,6 +401,96 @@ def test_status_filtered_footer_says_shown():
     assert "2 of 3 nodes shown" in result.output
 
 
+# ------ plan ------
+
+def _plan_resp(writes=None, audits=None, unknown=None):
+    return {"ok": True, "data": {
+        "writes": writes or [],
+        "audits": audits or [],
+        "unknown": unknown or [],
+    }}
+
+
+def test_plan_shows_enforced_writes():
+    result = _run(["plan"], _plan_resp(writes=[{
+        "pubkey": "aabbccdd" * 8,
+        "label": "site-a",
+        "mesh_name": "Tower",
+        "key": "name",
+        "known": "Old",
+        "desired": "New",
+        "policy": "enforce",
+        "command": "set name New",
+    }]))
+
+    assert result.exit_code == 0
+    assert "planned writes" in result.output
+    assert "set name New" in result.output
+    assert "site-a" in result.output
+
+
+def test_plan_shows_audit_drift_without_write():
+    result = _run(["plan"], _plan_resp(audits=[{
+        "pubkey": "aabbccdd" * 8,
+        "label": "site-a",
+        "mesh_name": "Tower",
+        "key": "owner.info",
+        "known": "old",
+        "desired": "new",
+        "policy": "audit",
+    }]))
+
+    assert result.exit_code == 0
+    assert "audit drift" in result.output
+    assert "owner.info" in result.output
+    assert "set owner.info" not in result.output
+
+
+def test_plan_shows_unknown_values():
+    result = _run(["plan"], _plan_resp(unknown=[{
+        "pubkey": "aabbccdd" * 8,
+        "label": "site-a",
+        "mesh_name": "Tower",
+        "key": "name",
+        "known": None,
+        "desired": "New",
+        "policy": "enforce",
+        "reason": "no known value; sync must read first",
+    }]))
+
+    assert result.exit_code == 0
+    assert "needs observation" in result.output
+    assert "sync must read first" in result.output
+
+
+def test_plan_filters_by_query():
+    result = _run(["plan", "site-b"], _plan_resp(writes=[
+        {
+            "pubkey": "aabbccdd" * 8,
+            "label": "site-a",
+            "mesh_name": "Tower A",
+            "key": "name",
+            "known": "Old",
+            "desired": "New",
+            "policy": "enforce",
+            "command": "set name New",
+        },
+        {
+            "pubkey": "11223344" * 8,
+            "label": "site-b",
+            "mesh_name": "Tower B",
+            "key": "name",
+            "known": "Old B",
+            "desired": "New B",
+            "policy": "enforce",
+            "command": "set name New B",
+        },
+    ]))
+
+    assert "site-b" in result.output
+    assert "site-a" not in result.output
+
+
 # ------ logs ------
 
 def test_logs_no_entries():

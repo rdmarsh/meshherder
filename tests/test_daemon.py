@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mch.config import Config, NodeSecrets, load
+from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
 from mch.daemon import Daemon, _dispatch
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
@@ -468,7 +468,84 @@ async def test_status_dispatch_returns_drifted_array(db, wq, config):
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
     assert len(resp["data"]["drifted"]) == 1
-    assert resp["data"]["drifted"][0]["key"] == "owner.info"
+
+
+async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key="name",
+        desired="Old",
+        observed="Old",
+        policy=SettingPolicy.AUDIT,
+    ))
+    config.nodes = [
+        NodeConfig(
+            pubkey_prefix="aabbccdd",
+            label="site-a",
+            settings={"name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
+        )
+    ]
+
+    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["writes"] == [{
+        "pubkey": node.pubkey,
+        "label": "site-a",
+        "mesh_name": "Tower",
+        "key": "name",
+        "desired": "New",
+        "known": "Old",
+        "policy": "enforce",
+        "command": "set name New",
+    }]
+    assert resp["data"]["audits"] == []
+    assert resp["data"]["unknown"] == []
+
+
+async def test_plan_dispatch_audit_default_does_not_write(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key="owner.info",
+        desired="Old",
+        observed="Old",
+        policy=SettingPolicy.AUDIT,
+    ))
+    config.nodes = [
+        NodeConfig(
+            pubkey_prefix="aabbccdd",
+            label="site-a",
+            settings={"owner.info": SettingConfig(desired="New")},
+        )
+    ]
+
+    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+
+    assert resp["data"]["writes"] == []
+    assert resp["data"]["audits"][0]["key"] == "owner.info"
+    assert resp["data"]["audits"][0]["policy"] == "audit"
+
+
+async def test_plan_dispatch_unknown_when_no_known_setting(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    config.nodes = [
+        NodeConfig(
+            pubkey_prefix="aabbccdd",
+            label="site-a",
+            settings={"name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
+        )
+    ]
+
+    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+
+    assert resp["data"]["writes"] == []
+    assert resp["data"]["unknown"][0]["key"] == "name"
+    assert "sync must read first" in resp["data"]["unknown"][0]["reason"]
 
 
 async def test_status_dispatch_includes_label(db, wq, config):

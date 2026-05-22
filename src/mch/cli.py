@@ -394,6 +394,20 @@ def _filter_drift(drifted: list[dict[str, Any]], query: str | None) -> list[dict
     ]
 
 
+def _filter_plan_items(items: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
+    """Filter plan items by pubkey prefix, label, mesh name, or setting key."""
+    if not query:
+        return items
+    q = query.lower()
+    return [
+        item for item in items
+        if (item.get("pubkey") or "").startswith(query)
+        or q in (item.get("label") or "").lower()
+        or q in (item.get("mesh_name") or "").lower()
+        or q in (item.get("key") or "").lower()
+    ]
+
+
 def _filter_ghosts(ghosts: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
     """Filter ghost config entries by pubkey_prefix or label substring."""
     if not query:
@@ -616,6 +630,90 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
     )
     data = _check(resp)
     click.echo(data)
+
+
+# ---------------------------------------------------------------------------
+# plan
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("query", required=False, default=None)
+@click.pass_context
+def plan(ctx: click.Context, query: str | None) -> None:
+    """Show desired-vs-known changes without sending mesh commands."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "plan"})
+    data = _check(resp)
+    writes = _filter_plan_items(data.get("writes", []), query)
+    audits = _filter_plan_items(data.get("audits", []), query)
+    unknown = _filter_plan_items(data.get("unknown", []), query)
+
+    if not writes and not audits and not unknown:
+        click.echo(f"no planned changes matching '{query}'" if query else "no planned writes")
+        return
+
+    def _value(value: Any, width: int = 18) -> str:
+        if value is None or value == "":
+            return "-"
+        text = str(value)
+        return text if _wlen(text) <= width else text[: max(0, width - 1)] + "…"
+
+    def _label(item: dict[str, Any]) -> str:
+        return item.get("label") or item.get("mesh_name") or "-"
+
+    def _label_width(items: list[dict[str, Any]]) -> int:
+        return max(_wlen("LABEL"), max((_wlen(_label(item)) for item in items), default=0))
+
+    if writes:
+        click.echo("planned writes (next sync would enforce):")
+        node_w = _label_width(writes)
+        fmt = "  {:<12}  {}  {:<22}  {:<18}  {:<18}  {}"
+        click.echo(fmt.format(
+            "PUBKEY", _wpad("LABEL", node_w), "KEY", "KNOWN", "DESIRED", "COMMAND"
+        ))
+        click.echo(fmt.format(
+            "------", _wpad("-----", node_w), "---", "-----", "-------", "-------"
+        ))
+        for item in writes:
+            click.echo(fmt.format(
+                _pk(item.get("pubkey")),
+                _wpad(_label(item), node_w),
+                item["key"][:22],
+                _value(item.get("known")),
+                _value(item.get("desired")),
+                item.get("command") or "-",
+            ))
+        click.echo("")
+
+    if audits:
+        click.echo("audit drift (no write):")
+        node_w = _label_width(audits)
+        fmt = "  {:<12}  {}  {:<22}  {:<18}  {:<18}"
+        click.echo(fmt.format("PUBKEY", _wpad("LABEL", node_w), "KEY", "KNOWN", "DESIRED"))
+        click.echo(fmt.format("------", _wpad("-----", node_w), "---", "-----", "-------"))
+        for item in audits:
+            click.echo(fmt.format(
+                _pk(item.get("pubkey")),
+                _wpad(_label(item), node_w),
+                item["key"][:22],
+                _value(item.get("known")),
+                _value(item.get("desired")),
+            ))
+        click.echo("")
+
+    if unknown:
+        click.echo("needs observation (no known value yet):")
+        node_w = _label_width(unknown)
+        fmt = "  {:<12}  {}  {:<22}  {:<18}  {}"
+        click.echo(fmt.format("PUBKEY", _wpad("LABEL", node_w), "KEY", "DESIRED", "REASON"))
+        click.echo(fmt.format("------", _wpad("-----", node_w), "---", "-------", "------"))
+        for item in unknown:
+            click.echo(fmt.format(
+                _pk(item.get("pubkey")),
+                _wpad(_label(item), node_w),
+                (item.get("key") or "-")[:22],
+                _value(item.get("desired")),
+                item.get("reason") or "-",
+            ))
 
 
 # ---------------------------------------------------------------------------

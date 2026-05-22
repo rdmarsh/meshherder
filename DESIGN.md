@@ -86,6 +86,10 @@ The global setting policy fallback is `audit`. A desired setting is read and com
 but mchd only writes to a node when the setting, node, or group explicitly opts in with
 `policy: enforce` or `default_policy: enforce`.
 
+`mch plan` is read-only. It compares YAML desired state with the DB's known state and shows:
+planned writes for enforced drift, audit drift that will not write, and values that must be
+observed by a sync before a write can be predicted. It does not send mesh commands.
+
 ## Authentication
 
 MeshCore nodes require login before accepting CLI commands. After the first successful login, the
