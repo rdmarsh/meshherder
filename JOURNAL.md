@@ -88,8 +88,9 @@ details, node identities, generated private keys, local hostnames, or operator p
   - `set advert.interval {minutes}`
   - `set flood.advert.interval {hours}`
   - `set radio {freq},{bw},{sf},{cr}` requires reboot to apply
-  - `region put`, `region allowf`, and `region save` are raw region-management commands, not
-    `set <key> <value>` settings
+  - `region put` and `region save` are raw region-management commands, not `set <key> <value>`
+    settings
+  - For MeshCore v1.15.0 and newer, `region allowf` is no longer required after `region put`
 - After successful `set name`, the DB node name is updated immediately to avoid stale display.
 
 ## 2026-05-22 - Desired vs Known Safety Model

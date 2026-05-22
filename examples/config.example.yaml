@@ -226,17 +226,13 @@ nodes:
       # Region commands are raw CLI operations, not normal `set <key> <value>`
       # settings. Use a long interval if these are one-time commissioning
       # commands that should not be repeated in normal operation.
+      # MeshCore v1.15.0 and newer do not need matching `region allowf`
+      # commands; `region put` plus `region save` is enough.
       - command: region put au
         every_hours: 87600   # 10 years
-      - command: region allowf au
-        every_hours: 87600
       - command: region put au-nsw
         every_hours: 87600
-      - command: region allowf au-nsw
-        every_hours: 87600
       - command: region put au-nsw-syd
-        every_hours: 87600
-      - command: region allowf au-nsw-syd
         every_hours: 87600
       - command: region save
         every_hours: 87600
