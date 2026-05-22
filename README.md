@@ -54,7 +54,7 @@ Think Ansible for your nodes, running continuously in the background.
 
 ```bash
 git clone https://github.com/rdmarsh/meshherder
-cd mch
+cd meshherder
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
