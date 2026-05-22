@@ -125,6 +125,23 @@ New findings from this recheck:
     - Give the operator explicit recovery guidance: reboot/wait, retry with managed credentials, or
       erase/reflash for a true factory reset.
 
+34. Add stale/lost node handling and explicit DB pruning.
+
+    Nodes removed from `config.yaml` currently remain in the SQLite database and still appear in
+    `mch status`, although the scheduler no longer syncs them. Add an explicit cleanup flow rather
+    than deleting automatically on config removal:
+
+    - `mch prune`: list DB nodes no longer present in config and ask before deleting local state.
+    - `mch remove <node>`: remove one retired node from DB state; refuse if still present in
+      `config.yaml` unless `--force` is supplied.
+    - Delete related facts, settings, operations, and logs with the node row.
+    - Keep gateway contact/favourite cleanup separate at first.
+
+    Also add a stale/lost status tier for nodes not seen for a long time. Prefer a configurable
+    threshold under `scheduler` or a future `status` section, with a conservative default such as
+    `lost_after_days: 30`. Display old nodes as `lost` with a capped age such as `>99d ago` rather
+    than letting very large day counts dominate the table.
+
 30. Document the bench reset/reflash commands.
 
     A separate "reset node to factory" command is not needed yet. A short operator note with the
