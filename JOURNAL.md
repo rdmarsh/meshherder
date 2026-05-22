@@ -266,6 +266,8 @@
   - `resolve_policy()` currently falls back to `ENFORCE`.
   - A safer operator posture is global fallback `AUDIT`, with writes only after explicit
     `policy: enforce` or `default_policy: enforce`.
+- Implemented:
+  - Changed global fallback to `AUDIT`.
+  - A desired setting with no explicit policy now reports drift but does not write.
 - Parked next step:
-  - Consider changing the fallback to audit and adding a plan/dry-run view before broad real-mesh
-    use.
+  - Add a plan/dry-run view before broad real-mesh use.

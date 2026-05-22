@@ -239,12 +239,12 @@ New findings from this recheck:
 
 5. Make read-only/audit the default safety posture before wider use.
 
-   Current `resolve_policy()` falls back to `ENFORCE` when a setting has no explicit policy and no
-   node/group default. That is powerful but risky for an operator who expects mch to observe first.
+   Done:
+   - `resolve_policy()` now falls back to `AUDIT` when a setting has no explicit policy and no
+     node/group default.
+   - Desired settings without an explicit enforce policy now report drift but do not write.
 
-   Recommended direction:
-   - Change the global fallback to `AUDIT`.
-   - Require explicit `policy: enforce` or `default_policy: enforce` before mch writes a setting.
+   Remaining direction:
    - Add a clear `mch plan` / dry-run view that shows desired vs known state and the exact writes a
      sync would perform.
    - Keep dangerous identity/radio/reset commands outside normal settings unless they are part of a

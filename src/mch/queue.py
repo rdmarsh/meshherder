@@ -51,7 +51,7 @@ def resolve_policy(
     key: str,
     node_cfg: NodeConfig,
     group_cfg: GroupConfig | None,
-    global_default: SettingPolicy = SettingPolicy.ENFORCE,
+    global_default: SettingPolicy = SettingPolicy.AUDIT,
 ) -> SettingPolicy:
     """
     Return the effective policy for a setting key on a node.
@@ -61,7 +61,7 @@ def resolve_policy(
       2. Group setting_overrides for this key
       3. Node default_policy
       4. Group default_policy
-      5. global_default (ENFORCE)
+      5. global_default (AUDIT)
     """
     # 1. per-node setting override
     node_setting = node_cfg.settings.get(key)
