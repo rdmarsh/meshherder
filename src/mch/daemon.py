@@ -29,8 +29,8 @@ from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
-from mch.models import NodeState
-from mch.queue import WorkQueue
+from mch.models import NodeState, SettingPolicy
+from mch.queue import WorkQueue, all_setting_keys, resolve_desired, resolve_policy
 
 log = logging.getLogger(__name__)
 
@@ -267,6 +267,60 @@ async def _dispatch(
         if not cmd_result.success:
             return {"ok": False, "error": cmd_result.error or "no response"}
         return {"ok": True, "data": cmd_result.text or "(ok)"}
+
+    if cmd == "plan":
+        nodes = await db.get_all_nodes()
+        groups = {g.name: g for g in config.groups}
+
+        writes: list[dict[str, Any]] = []
+        audits: list[dict[str, Any]] = []
+        unknown: list[dict[str, Any]] = []
+
+        for node_cfg in config.nodes:
+            node = next((n for n in nodes if n.pubkey.startswith(node_cfg.pubkey_prefix)), None)
+            if node is None:
+                unknown.append({
+                    "pubkey": node_cfg.pubkey_prefix,
+                    "label": node_cfg.label,
+                    "mesh_name": "",
+                    "key": "",
+                    "desired": None,
+                    "known": None,
+                    "policy": "",
+                    "reason": "node not known to gateway/DB",
+                })
+                continue
+
+            group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
+            known_settings = {s.key: s for s in await db.get_settings(node.pubkey)}
+
+            for key in sorted(all_setting_keys(node_cfg, group_cfg)):
+                policy = resolve_policy(key, node_cfg, group_cfg)
+                desired = resolve_desired(key, node_cfg, group_cfg)
+                if policy == SettingPolicy.SKIP or desired is None:
+                    continue
+
+                known = known_settings.get(key)
+                item = {
+                    "pubkey": node.pubkey,
+                    "label": node.label,
+                    "mesh_name": node.name,
+                    "key": key,
+                    "desired": desired,
+                    "known": known.observed if known else None,
+                    "policy": policy.value,
+                }
+
+                if known is None or known.observed is None:
+                    unknown.append({**item, "reason": "no known value; sync must read first"})
+                elif known.observed == desired:
+                    continue
+                elif policy == SettingPolicy.ENFORCE:
+                    writes.append({**item, "command": f"set {key} {desired}"})
+                elif policy == SettingPolicy.AUDIT:
+                    audits.append(item)
+
+        return {"ok": True, "data": {"writes": writes, "audits": audits, "unknown": unknown}}
 
     if cmd == "contacts":
         from mch.queue import get_unfiled_contacts

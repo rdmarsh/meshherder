@@ -403,6 +403,8 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 ```
 mch status                    Fleet overview: state, label, group, firmware, neighbours, last seen
 mch status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
+mch plan                      Desired-vs-known changes; no mesh traffic and no writes
+mch plan <label|prefix>       Filter planned writes/audit drift/unknown values
 mch hint                      Suggested txdelay for all nodes based on neighbour count
 mch hint <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes

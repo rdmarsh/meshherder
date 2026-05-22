@@ -282,3 +282,15 @@
 - Removed `/usr/local/etc/mch` from `ReadWritePaths`.
 - Updated comments to make the contract explicit: mchd reads operator-owned config files and never
   writes them.
+
+## 2026-05-22 - Plan Command
+
+- Added `mch plan` as a read-only desired-vs-known view.
+- It does not touch the mesh. It uses config/secrets already loaded by mchd and known values in the
+  SQLite DB.
+- Output groups:
+  - Planned writes: settings with explicit/enherited `enforce`, known drift, and a concrete `set`
+    command that the next sync would attempt.
+  - Audit drift: known drift under `audit`, explicitly no write.
+  - Needs observation: configured desired values where the DB has no known value yet, so a sync must
+    read before a write can be predicted.

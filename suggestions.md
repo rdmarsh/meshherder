@@ -245,10 +245,12 @@ New findings from this recheck:
    - Desired settings without an explicit enforce policy now report drift but do not write.
 
    Remaining direction:
-   - Add a clear `mch plan` / dry-run view that shows desired vs known state and the exact writes a
-     sync would perform.
    - Keep dangerous identity/radio/reset commands outside normal settings unless they are part of a
      deliberate commissioning or replacement flow.
+
+   Done:
+   - Added `mch plan` as a read-only desired-vs-known view. It shows enforced writes, audit drift,
+     and values that need observation before a write can be predicted.
 
    This fits the desired-vs-known model: YAML declares desired state, SQLite records known/observed
    state, and writes should only happen where the operator opted in.
