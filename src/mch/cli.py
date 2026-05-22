@@ -83,7 +83,7 @@ def _check(resp: dict[str, Any]) -> Any:
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(package_name="mch")
+@click.version_option(package_name="meshherder")
 @click.option(
     "--socket", "-s",
     default=DEFAULT_SOCKET,
@@ -474,13 +474,13 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# hint
+# suggest
 # ---------------------------------------------------------------------------
 
 @cli.command()
 @click.argument("query", required=False)
 @click.pass_context
-def hint(ctx: click.Context, query: str | None) -> None:
+def suggest(ctx: click.Context, query: str | None) -> None:
     """Show suggested settings based on each node's neighbour count.
 
     QUERY: pubkey prefix, label substring, or name substring. Omit to show all nodes.
@@ -492,7 +492,11 @@ def hint(ctx: click.Context, query: str | None) -> None:
     Requires 'neighbors' in the facts: list in config.yaml and at least
     one completed sync cycle to populate the neighbour count.
     """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "hint"})
+    _show_suggestions(ctx, query)
+
+
+def _show_suggestions(ctx: click.Context, query: str | None) -> None:
+    resp = _rpc(ctx.obj["socket"], {"cmd": "suggest"})
     all_data = _check(resp)
     data = _filter_nodes(all_data, query)
 
@@ -505,12 +509,12 @@ def hint(ctx: click.Context, query: str | None) -> None:
         return
 
     if len(data) == 1:
-        _hint_detail(data[0])
+        _suggest_detail(data[0])
     else:
-        _hint_table(data)
+        _suggest_table(data)
 
 
-def _hint_table(data: list[dict[str, Any]]) -> None:
+def _suggest_table(data: list[dict[str, Any]]) -> None:
     label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in data), default=0))
 
     row = "  {:<12}  {}  {:<4}  {:<7}  {}"
@@ -528,7 +532,7 @@ def _hint_table(data: list[dict[str, Any]]) -> None:
         ))
 
 
-def _hint_detail(n: dict[str, Any]) -> None:
+def _suggest_detail(n: dict[str, Any]) -> None:
     count = n["neighbour_count"]
     profile = n["profile"]
 

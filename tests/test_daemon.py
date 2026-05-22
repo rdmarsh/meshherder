@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,6 +11,18 @@ from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
 from mch.daemon import Daemon, _dispatch
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
+from mch.queue import OperationBusyError
+
+
+@asynccontextmanager
+async def _operation_ok(*args, **kwargs):
+    yield
+
+
+@asynccontextmanager
+async def _operation_busy(*args, **kwargs):
+    raise OperationBusyError("busy: scheduled sync aabbccdd")
+    yield
 
 
 @pytest.fixture
@@ -25,6 +38,10 @@ def wq():
     m = MagicMock()
     m.run_node = AsyncMock()
     m.run_cycle = AsyncMock()
+    m.start_cycle = AsyncMock(return_value="sync started")
+    m.operation = MagicMock(side_effect=_operation_ok)
+    m.exec_command = AsyncMock(return_value="(ok)")
+    m.unfiled_contacts = AsyncMock(return_value=[])
     return m
 
 
@@ -267,39 +284,39 @@ async def test_logs_dispatch_ambiguous_returns_error(db, wq, config):
     assert "ambiguous" in resp["error"]
 
 
-async def test_hint_dispatch_label_match(db, wq, config):
-    """hint command should match by label when pubkey prefix lookup fails."""
+async def test_suggest_dispatch_label_match(db, wq, config):
+    """suggest command should match by label when pubkey prefix lookup fails."""
     node = Node(
         pubkey="aabbccdd" * 8, name="Tower Node", label="QH Test", state=NodeState.CONFIGURED
     )
     await db.upsert_node(node)
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="5"))
 
-    resp = await _dispatch({"cmd": "hint", "pubkey": "QH Test"}, wq, db, config)
+    resp = await _dispatch({"cmd": "suggest", "pubkey": "QH Test"}, wq, db, config)
     assert resp["ok"] is True
     assert len(resp["data"]) == 1
     assert resp["data"][0]["label"] == "QH Test"
 
 
-async def test_hint_dispatch_all_nodes_when_no_pubkey(db, wq, config):
-    """hint with no pubkey returns all nodes."""
+async def test_suggest_dispatch_all_nodes_when_no_pubkey(db, wq, config):
+    """suggest with no pubkey returns all nodes."""
     node1 = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     node2 = Node(pubkey="11223344" * 8, name="Valley", label="site-b", state=NodeState.CONFIGURED)
     await db.upsert_node(node1)
     await db.upsert_node(node2)
 
-    resp = await _dispatch({"cmd": "hint"}, wq, db, config)
+    resp = await _dispatch({"cmd": "suggest"}, wq, db, config)
     assert resp["ok"] is True
     assert len(resp["data"]) == 2
 
 
-async def test_hint_dispatch_includes_profile_when_neighbors_known(db, wq, config):
-    """hint assigns a profile when neighbors fact is present."""
+async def test_suggest_dispatch_includes_profile_when_neighbors_known(db, wq, config):
+    """suggest assigns a profile when neighbors fact is present."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="25"))
 
-    resp = await _dispatch({"cmd": "hint"}, wq, db, config)
+    resp = await _dispatch({"cmd": "suggest"}, wq, db, config)
     assert resp["ok"] is True
     item = resp["data"][0]
     assert item["neighbour_count"] == 25
@@ -307,12 +324,12 @@ async def test_hint_dispatch_includes_profile_when_neighbors_known(db, wq, confi
     assert item["profile"]["name"] is not None  # e.g. "tower"
 
 
-async def test_hint_dispatch_profile_none_when_no_neighbors(db, wq, config):
-    """hint neighbour_count is None when fact not yet collected."""
+async def test_suggest_dispatch_profile_none_when_no_neighbors(db, wq, config):
+    """suggest neighbour_count is None when fact not yet collected."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
 
-    resp = await _dispatch({"cmd": "hint"}, wq, db, config)
+    resp = await _dispatch({"cmd": "suggest"}, wq, db, config)
     assert resp["ok"] is True
     assert resp["data"][0]["neighbour_count"] is None
 
@@ -326,7 +343,18 @@ async def test_sync_dispatch_no_prefix_starts_background_cycle(db, wq, config):
     resp = await _dispatch({"cmd": "sync"}, wq, db, config)
     assert resp["ok"] is True
     assert "sync started" in resp["data"]
-    wq.run_cycle.assert_called_once()
+    wq.start_cycle.assert_called_once()
+    wq.run_cycle.assert_not_called()
+
+
+async def test_sync_dispatch_no_prefix_busy_returns_error(db, wq, config):
+    """sync without a prefix returns busy when another gateway operation owns the queue."""
+    wq.start_cycle = AsyncMock(side_effect=OperationBusyError("busy: scheduled sync aabbccdd"))
+
+    resp = await _dispatch({"cmd": "sync"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "busy" in resp["error"]
 
 
 async def test_sync_dispatch_with_prefix_runs_node(db, wq, config):
@@ -341,6 +369,16 @@ async def test_sync_dispatch_with_prefix_runs_node(db, wq, config):
     assert resp["ok"] is True
     assert "Tower" in resp["data"]
     wq.run_node.assert_awaited_once_with("aabbcc")
+
+
+async def test_sync_dispatch_with_prefix_busy_returns_error(db, wq, config):
+    """forced node sync returns busy when another gateway operation is active."""
+    wq.run_node = AsyncMock(side_effect=OperationBusyError("busy: commission"))
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "busy" in resp["error"]
 
 
 async def test_sync_dispatch_bad_prefix_returns_error(db, wq, config):
@@ -360,40 +398,30 @@ async def test_sync_dispatch_bad_prefix_returns_error(db, wq, config):
 
 async def test_contacts_dispatch_returns_unfiled_rep_contacts(db, wq, config):
     """contacts returns REP nodes visible to the gateway but not in config."""
-    from unittest.mock import AsyncMock
     rep_contact = {
         "public_key": "aabbccdd11223344" + "aa" * 24,
         "adv_name": "Millbrook",
         "type": 2,  # CONTACT_TYPE_REPEATER
     }
-    wq._gateway = MagicMock()
-    wq._gateway.get_contacts = AsyncMock(return_value=[rep_contact])
+    wq.unfiled_contacts = AsyncMock(return_value=[rep_contact])
 
     resp = await _dispatch({"cmd": "contacts"}, wq, db, config)
 
     assert resp["ok"] is True
     assert len(resp["data"]) == 1
     assert resp["data"][0]["adv_name"] == "Millbrook"
+    wq.unfiled_contacts.assert_awaited_once()
 
 
 async def test_contacts_dispatch_excludes_already_managed(db, wq, config):
     """contacts excludes nodes whose pubkey_prefix is already in config."""
-    from unittest.mock import AsyncMock
-
-    from mch.config import NodeConfig
-    rep_contact = {
-        "public_key": "aabbccdd11223344" + "aa" * 24,
-        "adv_name": "Millbrook",
-        "type": 2,
-    }
-    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd")]
-    wq._gateway = MagicMock()
-    wq._gateway.get_contacts = AsyncMock(return_value=[rep_contact])
+    wq.unfiled_contacts = AsyncMock(return_value=[])
 
     resp = await _dispatch({"cmd": "contacts"}, wq, db, config)
 
     assert resp["ok"] is True
     assert resp["data"] == []
+    wq.unfiled_contacts.assert_awaited_once()
 
 
 # ------------------------------------------------------------------
@@ -703,45 +731,64 @@ async def test_exec_dispatch_no_contact_returns_error(db, wq, config):
     """exec returns error when node is in DB but not in gateway contacts."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    wq._contacts = []  # no contacts
+    wq.exec_command = AsyncMock(side_effect=ValueError("no gateway contact for aabbccddaabb"))
 
     resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "ver"}, wq, db, config)
 
     assert resp["ok"] is False
     assert "contact" in resp["error"]
+    wq.exec_command.assert_awaited_once_with(node.pubkey, "ver")
 
 
 async def test_exec_dispatch_free_command_returns_text(db, wq, config):
     """exec with a free command returns the command's text response."""
-    from mch.gateway import CommandResult
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    contact = {"public_key": node.pubkey, "adv_name": "Tower", "type": 2}
-    wq._contacts = [contact]
-    wq._gateway = MagicMock()
-    wq._gateway.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
+    wq.exec_command = AsyncMock(return_value="v1.14.1")
 
     resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "ver"}, wq, db, config)
 
     assert resp["ok"] is True
     assert resp["data"] == "v1.14.1"
+    wq.exec_command.assert_awaited_once_with(node.pubkey, "ver")
+
+
+async def test_exec_dispatch_busy_returns_error(db, wq, config):
+    """exec returns busy instead of touching the gateway during another operation."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    wq.exec_command = AsyncMock(side_effect=OperationBusyError("busy: scheduled sync aabbccdd"))
+
+    resp = await _dispatch({"cmd": "exec", "pubkey": "aabbccdd", "command": "ver"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "busy" in resp["error"]
+    wq.exec_command.assert_awaited_once_with(node.pubkey, "ver")
 
 
 async def test_exec_dispatch_fire_and_forget_timeout_returns_ok(db, wq, config):
     """exec reboot (fire-and-forget): timeout treated as success."""
-    from mch.gateway import CommandResult
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    contact = {"public_key": node.pubkey, "adv_name": "Tower", "type": 2}
-    wq._contacts = [contact]
-    wq._gateway = MagicMock()
-    wq._gateway.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq.exec_command = AsyncMock(return_value="(sent - no response expected)")
 
     resp = await _dispatch(
         {"cmd": "exec", "pubkey": "aabbccdd", "command": "reboot"}, wq, db, config
     )
 
     assert resp["ok"] is True
+    assert resp["data"] == "(sent - no response expected)"
+    wq.exec_command.assert_awaited_once_with(node.pubkey, "reboot")
+
+
+async def test_commission_dispatch_busy_returns_error(db, wq, config):
+    """commission returns busy when another gateway operation is active."""
+    wq.operation = MagicMock(side_effect=_operation_busy)
+
+    resp = await _dispatch({"cmd": "commission", "mode": "scan"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "busy" in resp["error"]
 
 
 async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):

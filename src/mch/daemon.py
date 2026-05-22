@@ -23,14 +23,20 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
-from mch.command_safety import blocked_exec_command, fire_and_forget_command
+from mch.command_safety import blocked_exec_command
 from mch.config import Config
 from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
 from mch.models import NodeState, SettingPolicy
-from mch.queue import WorkQueue, all_setting_keys, resolve_desired, resolve_policy
+from mch.queue import (
+    OperationBusyError,
+    WorkQueue,
+    all_setting_keys,
+    resolve_desired,
+    resolve_policy,
+)
 
 log = logging.getLogger(__name__)
 
@@ -236,11 +242,15 @@ async def _dispatch(
             try:
                 result = await wq.run_node(prefix)
                 return {"ok": True, "data": f"synced {result.name!r} ({result.pubkey[:8]})"}
+            except OperationBusyError as exc:
+                return {"ok": False, "error": str(exc)}
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
         # no prefix — full cycle in background
-        asyncio.create_task(wq.run_cycle())
-        return {"ok": True, "data": "sync started"}
+        try:
+            return {"ok": True, "data": await wq.start_cycle()}
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
 
     if cmd == "exec":
         pubkey = req.get("pubkey", "")
@@ -254,19 +264,12 @@ async def _dispatch(
             return {"ok": False, "error": str(exc)}
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
-        contact = next(
-            (c for c in wq._contacts if c.get("public_key", "")[:12] == node.pubkey[:12]),
-            None,
-        )
-        if not contact:
-            return {"ok": False, "error": f"no gateway contact for {node.pubkey[:12]}"}
-        faf = fire_and_forget_command(command) is not None
-        cmd_result = await wq._gateway.send_command(contact, command, timeout=60)
-        if faf and not cmd_result.success:
-            return {"ok": True, "data": "(sent - no response expected)"}
-        if not cmd_result.success:
-            return {"ok": False, "error": cmd_result.error or "no response"}
-        return {"ok": True, "data": cmd_result.text or "(ok)"}
+        try:
+            return {"ok": True, "data": await wq.exec_command(node.pubkey, command)}
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
 
     if cmd == "plan":
         nodes = await db.get_all_nodes()
@@ -323,10 +326,7 @@ async def _dispatch(
         return {"ok": True, "data": {"writes": writes, "audits": audits, "unknown": unknown}}
 
     if cmd == "contacts":
-        from mch.queue import get_unfiled_contacts
-        gateway = wq._gateway
-        unfiled = await get_unfiled_contacts(config, gateway)
-        return {"ok": True, "data": unfiled}
+        return {"ok": True, "data": await wq.unfiled_contacts()}
 
     if cmd == "logs":
         pubkey = req.get("pubkey")
@@ -400,7 +400,7 @@ async def _dispatch(
             },
         }
 
-    if cmd == "hint":
+    if cmd == "suggest":
         from pathlib import Path as _Path
 
         from mch.recommend import get_profile, load_profiles
@@ -419,7 +419,7 @@ async def _dispatch(
             if not node:
                 return {"ok": False, "error": f"node {pubkey!r} not found"}
             nodes = [node]
-        hint_results: list[dict[str, Any]] = []
+        suggest_results: list[dict[str, Any]] = []
         for n in nodes:
             facts = await db.get_facts(n.pubkey)
             raw_count = facts.get("neighbors")
@@ -427,7 +427,7 @@ async def _dispatch(
             # treat unknown neighbour count as 0 for profile lookup (mobile = most conservative)
             # count stays None so NBRS displays as '-' in the table
             profile = get_profile(count if count is not None else 0, profiles)
-            hint_results.append({
+            suggest_results.append({
                 "pubkey": n.pubkey,
                 "label": n.label,
                 "name": n.name,
@@ -443,7 +443,7 @@ async def _dispatch(
                     for u in universal
                 ],
             })
-        return {"ok": True, "data": hint_results}
+        return {"ok": True, "data": suggest_results}
 
     if cmd == "commission":
         from mch.commission import handle_commission
@@ -455,7 +455,11 @@ async def _dispatch(
                     await writer.drain()
                 except (ConnectionResetError, BrokenPipeError):
                     pass
-        return await handle_commission(req, wq, db, config, progress=progress_cb)
+        try:
+            async with wq.operation("commission", wait=False):
+                return await handle_commission(req, wq, db, config, progress=progress_cb)
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
 
     return {"ok": False, "error": f"unknown command: {cmd!r}"}
 

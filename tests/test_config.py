@@ -255,7 +255,7 @@ def test_label_with_space_raises(tmp_path):
     """A node label containing a space is rejected at load time."""
     p = _write_config(tmp_path, """\
         nodes:
-          - pubkey_prefix: aabb
+          - pubkey_prefix: aabbccdd
             label: "QH Tower"
     """)
     with pytest.raises(ValueError, match="label"):
@@ -266,7 +266,7 @@ def test_label_with_emoji_raises(tmp_path):
     """A node label containing emoji is rejected at load time."""
     p = _write_config(tmp_path, """\
         nodes:
-          - pubkey_prefix: aabb
+          - pubkey_prefix: aabbccdd
             label: "\U0001f4e1 Tower"
     """)
     with pytest.raises(ValueError, match="label"):
@@ -277,7 +277,7 @@ def test_label_valid_chars(tmp_path):
     """A label with letters, digits, dashes, underscores, and dots is accepted."""
     p = _write_config(tmp_path, """\
         nodes:
-          - pubkey_prefix: aabb
+          - pubkey_prefix: aabbccdd
             label: qh-tower.01
     """)
     cfg = load(p)
@@ -288,7 +288,7 @@ def test_label_absent_is_ok(tmp_path):
     """A node without a label field is accepted (label defaults to empty string)."""
     p = _write_config(tmp_path, """\
         nodes:
-          - pubkey_prefix: aabb
+          - pubkey_prefix: aabbccdd
     """)
     cfg = load(p)
     assert cfg.nodes[0].label == ""
@@ -298,9 +298,9 @@ def test_duplicate_labels_raise(tmp_path):
     """Two nodes with the same label raise ValueError at load time."""
     p = _write_config(tmp_path, """\
         nodes:
-          - pubkey_prefix: aabb
+          - pubkey_prefix: aabbccdd
             label: site-a
-          - pubkey_prefix: ccdd
+          - pubkey_prefix: ccddeeff
             label: site-a
     """)
     with pytest.raises(ValueError, match="duplicate"):
@@ -340,10 +340,10 @@ def test_pubkey_prefix_numeric_yaml_coerced_to_str(tmp_path):
     # YAML parses bare integers without quotes as int; startswith() would TypeError
     p = _write_config(tmp_path, """\
         nodes:
-          - pubkey_prefix: 123456
+          - pubkey_prefix: 12345678
     """)
     cfg = load(p)
-    assert cfg.nodes[0].pubkey_prefix == "123456"
+    assert cfg.nodes[0].pubkey_prefix == "12345678"
     assert isinstance(cfg.nodes[0].pubkey_prefix, str)
 
 
@@ -364,6 +364,46 @@ def test_list_config_raises(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text("- just a list\n")
     with pytest.raises(ValueError, match="mapping"):
+        load(p)
+
+
+def test_gateway_list_raises_clear_error(tmp_path):
+    """gateway: must be a mapping, not an implementation TypeError."""
+    p = _write_config(tmp_path, """\
+        gateway:
+          - /dev/ttyACM0
+    """)
+    with pytest.raises(ValueError, match="gateway.*mapping"):
+        load(p)
+
+
+def test_nodes_mapping_raises_clear_error(tmp_path):
+    """nodes: must be a list."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          pubkey_prefix: aabbccdd
+    """)
+    with pytest.raises(ValueError, match="nodes.*list"):
+        load(p)
+
+
+def test_unknown_top_level_key_raises(tmp_path):
+    """Unknown top-level keys are rejected so typos don't silently do nothing."""
+    p = _write_config(tmp_path, """\
+        databaes_path: /tmp/mch.db
+    """)
+    with pytest.raises(ValueError, match="unknown config key"):
+        load(p)
+
+
+def test_unknown_node_key_raises(tmp_path):
+    """Unknown node keys are rejected so typoed desired config is visible."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            lable: site-a
+    """)
+    with pytest.raises(ValueError, match="unknown node key"):
         load(p)
 
 
@@ -399,6 +439,47 @@ def test_pubkey_prefix_valid_hex_accepted(tmp_path):
     """)
     cfg = load(p)
     assert cfg.nodes[0].pubkey_prefix == "aabbccdd"
+
+
+def test_pubkey_prefix_too_short_raises(tmp_path):
+    """A pubkey_prefix shorter than 8 hex characters is ambiguous and rejected."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabb
+    """)
+    with pytest.raises(ValueError, match="at least 8"):
+        load(p)
+
+
+def test_pubkey_prefix_uppercase_is_normalized(tmp_path):
+    """Uppercase config prefixes are normalized for matching against lowercase DB pubkeys."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: AABBCCDD
+    """)
+    cfg = load(p)
+    assert cfg.nodes[0].pubkey_prefix == "aabbccdd"
+
+
+def test_secrets_prefix_invalid_raises(tmp_path):
+    """secrets.yaml prefixes use the same validation as config prefixes."""
+    p = _write_config(tmp_path, "gateway: {}\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  not-hex: nodepass\n")
+    secrets.chmod(0o600)
+    with pytest.raises(ValueError, match="secrets.nodes"):
+        load(p, secrets_path=secrets)
+
+
+def test_secrets_prefix_uppercase_is_normalized(tmp_path):
+    """Uppercase secrets prefixes are normalized so auth lookup still matches."""
+    p = _write_config(tmp_path, "gateway: {}\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  AABBCCDD: nodepass\n")
+    secrets.chmod(0o600)
+    cfg = load(p, secrets_path=secrets)
+    assert "aabbccdd" in cfg.secrets
+    assert cfg.secrets["aabbccdd"].password == "nodepass"
 
 
 # ------------------------------------------------------------------

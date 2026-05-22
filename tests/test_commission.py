@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,9 +56,19 @@ def make_db(nodes: list[Node] | None = None) -> MagicMock:
 
 def make_wq(gateway=None, db=None) -> MagicMock:
     wq = MagicMock()
-    wq._gateway = gateway or make_gateway()
+    gw = gateway or make_gateway()
     wq.pause = MagicMock()
     wq.resume = MagicMock()
+
+    @asynccontextmanager
+    async def _commission_session():
+        wq.pause()
+        try:
+            yield gw
+        finally:
+            wq.resume()
+
+    wq.commission_session = MagicMock(side_effect=_commission_session)
     return wq
 
 

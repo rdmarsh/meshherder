@@ -19,10 +19,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from mch.command_safety import fire_and_forget_command
 from mch.config import Config, GroupConfig, NodeConfig, OperationConfig
 from mch.db import Database
 from mch.gateway import CommandResult, Gateway
@@ -153,6 +156,10 @@ class _ReloginFailed(Exception):
     """Raised by _send_authed when re-login after a permission error fails."""
 
 
+class OperationBusyError(RuntimeError):
+    """Raised when a manual gateway-owning operation is already in progress."""
+
+
 # ---------------------------------------------------------------------------
 # work queue
 # ---------------------------------------------------------------------------
@@ -171,6 +178,9 @@ class WorkQueue:
         self._messenger = messenger
         self._running = False
         self._current_task: asyncio.Task[None] | None = None
+        self._manual_cycle_task: asyncio.Task[list[NodeResult]] | None = None
+        self._operation_lock = asyncio.Lock()
+        self._operation_name: str | None = None
         self._contacts: list[dict[str, Any]] = []  # cached at startup; refreshed by run_cycle
         self._paused: asyncio.Event = asyncio.Event()
         self._paused.set()  # starts unpaused — event set means "OK to proceed"
@@ -213,6 +223,54 @@ class WorkQueue:
         """Allow the queue to resume processing nodes."""
         self._paused.set()
 
+    @asynccontextmanager
+    async def commission_session(self) -> AsyncIterator[Gateway]:
+        """Pause scheduled work while a commissioning workflow owns the gateway."""
+        self.pause()
+        try:
+            yield self._gateway
+        finally:
+            self.resume()
+
+    @asynccontextmanager
+    async def operation(self, name: str, *, wait: bool = False) -> Any:
+        """Own the gateway/radio workflow for one high-level operation."""
+        if not wait and self._operation_lock.locked():
+            current = self._operation_name or "another operation"
+            raise OperationBusyError(f"busy: {current}")
+        await self._operation_lock.acquire()
+        self._operation_name = name
+        try:
+            yield
+        finally:
+            self._operation_name = None
+            self._operation_lock.release()
+
+    async def start_cycle(self) -> str:
+        """Start a manual full sync cycle in the background."""
+        if self._manual_cycle_task and not self._manual_cycle_task.done():
+            raise OperationBusyError("busy: sync cycle")
+        if self._operation_lock.locked():
+            current = self._operation_name or "another operation"
+            raise OperationBusyError(f"busy: {current}")
+        await self._operation_lock.acquire()
+        self._operation_name = "sync cycle"
+
+        task = asyncio.create_task(self._run_cycle_locked())
+        self._manual_cycle_task = task
+        task.add_done_callback(self._manual_cycle_done)
+        return "sync started"
+
+    def _manual_cycle_done(self, task: asyncio.Task[list[NodeResult]]) -> None:
+        try:
+            results = task.result()
+        except asyncio.CancelledError:
+            log.info("manual sync cycle cancelled")
+        except Exception as exc:
+            log.exception("manual sync cycle failed: %s", exc)
+        else:
+            log.info("manual sync cycle finished: %d nodes", len(results))
+
     async def refresh_config_state(self) -> None:
         """Refresh gateway contacts and reseed DB metadata after config reload."""
         self.pause()
@@ -222,6 +280,31 @@ class WorkQueue:
             await self._seed_node_labels()
         finally:
             self.resume()
+
+    async def exec_command(self, node_pubkey: str, command: str) -> str:
+        """Run an operator command against a known node through the gateway."""
+        async with self.operation(f"exec {node_pubkey[:8]}", wait=False):
+            contact = self._contact_for_pubkey(node_pubkey)
+            if contact is None:
+                raise ValueError(f"no gateway contact for {node_pubkey[:12]}")
+
+            faf = fire_and_forget_command(command) is not None
+            result = await self._gateway.send_command(contact, command, timeout=60)
+            if faf and not result.success:
+                return "(sent - no response expected)"
+            if not result.success:
+                raise ValueError(result.error or "no response")
+            return result.text or "(ok)"
+
+    async def unfiled_contacts(self) -> list[dict[str, Any]]:
+        """Return visible repeater contacts that are not yet in config."""
+        return await get_unfiled_contacts(self._config, self._gateway)
+
+    def _contact_for_pubkey(self, pubkey: str) -> dict[str, Any] | None:
+        return next(
+            (c for c in self._contacts if c.get("public_key", "")[:12] == pubkey[:12]),
+            None,
+        )
 
     async def _run_next_due(self, contacts: list[dict[str, Any]]) -> None:
         """Find the next due node, sleep until it's time, and process it."""
@@ -269,10 +352,14 @@ class WorkQueue:
         # block here if commission (or any other operation) has paused the queue
         await self._paused.wait()
 
-        if contact and node_cfg:
-            await self._process_node(node_cfg, group_cfg, contact)
-        else:
-            log.warning("node %r not in current contacts or config — skipping", node.pubkey[:12])
+        async with self.operation(f"scheduled sync {node.pubkey[:8]}", wait=True):
+            if contact and node_cfg:
+                await self._process_node(node_cfg, group_cfg, contact)
+            else:
+                log.warning(
+                    "node %r not in current contacts or config — skipping",
+                    node.pubkey[:12],
+                )
 
         interval_s = self._config.scheduler.sync_interval_days * 86400
         jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
@@ -380,49 +467,63 @@ class WorkQueue:
                 f"prefix must have an even number of hex chars (got {len(prefix)!r} - {prefix!r})"
             )
 
-        # use cached contacts — calling get_contacts() concurrently with the receive loop
-        # races on meshcore_py's dispatcher and causes timeouts
-        contacts = self._contacts
-        repeaters = [c for c in contacts if c.get("type") == CONTACT_TYPE_REPEATER]
-        matches = [c for c in repeaters if c["public_key"].startswith(prefix)]
+        async with self.operation(f"sync {prefix}", wait=False):
+            # use cached contacts — calling get_contacts() concurrently with the receive loop
+            # races on meshcore_py's dispatcher and causes timeouts
+            contacts = self._contacts
+            repeaters = [c for c in contacts if c.get("type") == CONTACT_TYPE_REPEATER]
+            matches = [c for c in repeaters if c["public_key"].startswith(prefix)]
 
-        if len(matches) == 0:
-            raise ValueError(f"no node found matching prefix {prefix!r}")
-        if len(matches) > 1:
-            names = ", ".join(c.get("adv_name", c["public_key"][:12]) for c in matches)
-            raise ValueError(f"ambiguous prefix {prefix!r} matches {len(matches)} nodes: {names}")
+            if len(matches) == 0:
+                raise ValueError(f"no node found matching prefix {prefix!r}")
+            if len(matches) > 1:
+                names = ", ".join(c.get("adv_name", c["public_key"][:12]) for c in matches)
+                raise ValueError(
+                    f"ambiguous prefix {prefix!r} matches {len(matches)} nodes: {names}"
+                )
 
-        contact = matches[0]
-        pubkey = contact["public_key"]
+            contact = matches[0]
+            pubkey = contact["public_key"]
 
-        node_cfg = next(
-            (nc for nc in self._config.nodes if pubkey.startswith(nc.pubkey_prefix)),
-            None,
-        )
-        group_cfg = (
-            {g.name: g for g in self._config.groups}.get(node_cfg.group)
-            if node_cfg and node_cfg.group else None
-        )
+            node_cfg = next(
+                (nc for nc in self._config.nodes if pubkey.startswith(nc.pubkey_prefix)),
+                None,
+            )
+            group_cfg = (
+                {g.name: g for g in self._config.groups}.get(node_cfg.group)
+                if node_cfg and node_cfg.group else None
+            )
 
-        if node_cfg is None:
-            # not in config — create a minimal NodeConfig so we can at least process it
-            from mch.config import NodeConfig as _NC
-            node_cfg = _NC(pubkey_prefix=pubkey[:8])
+            if node_cfg is None:
+                # not in config — create a minimal NodeConfig so we can at least process it
+                from mch.config import NodeConfig as _NC
+                node_cfg = _NC(pubkey_prefix=pubkey[:8])
 
-        result = await self._process_node(node_cfg, group_cfg, contact)
+            result = await self._process_node(node_cfg, group_cfg, contact)
 
-        interval_s = self._config.scheduler.sync_interval_days * 86400
-        jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
-        next_sync = datetime.now(UTC) + timedelta(seconds=interval_s + jitter)
-        await self._db.set_next_sync(pubkey, next_sync)
+            interval_s = self._config.scheduler.sync_interval_days * 86400
+            jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
+            next_sync = datetime.now(UTC) + timedelta(seconds=interval_s + jitter)
+            await self._db.set_next_sync(pubkey, next_sync)
 
-        return result
+            return result
 
     async def run_cycle(self) -> list[NodeResult]:
         """
         One full pass through all managed nodes in config order.
         Used for testing and for mch sync (no-arg full sweep).
         """
+        async with self.operation("sync cycle", wait=False):
+            return await self._run_cycle_body()
+
+    async def _run_cycle_locked(self) -> list[NodeResult]:
+        try:
+            return await self._run_cycle_body()
+        finally:
+            self._operation_name = None
+            self._operation_lock.release()
+
+    async def _run_cycle_body(self) -> list[NodeResult]:
         log.info("--- cycle start ---")
         self._contacts = await self._gateway.get_contacts(managed_only=False)
         contact_by_pubkey = {c["public_key"]: c for c in self._contacts}

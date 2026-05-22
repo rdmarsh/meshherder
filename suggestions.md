@@ -28,48 +28,41 @@ Fixed since the previous review:
 
 Still open or only partially fixed:
 
-- Bare `pytest -q` still fails unless the package is installed or `PYTHONPATH=src` is set.
-- Config validation is better, but section type checks and unknown-key checks are still incomplete.
-  For example, a non-mapping `gateway:`/`messenger:` or non-list `nodes:` can still fail with
-  implementation errors instead of a clear config error, and unknown keys other than node-level
-  `radio:` are still accepted.
+- Bare `pytest` now imports from `src` via pytest config.
+- Config validation now catches section type errors, unknown keys, short prefixes, and normalizes
+  uppercase config/secrets prefixes.
 - The daemon and CLI now share command-safety matching for raw `mch exec` commands. Multi-word
   blocked commands such as `set prv.key`, `set guest.password`, and `start ota` are now matched as
   full-token prefixes.
-- README DM command docs still promise `sync <pubkey-prefix>`, while `Messenger._handle_command()`
-  still returns `sync: not supported over DM`.
-- `mch hint` has not gained a `recommend` alias, and examples still mention `mch recommend`.
-- Daemon command handlers still access `wq._contacts` and `wq._gateway` directly.
-- Full-cycle `mch sync` still starts `wq.run_cycle()` as an untracked background task, so scheduler
-  coordination and error visibility are still weak.
+- README DM command docs now describe status/read commands instead of promising DM-triggered sync.
+- `mch suggest` is the single command for suggested settings.
+- Daemon dispatch and commissioning no longer access `wq._contacts` or `wq._gateway` directly.
+- Gateway-owning CLI operations now use a shared high-level operation lock and return `busy: ...`
+  when sync/exec/commission would overlap.
 - Database migrations are still ad hoc (`ALTER TABLE nodes ADD COLUMN label ...`) rather than named
   versions.
 - The profile URL cache still writes to `/var/lib/mch/profiles.yaml` unconditionally.
-- The systemd unit still says commissioning writes `secrets.yaml` atomically and grants
-  `/usr/local/etc/mch` write access, while the design/tests say commissioning prints snippets.
+- The systemd unit now keeps `/usr/local/etc/mch` read-only and says config files are
+  operator-owned.
 
 New findings from this recheck:
 
 21. Normalize or reject uppercase pubkey prefixes consistently.
 
-    `config.py` accepts uppercase hex in `pubkey_prefix`, but the error text says lowercase-only and
-    most matching uses case-sensitive `startswith()` against contact/DB pubkeys. An uppercase config
-    prefix can pass validation and then fail to match a lowercase MeshCore pubkey. Either normalize
-    node and secret prefixes to lowercase on load or reject uppercase with a clear error.
+    **2026-05-22 status:** fixed. Config node prefixes, secrets prefixes, and messenger allow-list
+    prefixes are normalized to lowercase on load.
 
 22. Validate `secrets.yaml` prefixes like config node prefixes.
 
-    `_load_secrets()` accepts any `nodes:` key, including odd-length, non-hex, or uppercase prefixes.
-    Bad secret prefixes will silently miss during auth lookup. Apply the same even-length hex
-    validation and normalization rules used for `config.yaml`, while preserving the special
-    `default` key.
+    **2026-05-22 status:** fixed. `secrets.yaml` preserves the special `default` key, validates
+    per-node prefixes as even-length hex with at least 8 characters, and normalizes them to
+    lowercase.
 
 23. Make background sync failures observable.
 
-    `mch sync` without a node starts `asyncio.create_task(wq.run_cycle())` and immediately returns
-    `sync started`, but no task reference or done callback records exceptions. If the cycle fails,
-    operators may only see an event-loop warning. Track the task, log failures with context, and
-    expose whether a cycle is already running.
+    **2026-05-22 status:** fixed. `mch sync` without a node now calls `WorkQueue.start_cycle()`,
+    which owns the task, rejects duplicate manual cycles, logs completion, and logs failures with
+    context.
 
 24. Make commissioning own node identity from first commission.
 
@@ -105,6 +98,32 @@ New findings from this recheck:
     **2026-05-22 status:** superseded by live testing. On Heltec V3 / v1.15.0, `set radio` does not
     itself reboot; it replies `OK - reboot to apply`. The correct behavior is to wait for `set radio`
     and then send one fire-and-forget `reboot`.
+
+33. Investigate replacement retry after partial commissioning failure.
+
+    **Observed on luna, 2026-05-22 19:57:** `mch commission` replacement found factory node
+    `fa5a4515607e`, logged in with the factory password, sent password/key setup commands, then
+    timed out waiting for `set radio 915.800,250.0,10,5`. Retrying immediately found the same node
+    but failed factory authentication:
+
+    ```text
+    Can't complete commissioning: commission failed at 'set radio 915.800,250.0,10,5': timeout
+    ...
+    Retrying...
+    Can't complete commissioning: could not authenticate to factory node
+    ```
+
+    Likely hypothesis: the first attempt partially succeeded and changed the node's admin password
+    and/or private key before timing out on radio. The retry still treats the visible node as
+    factory-fresh and tries the default password, so authentication fails. Investigate whether retry
+    should:
+
+    - Try the just-applied managed password when factory login fails after a partial attempt.
+    - Track the commissioning stage and resume from the failed command instead of restarting from
+      factory assumptions.
+    - Distinguish `set radio` timeout caused by no response from a command that actually applied.
+    - Give the operator explicit recovery guidance: reboot/wait, retry with managed credentials, or
+      erase/reflash for a true factory reset.
 
 30. Document the bench reset/reflash commands.
 
@@ -145,13 +164,12 @@ New findings from this recheck:
     config replacement commissioning should push to the node." That is too overloaded for
     bridge-mediated management, where the gateway may stay on one frequency while reaching a node
     on another through the mesh. Consider separate concepts:
-    - `via`: gateway/routing reachability hint.
+    - `via`: gateway/routing reachability path.
     - desired `radio`/`settings.radio`: node configuration to enforce or apply during commission.
 
 28. Track future DM/channel/room-server control separately from fleet convergence.
 
-    The current messenger supports small DM status/read commands, but docs still promise DM sync
-    while implementation rejects it. Longer-term ideas include:
+    The current messenger supports small DM status/read commands. Longer-term ideas include:
     - DM-triggered sync for already-managed nodes.
     - Read/write status to a configured channel.
     - Room-server integration for reports or command intake.
@@ -170,19 +188,16 @@ New findings from this recheck:
 
 1. Make the advertised quality gates actually pass.
 
-   **2026-05-21 status:** partially fixed. `ruff check .`, `mypy src`, and
-   `PYTHONPATH=src pytest -q` pass. Bare `pytest -q` still fails unless the package is installed or
-   `PYTHONPATH=src` is set.
+   **2026-05-22 status:** fixed. `pytest` imports from `src` via pytest config, and CI runs the
+   advertised checks.
 
-   `pyproject.toml` configures strict `mypy` and a `ruff` rule set. These now pass, but bare
-   `pytest` still does not. Keep the configured checks enforceable in CI so developer reality does
-   not drift from project intent.
+   `pyproject.toml` configures strict `mypy`, `ruff`, and pytest source-path behavior. CI keeps
+   these checks enforceable.
 
-   Good first steps:
-   - Add `pythonpath = ["src"]` or use editable installs in test docs/CI so bare `pytest` works.
-   - Run `ruff check --fix` for mechanical import and unused-code fixes, then handle line length and
-     bugbear warnings manually.
-   - Add explicit ignores for untyped third-party `meshcore` imports, or provide local stubs.
+   Checks:
+   - `pytest`
+   - `ruff check .`
+   - `mypy src`
 
 2. Fix likely type-shadowing bugs in daemon dispatch.
 
@@ -220,20 +235,13 @@ New findings from this recheck:
 
 4. Validate `config.yaml` more aggressively.
 
-   **2026-05-21 status:** partially fixed. Top-level mapping checks, node `radio:` rejection,
-   prefix hex/even-length checks, duplicate label/prefix checks, label validation, and unknown group
-   validation are present. Section type checks, unknown-key checks, minimum prefix length, and
-   lowercase normalization/rejection are still open.
+   **2026-05-22 status:** fixed for current schema. Top-level mapping checks, section type checks,
+   unknown-key rejection, node `radio:` rejection, prefix hex/even-length/minimum-length checks,
+   duplicate label/prefix checks, label validation, lowercase prefix normalization, secrets prefix
+   validation, and unknown group validation are present.
 
-   `load()` now checks that the top-level YAML is a mapping and rejects old node-level `radio:`.
-   More validation is still needed for section types and unknown keys.
-
-   Suggested validation:
-   - Ensure top-level config is a mapping.
-   - Validate `nodes`, `groups`, `gateway`, `scheduler`, and `messenger` types.
-   - Validate pubkey prefixes as even-length hex, minimum 8 chars.
-   - Reject or warn on unknown keys, especially `nodes[].radio`.
-   - Validate group references so typos do not silently drop inherited settings.
+   `load()` now fails fast with clear `ValueError` messages for malformed YAML structure and common
+   typos.
 
 ## Product / Operator Experience
 
@@ -266,18 +274,18 @@ New findings from this recheck:
      still be useful later for operator feedback, but daemon restart is no longer required for
      normal node/group/secrets edits.
 
-7. Reconcile DM command docs with implementation.
+7. Keep DM control read-only unless there is a clear operator need.
 
-   The README says a field operator can send `sync <pubkey>` by DM, but
-   `Messenger._handle_command()` currently returns `sync: not supported over DM`. Either implement
-   DM-triggered sync through the work queue with the same authorization model, or update the README
-   and feature list to avoid promising it.
+   **2026-05-22 status:** README now documents the implemented read-only/status commands:
+   `status`, `nodes`, `node <name-or-prefix>`, `issues`, and `logs [n]`.
 
-8. Rename or alias `mch hint` consistently.
+   DM-triggered sync can be added later through the work queue with the same authorization and
+   scheduler coordination model, but it should stay out until manual/scheduled sync ownership is
+   clearer.
 
-   Docs and examples still refer to "recommend" in places (`profiles_file` comments and the module
-   name), while the CLI command is `hint`. Consider adding `mch recommend` as an alias or standardize
-   all docs around `hint`.
+8. Rename or alias `mch suggest` consistently.
+
+   **2026-05-22 status:** done. `mch suggest` is the single command for suggested settings.
 
 8. Fix the CLI socket environment variable name.
 
@@ -289,17 +297,18 @@ New findings from this recheck:
 
 9. Avoid direct access to WorkQueue internals from daemon command handlers.
 
-   `_dispatch()` reaches into `wq._contacts` and `wq._gateway`. That makes command behavior depend
-   on private state and cached contacts. Add small public methods on `WorkQueue`, such as
-   `exec_command()`, `contacts()`, and `force_cycle()`, so synchronization and contact refresh rules
-   live in one place.
+   **2026-05-22 status:** fixed for daemon dispatch. Raw exec now goes through
+   `WorkQueue.exec_command()`, including contact lookup, operation locking, gateway send, and
+   fire-and-forget handling. Contacts lookup now goes through `WorkQueue.unfiled_contacts()`.
 
 10. Serialize manual full-cycle sync with the scheduler.
 
-   `mch sync` without a node starts `wq.run_cycle()` in the background while the scheduler loop may
-   also be active. There is a send lock in `Gateway`, but higher-level node state, radio hopping,
-   and scheduling can still interleave. A queue-level operation lock would make scheduled sync,
-   forced sync, exec, and commission coordination explicit.
+   **2026-05-22 status:** fixed. Scheduled node sync, manual full-cycle sync, forced
+   single-node sync, raw exec, and commissioning now share a high-level WorkQueue operation lock.
+   CLI-owned operations return `busy: <operation>` rather than silently overlapping.
+
+   Commissioning enters the gateway through `WorkQueue.commission_session()`, which pauses scheduled
+   work while the commissioning workflow owns the gateway.
 
 11. Tighten command safety checks.
 
@@ -357,6 +366,8 @@ New findings from this recheck:
 
 18. Add tests for config validation failures.
 
+   **2026-05-22 status:** done for current schema.
+
    Cover empty config, list top-level config, invalid pubkey prefixes, unknown group references,
    unknown node keys, and the old `radio:` node key. This will make startup errors friendlier and
    prevent silent misconfiguration.
@@ -368,6 +379,8 @@ New findings from this recheck:
    Add tests that assert only one high-level gateway operation can own the radio/session at a time.
 
 20. Add a small CI workflow.
+
+   **2026-05-22 status:** done.
 
    A minimal CI check should run:
 
