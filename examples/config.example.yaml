@@ -234,6 +234,8 @@ nodes:
         every_hours: 87600
       - command: region put au-nsw-syd
         every_hours: 87600
+      - command: region put au-vic
+        every_hours: 87600
       - command: region save
         every_hours: 87600
       - command: clock sync
