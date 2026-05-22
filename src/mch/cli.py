@@ -10,6 +10,7 @@ import asyncio
 import json
 import subprocess
 import unicodedata
+from datetime import UTC, datetime
 from typing import Any
 
 import click
@@ -32,6 +33,28 @@ def _wpad(s: str, width: int) -> str:
 def _pk(pubkey: str | None, length: int = 12) -> str:
     """Short pubkey prefix for tables."""
     return (pubkey or "-")[:length]
+
+
+def _ago(iso: str | None) -> str:
+    """Format an ISO datetime string as a compact relative time ('5m ago', '2h ago', etc.)."""
+    if not iso:
+        return "never"
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        secs = int((datetime.now(UTC) - dt).total_seconds())
+        if secs < 0:
+            return "just now"
+        if secs < 120:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
+    except (ValueError, TypeError):
+        return iso[:16].replace("T", " ")
 
 
 async def _request(
@@ -158,7 +181,7 @@ def status(ctx: click.Context, query: str | None) -> None:
             sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
         for n in nodes:
-            last  = (n.get("last_seen") or "never")[:16].replace("T", " ")
+            last  = _ago(n.get("last_seen"))
             group = (n.get("group") or "-")
             nbrs  = n.get("neighbors") or "-"
             ver   = _short_ver(n.get("ver"))
@@ -243,7 +266,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     click.echo(f"group:       {data.get('group') or '-'}")
     click.echo(f"mesh name:   {data['name']}")
     click.echo(f"state:       {data['state']}")
-    click.echo(f"last seen:   {_ts(data.get('last_seen'))}")
+    click.echo(f"last seen:   {_ago(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ts(data.get('last_connected'))}")
     click.echo(f"pubkey:      {data['pubkey']}")
     click.echo(f"authed:      {'yes' if data.get('auth_cached') else 'no'}")
@@ -325,7 +348,7 @@ def _render_issue_sections(
         click.echo(fmt.format("------", _wpad("----", name_w), "-----", "---------"))
         for n in bad_state:
             label = n.get("label") or n["name"]
-            last = (n.get("last_seen") or "never")[:16].replace("T", " ")
+            last = _ago(n.get("last_seen"))
             click.echo(fmt.format(_pk(n.get("pubkey")), _wpad(label, name_w), n["state"], last))
         click.echo("")
 
