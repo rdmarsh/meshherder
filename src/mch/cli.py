@@ -16,6 +16,7 @@ from typing import Any
 import click
 
 from mch.command_safety import blocked_exec_command, confirm_exec_command
+from mch.meshkey import derive_public_key, generate_private_key
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
 
@@ -99,6 +100,16 @@ def _check(resp: dict[str, Any]) -> Any:
         click.echo(f"error: {resp.get('error', 'unknown error')}", err=True)
         raise SystemExit(1)
     return resp.get("data")
+
+
+def _commission_busy_hint(error: str) -> str | None:
+    if "busy: commission" not in error:
+        return None
+    return (
+        "Another commissioning operation is still finishing or cancelling.\n"
+        "This usually clears after the current radio/discovery step completes.\n"
+        "Wait about 10-30 seconds and retry. If it stays busy, restart mchd."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +507,62 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
 
 
+@cli.command()
+@click.option("--yes", "-y", is_flag=True, help="Delete the listed local DB state.")
+@click.pass_context
+def prune(ctx: click.Context, yes: bool) -> None:
+    """List or delete DB nodes that are no longer in config.yaml."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
+    data = _check(resp)
+    candidates = data.get("candidates", [])
+
+    if not candidates:
+        click.echo("no DB nodes outside config.yaml")
+        click.echo("secrets.yaml entries and gateway favourites are left unchanged")
+        return
+
+    label_w = max(
+        _wlen("LABEL"),
+        max((_wlen(n.get("label") or "-") for n in candidates), default=0),
+    )
+    name_w = max(
+        _wlen("MESH NAME"),
+        max((_wlen(n.get("name") or "-") for n in candidates), default=0),
+    )
+    row = "  {:<12}  {}  {}  {:<12}  {:<12}"
+    click.echo("DB nodes outside config.yaml:")
+    click.echo(row.format(
+        "PUBKEY",
+        _wpad("LABEL", label_w),
+        _wpad("MESH NAME", name_w),
+        "STATE",
+        "LAST SEEN",
+    ))
+    click.echo(row.format(
+        "------",
+        _wpad("-----", label_w),
+        _wpad("---------", name_w),
+        "-----",
+        "---------",
+    ))
+    for n in candidates:
+        click.echo(row.format(
+            _pk(n["pubkey"]),
+            _wpad(n.get("label") or "-", label_w),
+            _wpad(n.get("name") or "-", name_w),
+            n.get("state") or "-",
+            _ago(n.get("last_seen")),
+        ))
+
+    if yes:
+        click.echo("")
+        click.echo(f"deleted {data.get('deleted', 0)} node(s) from local DB state")
+    else:
+        click.echo("")
+        click.echo("run 'mch prune --yes' to delete these local DB rows")
+    click.echo("secrets.yaml entries and gateway favourites are left unchanged")
+
+
 # ---------------------------------------------------------------------------
 # suggest
 # ---------------------------------------------------------------------------
@@ -775,7 +842,11 @@ def _run_commission_wizard(socket: str) -> None:
         )
         resp = _rpc(socket, {"cmd": "commission", "mode": "scan"}, timeout=30)
         if not resp.get("ok"):
-            click.echo(f"\nSearch failed: {resp.get('error', 'unknown error')}")
+            error = resp.get("error", "unknown error")
+            click.echo(f"\nSearch failed: {error}")
+            hint = _commission_busy_hint(error)
+            if hint:
+                click.echo(hint)
             click.echo("")
             choice = click.prompt(
                 "Press Enter to retry or q to cancel", default="", show_default=False
@@ -921,7 +992,14 @@ def _prompt_radio_all(
     return freq, bw, sf, cr
 
 
-def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> None:
+def _default_commission_label(pubkey: str | None) -> str:
+    return pubkey[:12] if pubkey else "node01"
+
+
+def _commission_new_wizard(
+    socket: str,
+    gateway_radio: str | None = None,
+) -> None:
     """Collect params for a new node, confirm, send RPC with retry, display result."""
     click.echo("")
     click.echo("New node commissioning")
@@ -932,12 +1010,15 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
     def _gw(i: int) -> str:
         return gw_parts[i].strip() if len(gw_parts) > i else ""
 
+    prv_key = generate_private_key()
+    pubkey = derive_public_key(prv_key)
+
     # Saved values — used as defaults when the outer edit loop iterates.
-    label = ""
-    group: str | None = ""
+    label = _default_commission_label(pubkey)
+    group: str | None = "default"
     name = ""
     admin_password = "password"
-    guest_password = ""
+    guest_password = "guest"
     freq = _gw(0)
     bw = _gw(1)
     sf = _gw(2)
@@ -945,10 +1026,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
 
     while True:  # outer: re-enter values loop
         # --- identity ---
-        if label:
-            label = click.prompt("Node label", default=label).strip()
-        else:
-            label = click.prompt("Node label").strip()
+        label = click.prompt("Node label", default=label).strip()
         # Re-prompt name until within 31 bytes (MeshCore firmware cap).
         name_default = name or label
         while True:
@@ -1003,6 +1081,7 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
                 "target_freq": target_freq,
                 "admin_password": admin_password,
                 "guest_password": guest_password or None,
+                "prv_key": prv_key,
             }, timeout=120, on_progress=lambda msg: click.echo(f"  {msg}"))
 
             if resp.get("ok"):
@@ -1010,6 +1089,9 @@ def _commission_new_wizard(socket: str, gateway_radio: str | None = None) -> Non
                 break
 
             click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
+            hint = _commission_busy_hint(resp.get("error", ""))
+            if hint:
+                click.echo(hint)
             click.echo("Check the node is powered on, in range, and with an antenna.")
             choice = click.prompt(
                 "[Enter] retry  [e]dit  [q]uit", default=""

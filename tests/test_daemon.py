@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -332,6 +332,50 @@ async def test_suggest_dispatch_profile_none_when_no_neighbors(db, wq, config):
     resp = await _dispatch({"cmd": "suggest"}, wq, db, config)
     assert resp["ok"] is True
     assert resp["data"][0]["neighbour_count"] is None
+
+
+async def test_prune_dispatch_lists_nodes_outside_config(db, wq, config):
+    """prune dry-run lists DB nodes whose pubkeys are no longer in config."""
+    kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
+    retired = Node(
+        pubkey="11223344" * 8,
+        name="Retired",
+        label="old-site",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(kept)
+    await db.upsert_node(retired)
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="kept")]
+
+    resp = await _dispatch({"cmd": "prune"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["deleted"] == 0
+    assert [n["pubkey"] for n in resp["data"]["candidates"]] == [retired.pubkey]
+    assert await db.get_node(retired.pubkey) is not None
+
+
+async def test_prune_dispatch_deletes_nodes_outside_config(db, wq, config):
+    """prune with dry_run false deletes retired local DB state only."""
+    kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
+    retired = Node(
+        pubkey="11223344" * 8,
+        name="Retired",
+        label="old-site",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(kept)
+    await db.upsert_node(retired)
+    await db.upsert_fact(NodeFact(node_pubkey=retired.pubkey, key="ver", value="v1.14.1"))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="kept")]
+
+    resp = await _dispatch({"cmd": "prune", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["deleted"] == 1
+    assert await db.get_node(kept.pubkey) is not None
+    assert await db.get_node(retired.pubkey) is None
+    assert await db.get_facts(retired.pubkey) == {}
 
 
 # ------------------------------------------------------------------
@@ -789,6 +833,26 @@ async def test_commission_dispatch_busy_returns_error(db, wq, config):
 
     assert resp["ok"] is False
     assert "busy" in resp["error"]
+
+
+async def test_commission_dispatch_disconnected_progress_cancels(db, wq, config):
+    """A broken progress stream cancels the commission RPC and releases operation ownership."""
+    writer = MagicMock()
+    writer.drain = AsyncMock(side_effect=BrokenPipeError)
+
+    async def fake_handle(req, wq, db, config, progress=None):
+        await progress("switching to factory frequency...")
+        return {"ok": True, "data": {}}
+
+    with patch("mch.commission.handle_commission", side_effect=fake_handle):
+        resp = await _dispatch(
+            {"cmd": "commission", "mode": "new"}, wq, db, config, writer=writer
+        )
+
+    assert resp["ok"] is False
+    assert "client disconnected" in resp["error"]
+    wq.operation.assert_called_once_with("commission", wait=False)
+    writer.write.assert_called_once()
 
 
 async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):

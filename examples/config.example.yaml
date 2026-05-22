@@ -126,6 +126,16 @@ messenger:
 # per-node overrides on top. Groups are optional - nodes can also be configured
 # fully standalone.
 groups:
+  - name: default
+    default_policy: audit
+    settings:
+      owner.info: "Managed by mch"
+      radio: "915.075,125,9,5"
+      flood.advert.interval: "47"  # hours
+      advert.interval: "238"       # minutes
+      multi.acks: "1"
+      path.hash.mode: "1"
+
   - name: repeaters
     default_policy: enforce
     settings:
@@ -213,6 +223,23 @@ nodes:
     label: SiteD-Remote
     group: solar-nodes
     operations:
+      # Region commands are raw CLI operations, not normal `set <key> <value>`
+      # settings. Use a long interval if these are one-time commissioning
+      # commands that should not be repeated in normal operation.
+      - command: region put au
+        every_hours: 87600   # 10 years
+      - command: region allowf au
+        every_hours: 87600
+      - command: region put au-nsw
+        every_hours: 87600
+      - command: region allowf au-nsw
+        every_hours: 87600
+      - command: region put au-nsw-syd
+        every_hours: 87600
+      - command: region allowf au-nsw-syd
+        every_hours: 87600
+      - command: region save
+        every_hours: 87600
       - command: clock sync
         every_hours: 6       # run if not run in the last 6 hours
       - command: reboot

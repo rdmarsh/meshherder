@@ -56,6 +56,14 @@ universal:
     value: "915.075,125,9,5"
     description: "Australia:Mid preset - verify this matches your regional mesh"
 
+  - key: flood.advert.interval
+    value: "47"
+    description: "Flood advert interval in hours - stagger from common defaults"
+
+  - key: advert.interval
+    value: "238"
+    description: "Direct advert interval in minutes - stagger from common defaults"
+
   - key: path.hash.mode
     value: "1"
     description: "2-byte advert path hashes - reduces routing ambiguity (fw >= 1.14)"

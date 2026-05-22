@@ -417,6 +417,8 @@ mch suggest <label|prefix>       Full suggestions + paste-ready config block for
 mch logs                      Recent per-node activity across all nodes
 mch logs <prefix>             Activity for one node
 mch contacts                  Repeater nodes visible to the gateway not yet in config
+mch prune                     List DB nodes no longer present in config.yaml
+mch prune --yes               Delete listed local DB state for retired nodes
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node immediately; CLI waits for the result
 mch exec <node> <command>     Run a raw MeshCore CLI command on a node (e.g. ver, stats-radio)
@@ -425,6 +427,12 @@ mch start                     Start mchd via systemd (alias: sudo systemctl star
 mch stop                      Stop mchd via systemd
 mch restart                   Restart mchd via systemd
 ```
+
+`mch prune` is deliberately conservative: removing a node from `config.yaml` stops future syncs,
+but does not automatically delete historical DB state. Run `mch prune` to review retired DB nodes
+and `mch prune --yes` to delete their local facts, settings, operations, and logs. It does not edit
+`config.yaml`, `secrets.yaml`, or gateway favourites. Secrets entries without matching config nodes
+are allowed; operators may keep passwords or private keys there for replacement hardware.
 
 `mch sync <prefix>` runs that node immediately and waits — the CLI returns once the sync is
 complete. It collects facts, checks and enforces settings, runs any due operations, then

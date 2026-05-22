@@ -67,6 +67,27 @@ async def test_get_all_nodes(db):
     assert nodes[0].name == "A"  # ordered by name
 
 
+async def test_delete_node_removes_local_state(db):
+    await db.upsert_node(Node(pubkey="aabbcc", name="N"))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey="aabbcc",
+        key="owner.info",
+        desired="managed",
+        policy=SettingPolicy.AUDIT,
+    ))
+    await db.upsert_fact(NodeFact(node_pubkey="aabbcc", key="ver", value="v1.14.1"))
+    await db.upsert_operation(OperationRecord(node_pubkey="aabbcc", command="clock sync"))
+    await db.write_log("aabbcc", "INFO", "test log")
+
+    await db.delete_node("aabbcc")
+
+    assert await db.get_node("aabbcc") is None
+    assert await db.get_settings("aabbcc") == []
+    assert await db.get_facts("aabbcc") == {}
+    assert await db.get_pending_operations("aabbcc") == []
+    assert await db.get_logs("aabbcc") == []
+
+
 # ------------------------------------------------------------------
 # settings
 # ------------------------------------------------------------------
