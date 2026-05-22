@@ -6,6 +6,15 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## How to Use This File
 
+- Prefer simple, boring solutions over clever or expansive ones.
+- Treat "we could do this" as insufficient. New work should have a clear operator benefit,
+  reasonable implementation cost, and low ongoing maintenance burden.
+- Avoid fragile high-maintenance code. If a change depends on non-obvious ordering, firmware
+  behavior, or safety constraints, leave a concise "why" comment or journal note so the reasoning is
+  not rediscovered later.
+- Keep speculative ideas in **Wishlist** or **Not Yet** until they solve a real problem.
+- Apply the same filter to code review follow-ups: fix real bugs and maintainability risks first,
+  and avoid turning nice-to-have ideas into required work.
 - Add new work to **Inbox** first if priority or scope is unclear.
 - Move committed near-term work to **Next**.
 - Move broader improvements to **Later** or **Wishlist**.
