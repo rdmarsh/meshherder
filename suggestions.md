@@ -346,9 +346,10 @@ New findings from this recheck:
 
 17. Keep examples aligned with implementation.
 
-   The systemd unit comments say commissioning writes `secrets.yaml` atomically, but the design and
-   current code say commissioning only prints snippets. Update the unit comment and consider removing
-   `/usr/local/etc/mch` from `ReadWritePaths` if the daemon truly remains config-read-only.
+   Done:
+   - The systemd unit no longer grants write access to `/usr/local/etc/mch`.
+   - Comments now state that mchd reads config files but never writes `config.yaml` or
+     `secrets.yaml`.
 
 ## Testing Suggestions
 
