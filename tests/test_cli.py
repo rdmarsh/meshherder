@@ -3,6 +3,7 @@
 import asyncio
 import re
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -263,6 +264,28 @@ nodes:
     assert "config ok:" in result.output
     assert "nodes: 1" in result.output
     assert "secrets ok:" in result.output
+
+
+def test_validate_without_config_option_uses_local_config(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        config = Path("config.yaml")
+        config.write_text("""\
+nodes:
+  - pubkey_prefix: aabbccdd
+    label: site-a
+""")
+        secrets = Path("secrets.yaml")
+        secrets.write_text("nodes: {}\n")
+        secrets.chmod(0o600)
+
+        with patch("mch.cli._rpc") as mock_rpc:
+            result = runner.invoke(cli, ["validate"])
+
+    mock_rpc.assert_not_called()
+    assert result.exit_code == 0
+    assert "config ok:" in result.output
+    assert "nodes: 1" in result.output
 
 
 def test_validate_invalid_config_exits_nonzero(tmp_path):
