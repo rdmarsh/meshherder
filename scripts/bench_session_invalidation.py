@@ -54,6 +54,7 @@ from pathlib import Path
 
 from mch.config import load as load_config
 from mch.gateway import Gateway
+from mch.meshkey import derive_public_key, generate_private_key
 
 FACTORY_PW = "password"
 TEST_PW = "bench_temp_pw"
@@ -108,7 +109,17 @@ async def main(config_path: str) -> int:
         "phase_a_baseline_set_name": None,
         "phase_b_set_prv_key_alone": None,
         "phase_c_set_prv_key_after_password": None,
+        "phase_d_set_prv_key_real": None,
     }
+
+    # Pre-generate a real key so we can log it before sending. If the node ever
+    # reboots with this staged, it will adopt this identity; the operator can
+    # recover by using the prv_key recorded here.
+    real_prv_key = generate_private_key()
+    real_pub_key = derive_public_key(real_prv_key)
+    log.info("Phase D will use a real key. Record these in case of reboot:")
+    log.info("  prv_key (full, 128 hex): %s", real_prv_key)
+    log.info("  pubkey (derived):        %s", real_pub_key)
 
     try:
         log.info("hopping to factory frequency %s", Gateway.FACTORY_FREQ)
@@ -150,6 +161,12 @@ async def main(config_path: str) -> int:
             gw, contact, f"set prv.key {JUNK_PRV_KEY}", timeout=90.0
         )
 
+        log.info("\n--- Phase D: real generated `set prv.key`, 180s timeout ---")
+        log.info("(staged only — we never send reboot, so identity does not apply)")
+        findings["phase_d_set_prv_key_real"] = await send_and_observe(
+            gw, contact, f"set prv.key {real_prv_key}", timeout=180.0
+        )
+
     finally:
         # Cleanup is best-effort. If we lost the session entirely, the operator
         # can recover via USB (`password password`).
@@ -178,18 +195,20 @@ async def main(config_path: str) -> int:
     a = findings["phase_a_baseline_set_name"]
     b = findings["phase_b_set_prv_key_alone"]
     c = findings["phase_c_set_prv_key_after_password"]
-    if a and b and c:
-        log.info("\nResult: `set prv.key` works in both contexts — commission failure"
-                 " was likely a transient timing issue. Investigate node behaviour or"
-                 " try a longer timeout in commission.py.")
-    elif a and not b and not c:
-        log.info("\nResult: `set prv.key` is unreliable over the mesh on this firmware,"
-                 " independent of preceding commands. Look at firmware/timeout, not session.")
-    elif a and b and not c:
-        log.info("\nResult: `set prv.key` works alone but not after password change."
-                 " The bug is in the interaction; deeper firmware investigation needed.")
-    else:
-        log.info("\nResult: pattern does not match expectations — investigate.")
+    d = findings["phase_d_set_prv_key_real"]
+    log.info("")
+    if d is True:
+        log.info("Phase D reply confirms a real `set prv.key` *does* return within 180s.")
+        log.info("Action: raise the commission timeout for set prv.key (and likely set radio)"
+                 " to ~180s and re-test live.")
+    elif d is False:
+        log.info("Phase D did not reply within 180s with a properly generated key.")
+        log.info("Action: the response is genuinely lost, not just slow. Investigate further"
+                 " (mesh routing, repeater queue, firmware bug).")
+    if a and (b is not None) and (c is not None):
+        if not b and not c:
+            log.info("(Note: junk keys errored fast in both B and C, confirming validation"
+                     " runs and the session is not blocked by password change.)")
     return 0
 
 

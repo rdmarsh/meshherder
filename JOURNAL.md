@@ -4,6 +4,61 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-23 - Bench Investigation of the set prv.key Timeout
+
+After shipping the new-mode fallback, the next live commission failed at the same
+point: `password walter76` replied OK, `set prv.key <real key>` timed out with no
+reply after 30s. The fallback recovered the auth on retry, but each retry hit the
+exact same wall — the wizard was now stuck in a loop where the fallback worked
+correctly but couldn't get past `set prv.key`.
+
+Built `scripts/bench_session_invalidation.py` to test hypotheses against the
+USB-attached bricked node from luna's gateway over the mesh, with mchd stopped so
+the script owned the serial port. Every step prints `[SEND]` / `[REPLY]` /
+`[NO REPLY]` so the bench tape is unambiguous. The script never sends `reboot`,
+so any staged radio/key changes never apply.
+
+### Run 1: hypothesis "password change invalidates the admin session"
+
+Phases: factory login → `set name PHASE_A` → `password <new>` → `set name PHASE_B`
+(no re-login) → re-login → `set name PHASE_C`. Result: A, B, and C all replied
+`OK`. The session is **not** invalidated by `password <new>`. Hypothesis refuted.
+
+### Run 2: hypothesis "`set prv.key` is the slow command"
+
+Refocused Phases: factory login → `set name PHASE_A` (control) → `set prv.key
+<junk>` (90s timeout) → `password <new>` → re-login → `set prv.key <junk>` (90s).
+
+Results:
+- Phase A: `set name PHASE_A` → `OK` (instant).
+- Phase B: `set prv.key 1111...2222...` → **`'Error, bad key'`** (instant).
+- Phase C: same junk key after password change → **`'Error, bad key'`** (instant).
+
+Two key inferences:
+- The firmware *validates the scalar clamping* on the private key. Our junk had
+  bit 0 set in the first byte, violating the standard curve25519 `&= 248` clamp,
+  so the firmware rejected it instantly with `'Error, bad key'`. `src/mch/meshkey.py`
+  produces properly clamped keys, so real wizard-generated keys pass validation.
+- A *validated* `set prv.key` doesn't just respond fast and lazily defer work.
+  The processing the firmware does for a valid key (probably curve25519 scalar
+  multiplication on the ESP32 to derive the new public key, plus flash writes)
+  takes long enough that the response misses the 30s timeout in
+  `gateway.send_command` (`src/mch/gateway.py`, line 353).
+
+Side observation from Run 2: the post-password re-login failed
+(`login failed for bbcde403cef3: None`), but Phase C still got an admin reply
+without it. Consistent with the existing model in `CLAUDE.md`: after first login
+the gateway pubkey is on the node's ACL and subsequent commands work without
+re-authentication.
+
+### Conclusion and next step
+
+The bug is not session-related. The bug is that the default 30s timeout is too
+short for `set prv.key` (and almost certainly `set radio`, which failed the same
+way on 2026-05-22). Next: extend the bench with Phase D that sends a *real*
+generated private key with a long timeout so we can measure the actual response
+time, then ship a calibrated per-command timeout in commissioning.
+
 ## 2026-05-23 - New-Mode Commission Fallback to User Password
 
 - After shipping the replace-mode fallback (entry below), a live `commission new` run on the
