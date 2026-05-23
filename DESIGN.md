@@ -135,16 +135,25 @@ mid-conversation. Commissioning must assume *any* command can time out without a
 apply but lose its response. The architecture treats partial-state recovery as a first-class
 concern rather than an edge case.
 
-Two firmware behaviours drive the strategy:
+Three firmware behaviours drive the strategy:
 
 - **Reboot gates identity and radio.** `set prv.key` and `set radio` are stored on send but only
   take effect after `reboot`. So if commissioning fails before the reboot is sent, the node still
   advertises with the old pubkey on the old radio. Re-discovery on the factory frequency will find
   it; the command sequence can be safely re-sent.
-- **`password <new>` invalidates the current admin session.** On v1.15-era firmware, the next CLI
-  command after a password change often times out with no response — observed on both `set radio`
-  (2026-05-22) and `set prv.key` (2026-05-23). The node has the new password, but the in-flight
-  command never gets a reply.
+- **`set prv.key` and `set radio` are slow.** Bench-measured on v1.15-era firmware: a valid
+  `set prv.key` derives the new public key (curve25519 scalar mult on the ESP32) and writes to
+  flash before replying `OK, reboot to apply! New pubkey: <hex>`. The work takes longer than the
+  30s default `send_command` timeout but completes inside 180s. `set radio` exhibits the same
+  pattern. Commissioning passes a 180s timeout for these two commands via
+  `_command_timeout` in `src/mch/commission.py`; everything else keeps the 30s default.
+  This was originally misdiagnosed as session invalidation after the preceding `password <new>`;
+  Run 1 of `scripts/bench_session_invalidation.py` refuted that — `set name` after a password
+  change with no re-login works fine.
+- **Once `password <new>` is sent, the factory password is gone.** This is not session
+  invalidation, just normal admin-password change. If a later command fails for any reason and
+  the wizard retries, the next factory login attempt will be rejected; recovery has to know
+  about the new password.
 
 Together these mean partial commission leaves a predictable state: factory-looking pubkey and
 radio, but a *non-factory* admin password. Recovery cannot rely on the factory password alone.
