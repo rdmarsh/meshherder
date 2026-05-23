@@ -1,21 +1,30 @@
 #!/usr/bin/env python3
 """
-Bench experiment: does `password <new>` over the mesh invalidate the gateway's
-admin session on v1.15-era MeshCore firmware?
+Bench experiment: why does `set prv.key` time out during commissioning?
 
-Symptom from 2026-05-23 live commissioning: factory login OK, `set name`,
-`set guest.password`, `password <new>` all reply normally, then the very next
-mesh command (`set prv.key` or `set radio`) times out with no response.
+Symptom from 2026-05-22 and 2026-05-23 live commissioning: every command
+through `password <new>` replies normally; the very next mesh command
+(`set radio` then, `set prv.key` now) times out with no response after 30s.
 
-Hypothesis: the admin session bound to the previous password is invalidated
-when the password changes. Without a re-login, the next command is silently
-dropped. An explicit re-login with the new password should restore admin and
-let subsequent commands through.
+A first experiment (committed as the initial version of this script) refuted
+the "password invalidates the session" hypothesis: `set name` worked fine
+right after `password <new>` with no re-login. So the session is intact.
 
-This script tests that hypothesis safely. It does NOT send `set prv.key`,
-`set radio`, or `reboot`, so it cannot brick the node further. It probes the
-behavior using `set name`, which is reversible. It restores the admin password
-to factory at the end regardless of outcome.
+This revision tests the next two hypotheses:
+  B. `set prv.key` is just slow/unreliable over the mesh on this firmware,
+     independently of any preceding password change. Send it alone, after
+     factory login, with a generous 90s timeout. If it eventually replies,
+     a longer timeout in commissioning is the fix.
+  C. The interaction between `password <new>` and a *following* `set prv.key`
+     is the bug. After password change, re-login, then send `set prv.key`.
+     If B succeeds but C times out, this points at a state issue post-password.
+
+`set prv.key` stages a new private key that only applies on reboot. The
+experiment never sends `reboot`, so the staged junk key never takes effect;
+the bench node continues advertising on its current identity. The next real
+commission attempt overwrites the staged key.
+
+It restores the admin password to factory at the end regardless of outcome.
 
 Usage (on the host with the gateway USB-attached, e.g. luna):
     sudo systemctl stop mchd       # daemon must release the serial port
@@ -48,6 +57,13 @@ from mch.gateway import Gateway
 
 FACTORY_PW = "password"
 TEST_PW = "bench_temp_pw"
+
+# 64-byte (128-hex-char) deterministic junk key. The staged key is never applied
+# because we never send reboot, so this value never affects the node's identity.
+JUNK_PRV_KEY = (
+    "1111111111111111111111111111111111111111111111111111111111111111"
+    "2222222222222222222222222222222222222222222222222222222222222222"
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("bench")
@@ -89,9 +105,9 @@ async def main(config_path: str) -> int:
     log.info("home radio snapshot: %.3f / %g / SF%d / CR%d", *home)
 
     findings: dict[str, bool | None] = {
-        "phase_a_baseline": None,
-        "phase_b_no_relogin": None,
-        "phase_c_relogin": None,
+        "phase_a_baseline_set_name": None,
+        "phase_b_set_prv_key_alone": None,
+        "phase_c_set_prv_key_after_password": None,
     }
 
     try:
@@ -114,23 +130,25 @@ async def main(config_path: str) -> int:
             return 3
         log.info("factory login OK")
 
-        log.info("\n--- Phase A: baseline (pre-password-change) ---")
-        findings["phase_a_baseline"] = await send_and_observe(gw, contact, "set name PHASE_A")
-
-        log.info("\n--- Phase B: change password, do NOT re-login ---")
-        # Reduce timeout because we expect this to time out per the hypothesis.
-        pw_replied = await send_and_observe(gw, contact, f"password {TEST_PW}")
-        if not pw_replied:
-            log.warning("password change did not reply; hypothesis already partial")
-        log.info("(deliberately skipping re-login)")
-        findings["phase_b_no_relogin"] = await send_and_observe(
-            gw, contact, "set name PHASE_B", timeout=15.0
+        log.info("\n--- Phase A: baseline `set name` (control) ---")
+        findings["phase_a_baseline_set_name"] = await send_and_observe(
+            gw, contact, "set name PHASE_A"
         )
 
-        log.info("\n--- Phase C: re-login with new password, retry ---")
+        log.info("\n--- Phase B: `set prv.key` alone, no password change, 90s timeout ---")
+        findings["phase_b_set_prv_key_alone"] = await send_and_observe(
+            gw, contact, f"set prv.key {JUNK_PRV_KEY}", timeout=90.0
+        )
+
+        log.info(
+            "\n--- Phase C: `password <new>` then re-login then `set prv.key` (90s timeout) ---"
+        )
+        await send_and_observe(gw, contact, f"password {TEST_PW}")
         relogin_ok = await gw.login(contact, TEST_PW)
         log.info("re-login with TEST_PW: %s", relogin_ok)
-        findings["phase_c_relogin"] = await send_and_observe(gw, contact, "set name PHASE_C")
+        findings["phase_c_set_prv_key_after_password"] = await send_and_observe(
+            gw, contact, f"set prv.key {JUNK_PRV_KEY}", timeout=90.0
+        )
 
     finally:
         # Cleanup is best-effort. If we lost the session entirely, the operator
@@ -157,15 +175,22 @@ async def main(config_path: str) -> int:
         "\nVerify post-state on the USB side:\n"
         "    meshcore-cli -r -s /dev/cu.usbserial-0001 get name"
     )
-    # Exit 0 if the hypothesis holds clearly: Phase A reply, Phase B no reply, Phase C reply.
-    if (findings["phase_a_baseline"] is True
-            and findings["phase_b_no_relogin"] is False
-            and findings["phase_c_relogin"] is True):
-        log.info("\nResult: HYPOTHESIS CONFIRMED — password change invalidates session;"
-                 " explicit re-login restores it.")
-        return 0
-    log.info("\nResult: pattern does not match the hypothesis cleanly — investigate further.")
-    return 1
+    a = findings["phase_a_baseline_set_name"]
+    b = findings["phase_b_set_prv_key_alone"]
+    c = findings["phase_c_set_prv_key_after_password"]
+    if a and b and c:
+        log.info("\nResult: `set prv.key` works in both contexts — commission failure"
+                 " was likely a transient timing issue. Investigate node behaviour or"
+                 " try a longer timeout in commission.py.")
+    elif a and not b and not c:
+        log.info("\nResult: `set prv.key` is unreliable over the mesh on this firmware,"
+                 " independent of preceding commands. Look at firmware/timeout, not session.")
+    elif a and b and not c:
+        log.info("\nResult: `set prv.key` works alone but not after password change."
+                 " The bug is in the interaction; deeper firmware investigation needed.")
+    else:
+        log.info("\nResult: pattern does not match expectations — investigate.")
+    return 0
 
 
 if __name__ == "__main__":
