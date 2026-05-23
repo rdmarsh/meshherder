@@ -59,6 +59,47 @@ way on 2026-05-22). Next: extend the bench with Phase D that sends a *real*
 generated private key with a long timeout so we can measure the actual response
 time, then ship a calibrated per-command timeout in commissioning.
 
+### Run 3: Phase D with a real generated key (180s timeout)
+
+Sent a fresh `generate_private_key()` value with a 180s timeout. The firmware
+replied within the window with:
+`OK, reboot to apply! New pubkey: <hex>`. The pubkey matched the one derived
+locally from the same private key, so `src/mch/meshkey.py` produces the format
+the firmware expects and our `derive_public_key` agrees with the firmware's
+own derivation. The response was real, not lost — the 30s default timeout was
+just too short for the firmware to finish its work (curve25519 scalar mult to
+derive the new public key + flash write to persist the staged identity).
+
+### Fix
+
+Per-command timeout in `_send_commission_command`: `set prv.key` and `set radio`
+get 180s; everything else keeps the 30s default. Targeted and reversible.
+
+### Reference: firmware source for `set prv.key`
+
+Handler at `src/helpers/CommonCLI.cpp` (MeshCore main, ~line 710):
+
+```cpp
+} else if (memcmp(config, "prv.key ", 8) == 0) {
+  uint8_t prv_key[PRV_KEY_SIZE];
+  bool success = mesh::Utils::fromHex(prv_key, PRV_KEY_SIZE, &config[8]);
+  if (success && mesh::LocalIdentity::validatePrivateKey(prv_key)) {
+    mesh::LocalIdentity new_id;
+    new_id.readFrom(prv_key, PRV_KEY_SIZE);
+    _callbacks->saveIdentity(new_id);
+    strcpy(reply, "OK, reboot to apply! New pubkey: ");
+    mesh::Utils::toHex(&reply[33], new_id.pub_key, PUB_KEY_SIZE);
+  } else {
+    strcpy(reply, "Error, bad key");
+  }
+}
+```
+
+`validatePrivateKey` is what rejects malformed input fast; `readFrom` does the
+expensive public-key derivation; `saveIdentity` writes to flash. Then the reply
+goes out — the reply is always sent, it just takes time. There is no remote-vs-
+serial gate on `set prv.key` (only `get prv.key` is serial-only).
+
 ## 2026-05-23 - New-Mode Commission Fallback to User Password
 
 - After shipping the replace-mode fallback (entry below), a live `commission new` run on the

@@ -740,6 +740,41 @@ async def test_commission_replace_sends_reboot_last():
 
 
 @pytest.mark.asyncio
+async def test_commission_uses_long_timeout_for_slow_commands():
+    """`set prv.key` and `set radio` use a longer timeout than fast commands.
+
+    Bench-measured on v1.15-era firmware: a valid set prv.key derives the new
+    pubkey and writes flash before replying, taking well over 30s. set radio
+    showed the same pattern. Fast commands (set name, password, etc.) reply
+    instantly and should keep the short default."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "hunter2",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    timeouts_by_command = {
+        call.args[1]: call.kwargs["timeout"]
+        for call in gw.send_command.call_args_list
+    }
+    # Fast commands keep the short default
+    assert timeouts_by_command["set name TestNode"] == 30.0
+    assert timeouts_by_command["password hunter2"] == 30.0
+    # Slow commands get the extended timeout
+    assert timeouts_by_command[f"set prv.key {GENERATED_PRV_KEY}"] == 180.0
+    assert timeouts_by_command["set radio 915.800,250,10,5"] == 180.0
+
+
+@pytest.mark.asyncio
 async def test_commission_replace_waits_for_radio_then_reboots_without_waiting():
     """'replace' mode waits for set radio before sending the no-wait reboot."""
     from mch.commission import handle_commission
