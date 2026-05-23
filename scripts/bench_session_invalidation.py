@@ -43,9 +43,7 @@ import logging
 import sys
 from pathlib import Path
 
-import yaml
-
-from mch.config import GatewayConfig
+from mch.config import load as load_config
 from mch.gateway import Gateway
 
 FACTORY_PW = "password"
@@ -76,11 +74,10 @@ async def send_and_observe(
 
 
 async def main(config_path: str) -> int:
-    cfg = yaml.safe_load(Path(config_path).read_text())
-    gw_cfg = GatewayConfig(**(cfg.get("gateway") or {}))
-    gw = Gateway(gw_cfg)
+    cfg = load_config(Path(config_path), load_secrets=False)
+    gw = Gateway(cfg.gateway)
 
-    log.info("connecting to gateway on %s", gw_cfg.device)
+    log.info("connecting to gateway on %s", cfg.gateway.device)
     await gw.connect()
 
     home = (
