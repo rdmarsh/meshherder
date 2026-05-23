@@ -381,6 +381,7 @@ snippet, add it to config, and restart mchd. If the node needs a login password,
 ```
 mch status                  # fleet view: state, label, group, firmware, neighbours, last seen
 mch status <label|prefix>   # one match → detail view; multiple matches → filtered table
+mch validate                # validate config.yaml and secrets.yaml without contacting mchd
 mch suggest                    # suggested txdelay for every node based on neighbour count
 mch suggest <label|prefix>     # full suggestions + paste-ready config block
 mch contacts                # nodes visible to the gateway but not yet in config
@@ -421,6 +422,8 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 ```
 mch status                    Fleet overview: state, label, group, firmware, neighbours, last seen
 mch status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
+mch validate                  Validate config.yaml/secrets.yaml without contacting mchd
+mch validate --config <path>  Validate an explicit config file
 mch plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch plan <label|prefix>       Filter planned writes/audit drift/unknown values
 mch suggest                      Suggested txdelay for all nodes based on neighbour count

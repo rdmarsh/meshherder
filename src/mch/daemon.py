@@ -339,6 +339,7 @@ async def _dispatch(
     if cmd == "prune":
         dry_run = bool(req.get("dry_run", True))
         nodes = await db.get_all_nodes()
+        candidate_nodes = [n for n in nodes if not _is_configured_node(n.pubkey, config)]
         candidates = [
             {
                 "pubkey": n.pubkey,
@@ -347,12 +348,11 @@ async def _dispatch(
                 "state": n.state.value,
                 "last_seen": n.last_seen.isoformat() if n.last_seen else None,
             }
-            for n in nodes
-            if not _is_configured_node(n.pubkey, config)
+            for n in candidate_nodes
         ]
         if not dry_run:
-            for item in candidates:
-                await db.delete_node(item["pubkey"])
+            for node in candidate_nodes:
+                await db.delete_node(node.pubkey)
         return {
             "ok": True,
             "data": {

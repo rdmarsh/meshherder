@@ -11,11 +11,13 @@ import json
 import subprocess
 import unicodedata
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import click
 
 from mch.command_safety import blocked_exec_command, confirm_exec_command
+from mch.config import load as load_config
 from mch.meshkey import derive_public_key, generate_private_key
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
@@ -130,6 +132,49 @@ def cli(ctx: click.Context, socket: str) -> None:
     """mch — MeshCore node management CLI"""
     ctx.ensure_object(dict)
     ctx.obj["socket"] = socket
+
+
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
+
+@cli.command("validate")
+@click.option(
+    "--config", "-c",
+    "config_path",
+    default=Path("config.yaml"),
+    type=click.Path(dir_okay=False, path_type=Path),
+    show_default=True,
+    help="Path to config.yaml",
+)
+@click.option(
+    "--secrets",
+    "secrets_path",
+    default=None,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Path to secrets.yaml. Defaults to config secrets_file or sibling secrets.yaml.",
+)
+def validate_config(config_path: Path, secrets_path: Path | None) -> None:
+    """Validate config.yaml and secrets.yaml without contacting mchd."""
+    if not config_path.exists():
+        click.echo(f"error: config file not found: {config_path}", err=True)
+        raise SystemExit(1)
+    if secrets_path is not None and not secrets_path.exists():
+        click.echo(f"error: secrets file not found: {secrets_path}", err=True)
+        raise SystemExit(1)
+
+    try:
+        cfg = load_config(config_path, secrets_path=secrets_path)
+    except (ValueError, PermissionError, OSError) as exc:
+        click.echo(f"error: config validation failed: {exc}", err=True)
+        raise SystemExit(1) from None
+
+    click.echo(f"config ok: {cfg.config_path}")
+    click.echo(f"nodes: {len(cfg.nodes)}  groups: {len(cfg.groups)}  secrets: {len(cfg.secrets)}")
+    if cfg.secrets_path and Path(cfg.secrets_path).exists():
+        click.echo(f"secrets ok: {cfg.secrets_path}")
+    else:
+        click.echo("secrets: none found")
 
 
 # ---------------------------------------------------------------------------
