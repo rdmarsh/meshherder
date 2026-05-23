@@ -21,6 +21,7 @@ from mch.config import load as load_config
 from mch.meshkey import derive_public_key, generate_private_key
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
+DEFAULT_CONFIG = Path("/etc/meshherder/config.yaml")
 
 
 def _wlen(s: str) -> int:
@@ -114,6 +115,11 @@ def _commission_busy_hint(error: str) -> str | None:
     )
 
 
+def _default_config_path() -> Path:
+    local_config = Path("config.yaml")
+    return local_config if local_config.exists() else DEFAULT_CONFIG
+
+
 # ---------------------------------------------------------------------------
 # group
 # ---------------------------------------------------------------------------
@@ -142,9 +148,9 @@ def cli(ctx: click.Context, socket: str) -> None:
 @click.option(
     "--config", "-c",
     "config_path",
-    default=Path("config.yaml"),
+    default=None,
     type=click.Path(dir_okay=False, path_type=Path),
-    show_default=True,
+    show_default="config.yaml, then /etc/meshherder/config.yaml",
     help="Path to config.yaml",
 )
 @click.option(
@@ -154,8 +160,9 @@ def cli(ctx: click.Context, socket: str) -> None:
     type=click.Path(dir_okay=False, path_type=Path),
     help="Path to secrets.yaml. Defaults to config secrets_file or sibling secrets.yaml.",
 )
-def validate_config(config_path: Path, secrets_path: Path | None) -> None:
+def validate_config(config_path: Path | None, secrets_path: Path | None) -> None:
     """Validate config.yaml and secrets.yaml without contacting mchd."""
+    config_path = config_path or _default_config_path()
     if not config_path.exists():
         click.echo(f"error: config file not found: {config_path}", err=True)
         raise SystemExit(1)
