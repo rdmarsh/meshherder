@@ -1,0 +1,163 @@
+.TH MCH 1 "2026-05-23" "meshherder 0.1.0" "User Commands"
+.SH NAME
+mch \- manage MeshCore repeater nodes through the mchd daemon
+.SH SYNOPSIS
+.B mch
+[\fB--socket\fR \fIPATH\fR]
+\fICOMMAND\fR
+[\fIARGS\fR]
+.SH DESCRIPTION
+.B mch
+is the command line client for Mesh Herder. It talks to
+.BR mchd (8)
+over a Unix socket and shows fleet status, validates configuration,
+triggers syncs, runs carefully checked one-off commands, and guides node
+commissioning.
+.PP
+Mesh Herder treats
+.I config.yaml
+as desired state and the SQLite database as observed state. The daemon applies
+only the settings that are explicitly configured for enforcement; the default
+setting policy is audit.
+.SH OPTIONS
+.TP
+.B \-\-version
+Show the installed version and exit.
+.TP
+.B \-s, \-\-socket \fIPATH\fR
+Path to the
+.B mchd
+Unix socket. Defaults to
+.IR /run/meshherder/mchd.sock .
+.TP
+.B \-\-help
+Show command help.
+.SH COMMANDS
+.TP
+.B status
+Show the fleet table, including state, label, group, firmware, neighbour count,
+and last seen time.
+.TP
+.B status \fILABEL_OR_PREFIX\fR
+Show one matching node in detail, or a filtered table if more than one node
+matches.
+.TP
+.B validate
+Validate a local
+.I config.yaml
+if present, otherwise
+.IR /etc/meshherder/config.yaml .
+This command does not contact
+.BR mchd .
+If the secrets file is not readable, the readable config is still checked and
+secrets are reported as not checked.
+.TP
+.B validate \-\-config \fIPATH\fR
+Validate an explicit config file.
+.TP
+.B plan
+Show desired-versus-known changes without sending mesh commands or writing to
+nodes.
+.TP
+.B plan \fILABEL_OR_PREFIX\fR
+Filter planned writes, audit drift, and unknown values.
+.TP
+.B suggest
+Show suggested settings for all nodes based on neighbour count.
+.TP
+.B suggest \fILABEL_OR_PREFIX\fR
+Show detailed suggestions and a paste-ready config block for one node.
+.TP
+.B logs
+Show recent per-node activity across all nodes.
+.TP
+.B logs \fIPREFIX\fR
+Show recent activity for one node.
+.TP
+.B contacts
+Show repeater contacts visible to the gateway that are not yet in config.
+.TP
+.B prune
+List database nodes no longer present in
+.IR config.yaml .
+.TP
+.B prune \-\-yes
+Delete listed local database state for retired nodes. This does not edit
+.IR config.yaml ,
+.IR secrets.yaml ,
+or gateway favourites.
+.TP
+.B remove \fILABEL_OR_PREFIX\fR
+Delete one node's local database state after confirmation. This deletes local
+facts, settings, operations, logs, and the database node row. It refuses nodes
+still present in
+.I config.yaml
+unless
+.B \-\-force
+is supplied.
+.TP
+.B remove \fILABEL_OR_PREFIX\fR \-\-yes
+Delete without prompting.
+.TP
+.B sync
+Start an immediate full sync cycle in the background. Rate limiting still
+applies.
+.TP
+.B sync \fILABEL_OR_PREFIX\fR
+Sync one node immediately and wait for the result.
+.TP
+.B exec \fINODE\fR \fICOMMAND...\fR
+Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked
+or require confirmation.
+.TP
+.B commission
+Interactively commission a fresh or replacement MeshCore node.
+.TP
+.B start
+Start
+.B mchd
+through systemd.
+.TP
+.B stop
+Stop
+.B mchd
+through systemd.
+.TP
+.B restart
+Restart
+.B mchd
+through systemd.
+.SH FILES
+.TP
+.I /etc/meshherder/config.yaml
+Desired fleet state.
+.TP
+.I /etc/meshherder/secrets.yaml
+Node passwords and private keys. Usually mode 600 and readable only by the
+service account.
+.TP
+.I /var/lib/meshherder/mch.db
+Observed state, command history, facts, and sync schedule.
+.TP
+.I /run/meshherder/mchd.sock
+Default daemon socket.
+.SH EXAMPLES
+.TP
+.B mch validate
+Validate the active config file, and validate secrets too if they are readable.
+.TP
+.B sudo mch validate
+Validate both production config and mode-600 secrets.
+.TP
+.B mch status qh
+Show nodes matching
+.IR qh .
+.TP
+.B mch sync aabbccdd
+Sync one node immediately.
+.TP
+.B mch remove old-site --yes
+Delete local DB state for a retired node.
+.SH SEE ALSO
+.BR mchd (8),
+.BR systemctl (1)
