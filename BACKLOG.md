@@ -112,6 +112,11 @@ keep `DESIGN.md` for stable architecture notes.
   - Treat `mch node <node>` wording as legacy.
   - Remove or redirect older docs/code references over time.
 
+- Polish `mch validate` output ordering.
+  - The current behavior is useful, but the display is a little awkward: the node/group count sits
+    between config and secrets status, and it mentions secrets before confirming the secrets file.
+  - Revisit after core validation behavior settles.
+
 ## Wishlist
 
 - DM-triggered sync for already-managed nodes, using the same authorization and operation-lock
