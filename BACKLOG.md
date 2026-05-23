@@ -97,6 +97,24 @@ keep `DESIGN.md` for stable architecture notes.
     location is being set: cap at 24 if yes, 32 if no. Also surface this in the prompt
     text so operators understand why the name they typed got rejected.
 
+- Tolerate float roundoff when comparing observed-vs-desired numeric settings.
+  - Observed 2026-05-23: the bench node returned `915.7999877` from `get radio` after
+    being set to `915.800`. Same single-precision drift will apply to `set lat` / `set lon`
+    (e.g. desired `32.5` comes back as `32.499999`). Audit/enforce that does a literal
+    string or exact-float compare will treat this as permanent drift and try to re-sync
+    every cycle — exactly the chatter we don't want.
+  - Two reasonable mechanisms (pick one or both):
+    1. **Significant-digits comparison**: for each known-numeric setting key, compare to
+       a defined precision (e.g. 4 decimals for `lat`/`lon`, 3 for `radio.freq`). Round
+       both desired and observed before comparing.
+    2. **Tolerance comparison**: compare with `abs(desired - observed) < epsilon` per
+       known-numeric key.
+  - Where to put it: the setting-comparison helper in the sync/audit path. Add a small
+    per-key numeric metadata table (key → precision/epsilon) and use that during compare.
+  - Keep all-string compares for non-numeric settings (name, owner.info, etc.).
+  - Worth catching in `mch validate` too: warn if a desired numeric value has more
+    significant digits than the firmware will preserve.
+
 - `mch adopt <node-id>`: bring an existing in-the-wild node under management.
   - Use case: a repeater is already deployed and operational on the mesh, possibly
     commissioned by someone else or by a previous tool. Operator wants to start managing
