@@ -7,7 +7,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mch.config import Config, GatewayConfig, NodeConfig, NodeSecrets, RadioConfig
+from mch.config import (
+    Config,
+    GatewayConfig,
+    GroupConfig,
+    NodeConfig,
+    NodeSecrets,
+    RadioConfig,
+    SettingConfig,
+)
 from mch.gateway import CommandResult
 from mch.meshkey import derive_public_key
 from mch.models import Node
@@ -887,6 +895,63 @@ async def test_commission_scan_returns_gateway_radio_string():
 
     assert resp["ok"] is True
     assert resp["data"]["gateway_radio"] == "915.800,250,10,5"
+    assert resp["data"]["group_options"] == []
+    assert resp["data"]["radio_options"] == [
+        {"label": "gateway/home radio", "value": "915.800,250,10,5"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_commission_scan_returns_group_options():
+    """scan mode includes configured group names for the new-node wizard."""
+    from mch.commission import handle_commission
+
+    gw = make_gateway(discovered=[])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = Config(groups=[GroupConfig(name="QH"), GroupConfig(name="test")])
+
+    resp = await handle_commission({"cmd": "commission", "mode": "scan"}, wq, db, cfg)
+
+    assert resp["ok"] is True
+    assert resp["data"]["group_options"] == ["QH", "test"]
+
+
+@pytest.mark.asyncio
+async def test_commission_scan_returns_config_radio_options():
+    """scan mode includes radio choices declared in groups, nodes, and via."""
+    from mch.commission import handle_commission
+
+    gw = make_gateway(discovered=[])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = Config(
+        gateway=GatewayConfig(radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5)),
+        groups=[
+            GroupConfig(
+                name="repeaters",
+                settings={"radio": SettingConfig(desired="915.075,125,9,5")},
+            )
+        ],
+        nodes=[
+            NodeConfig(
+                pubkey_prefix="aabbccdd",
+                label="site-a",
+                settings={"radio": SettingConfig(desired="916.575,62.5,7,8")},
+                via=RadioConfig(freq=917.000, bw=125.0, sf=8, cr=5),
+            )
+        ],
+    )
+
+    resp = await handle_commission({"cmd": "commission", "mode": "scan"}, wq, db, cfg)
+
+    assert resp["ok"] is True
+    assert resp["data"]["radio_options"] == [
+        {"label": "gateway/home radio", "value": "915.800,250,10,5"},
+        {"label": "group repeaters", "value": "915.075,125,9,5"},
+        {"label": "node site-a", "value": "916.575,62.5,7,8"},
+        {"label": "node site-a", "value": "917.000,125,8,5"},
+    ]
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,8 @@
 # profiles_file: /path/to/your/profiles.yaml in config.yaml.
 # Or set profiles_url: to fetch an up-to-date copy automatically.
 
+version: 1
+
 profiles:
   - name: tower
     min_neighbours: 20
@@ -79,3 +81,9 @@ universal:
   - key: agc.reset.interval
     value: "4"
     description: "Reset radio AGC every 4 s - cures deafness from nearby interference"
+
+# Named radio options shown by `mch commission`.
+radio_presets:
+  - name: Australia Mid
+    value: "915.075,125,9,5"
+    description: "Public AU/NZ mesh default from the bundled profile"

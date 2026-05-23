@@ -20,6 +20,7 @@ from mch.command_safety import blocked_exec_command, confirm_exec_command
 from mch.config import load as load_config
 from mch.config import secrets_identity_warnings
 from mch.meshkey import derive_public_key, generate_private_key
+from mch.recommend import load_radio_presets
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
 DEFAULT_CONFIG = Path("/etc/meshherder/config.yaml")
@@ -955,6 +956,8 @@ def _run_commission_wizard(socket: str) -> None:
 
     # Search first — no point asking questions if there's no node to commission.
     gateway_radio = None
+    radio_options: list[dict[str, str]] = []
+    group_options: list[str] = []
     while True:
         click.echo(
             "Searching for unmanaged nodes in range on default factory frequency (869.618 MHz)..."
@@ -976,6 +979,8 @@ def _run_commission_wizard(socket: str) -> None:
 
         nodes = resp["data"]["nodes"]
         gateway_radio = resp["data"].get("gateway_radio")
+        radio_options = resp["data"].get("radio_options", [])
+        group_options = resp["data"].get("group_options", [])
 
         if len(nodes) == 0:
             click.echo("\nNo unmanaged nodes found. Is it powered on and in range with an antenna?")
@@ -1014,7 +1019,7 @@ def _run_commission_wizard(socket: str) -> None:
     while True:
         mode_raw = click.prompt("Mode", default="q").strip().lower()
         if mode_raw in ("n", "new"):
-            _commission_new_wizard(socket, gateway_radio)
+            _commission_new_wizard(socket, gateway_radio, radio_options, group_options)
             return
         if mode_raw in ("r", "replace"):
             _commission_replace_wizard(socket)
@@ -1075,33 +1080,101 @@ def _prompt_radio_cr(default: str = "") -> str:
         click.echo("  coding rate must be an integer 5-8")
 
 
+def _validate_radio_tuple(raw: str) -> tuple[str, str, str, str] | None:
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) != 4:
+        return None
+    freq, bw, sf, cr = parts
+    try:
+        if not 400.0 <= float(freq) <= 928.0:
+            return None
+        if float(bw) not in (7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0):
+            return None
+        if not 7 <= int(sf) <= 12:
+            return None
+        if not 5 <= int(cr) <= 8:
+            return None
+    except ValueError:
+        return None
+    return freq, bw, sf, cr
+
+
+def _profile_radio_options() -> list[tuple[str, str]]:
+    try:
+        presets = load_radio_presets()
+    except RuntimeError:
+        return []
+    return [
+        (preset.name, preset.value)
+        for preset in presets
+        if _validate_radio_tuple(preset.value)
+    ]
+
+
 def _prompt_radio_all(
-    freq: str, bw: str, sf: str, cr: str, gateway_radio: str | None
-) -> tuple[str, str, str, str]:
-    """
-    Prompt for radio settings. If gateway_radio is set and current values match it,
-    offer a single Enter-to-accept shortcut before falling through to individual prompts.
-    """
-    if gateway_radio:
-        gw_display = gateway_radio
-        accept = click.prompt(
-            "Radio settings ('c' to change)",
-            default=gw_display,
-        ).strip()
-        if accept.lower() != "c":
-            # Accept defaults or a pasted freq,bw,sf,cr string.
-            parts = [p.strip() for p in accept.split(",")]
-            if len(parts) == 4:
-                try:
-                    f, b, s, c = parts
-                    float(f)
-                    float(b)
-                    int(s)
-                    int(c)
-                    return f, b, s, c
-                except ValueError:
-                    pass
-            # Fall through to individual prompts.
+    freq: str,
+    bw: str,
+    sf: str,
+    cr: str,
+    gateway_radio: str | None,
+    config_radio_options: list[dict[str, str]],
+) -> tuple[str, str, str, str] | None:
+    """Prompt for radio settings with named choices plus paste/custom escape hatches."""
+    current_radio = f"{freq},{bw},{sf},{cr}" if all((freq, bw, sf, cr)) else ""
+    options: list[tuple[str, str, str]] = []
+
+    def _add_option(label: str, value: str | None) -> None:
+        if value is None:
+            return
+        is_new = all(existing != value for _, existing, _ in options)
+        if is_new and _validate_radio_tuple(value):
+            options.append((str(len(options) + 1), value, label))
+
+    _add_option("gateway/home radio", gateway_radio)
+    for option in config_radio_options:
+        _add_option(option.get("label", "config radio"), option.get("value"))
+    for name, value in _profile_radio_options():
+        _add_option(name, value)
+    _add_option("current value", current_radio)
+
+    if options:
+        click.echo("Radio settings:")
+        for key, value, label in options:
+            click.echo(f"  {key}. {value:<18} {label}")
+        click.echo("  p. paste freq,bw,sf,cr")
+        click.echo("  c. custom fields")
+        click.echo("  q. cancel")
+        default_choice = options[0][0]
+        while True:
+            choice = click.prompt("Radio", default=default_choice).strip().lower()
+            if choice in ("q", "quit", "n", "no", "exit"):
+                return None
+            for key, value, _ in options:
+                if choice == key:
+                    parsed = _validate_radio_tuple(value)
+                    if parsed is not None:
+                        return parsed
+            if choice == "p":
+                raw = click.prompt(
+                    "Radio tuple (freq,bw,sf,cr)",
+                    default="",
+                    show_default=False,
+                ).strip()
+                if not raw:
+                    continue
+                if raw.lower() in ("q", "quit", "n", "no", "exit"):
+                    return None
+                parsed = _validate_radio_tuple(raw)
+                if parsed is not None:
+                    return parsed
+                click.echo("  enter radio as freq,bw,sf,cr, e.g. 915.075,125,9,5")
+                continue
+            if choice == "c":
+                break
+            pasted = _validate_radio_tuple(choice)
+            if pasted is not None:
+                return pasted
+            click.echo("  choose a number, p to paste, c for custom fields, or q to cancel")
 
     click.echo("")
     freq = _prompt_radio_freq(freq)
@@ -1115,14 +1188,55 @@ def _default_commission_label(pubkey: str | None) -> str:
     return pubkey[:12] if pubkey else "node01"
 
 
+def _prompt_commission_group(
+    current: str | None,
+    group_options: list[str],
+) -> str | None:
+    """Prompt for a config group using numbered choices when groups are known."""
+    if not group_options:
+        raw_group: str = click.prompt("Group label", default=current or "-").strip()
+        return None if raw_group == "-" else raw_group
+
+    default_group = current if current in group_options else group_options[0]
+    default_choice = str(group_options.index(default_group) + 1)
+
+    click.echo("Groups:")
+    for idx, name in enumerate(group_options, 1):
+        click.echo(f"  {idx}. {name}")
+    click.echo("  n. none")
+    click.echo("  c. custom")
+
+    while True:
+        choice: str = click.prompt("Group", default=default_choice).strip()
+        lowered = choice.lower()
+        if lowered in ("n", "none", "-"):
+            return None
+        if lowered == "c":
+            raw_group = click.prompt("Group label", default=current or "-").strip()
+            return None if raw_group == "-" else raw_group
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(group_options):
+                return group_options[idx]
+        except ValueError:
+            pass
+        if choice in group_options:
+            return choice
+        click.echo("  choose a number, n for none, or c for custom")
+
+
 def _commission_new_wizard(
     socket: str,
     gateway_radio: str | None = None,
+    radio_options: list[dict[str, str]] | None = None,
+    group_options: list[str] | None = None,
 ) -> None:
     """Collect params for a new node, confirm, send RPC with retry, display result."""
     click.echo("")
     click.echo("New node commissioning")
     click.echo("")
+    radio_options = radio_options or []
+    group_options = group_options or []
 
     # Parse gateway_radio "freq,bw,sf,cr" into per-field defaults.
     gw_parts = (gateway_radio or "").split(",")
@@ -1134,7 +1248,12 @@ def _commission_new_wizard(
 
     # Saved values — used as defaults when the outer edit loop iterates.
     label = _default_commission_label(pubkey)
-    group: str | None = "default"
+    if "default" in group_options:
+        group: str | None = "default"
+    elif group_options:
+        group = group_options[0]
+    else:
+        group = "default"
     name = ""
     admin_password = "password"
     guest_password = "guest"
@@ -1145,19 +1264,18 @@ def _commission_new_wizard(
 
     while True:  # outer: re-enter values loop
         # --- identity ---
-        label = click.prompt("Node label", default=label).strip()
+        label = click.prompt("Node label ", default=label).strip()
         # Re-prompt name until within 31 bytes (MeshCore firmware cap).
         name_default = name or label
         while True:
-            name = click.prompt("Node name", default=name_default).strip()
+            name = click.prompt("Node name  ", default=name_default).strip()
             encoded = name.encode("utf-8")
             if len(encoded) <= 31:
                 break
             truncated = encoded[:31].decode("utf-8", errors="ignore")
             click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
             name_default = truncated
-        raw_group: str = click.prompt("Group label", default=group or "-").strip()
-        group = None if raw_group == "-" else raw_group
+        group = _prompt_commission_group(group, group_options)
 
         # --- security ---
         click.echo("")
@@ -1167,7 +1285,13 @@ def _commission_new_wizard(
 
         # --- radio ---
         click.echo("")
-        freq, bw, sf, cr = _prompt_radio_all(freq, bw, sf, cr, gateway_radio)
+        radio = _prompt_radio_all(
+            freq, bw, sf, cr, gateway_radio, radio_options
+        )
+        if radio is None:
+            click.echo("cancelled")
+            return
+        freq, bw, sf, cr = radio
         target_freq = f"{freq},{bw},{sf},{cr}"
 
         click.echo("")
@@ -1179,11 +1303,20 @@ def _commission_new_wizard(
         click.echo("  radio:    " + target_freq)
         click.echo("")
 
-        action = click.prompt("Proceed? [y]es  [e]dit  [q]uit", default="y").strip().lower()
-        if action == "q":
+        while True:
+            action = click.prompt("Proceed? [y]es  [e]dit  [q]uit", default="y").strip().lower()
+            if action in ("", "y", "yes"):
+                break
+            if action in ("e", "edit"):
+                break
+            if action in ("q", "quit", "n", "no"):
+                break
+            click.echo("  please enter y, e, or q")
+
+        if action in ("q", "quit", "n", "no"):
             click.echo("cancelled")
             return
-        if action == "e":
+        if action in ("e", "edit"):
             continue
 
         # Inner: commission retry loop.

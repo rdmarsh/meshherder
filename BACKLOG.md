@@ -32,6 +32,14 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
+- Add explicit profile update command.
+  - One-day scope: add `mch profiles update` (or `mch update-profiles`) to fetch
+    `profiles_url` or the default `https://meshherder.com/profiles.yaml`, validate
+    `version: 1`, and write the cache used by recommendations/commission radio presets.
+  - Keep commissioning offline-friendly: do not prompt to fetch profiles during
+    `mch commission`.
+  - Output should summarize what changed, especially profile count and radio preset count.
+
 - Wizard hardcodes `group: default` even when no `default` group is defined.
   - `mch commission new` always offers `default` as the group prompt's default. If the
     operator's `config.yaml` defines only e.g. `QH`, the pasted snippet then fails reload

@@ -6,9 +6,11 @@ import pytest
 
 from mch.recommend import (
     Profile,
+    RadioPreset,
     UniversalSetting,
     get_profile,
     load_profiles,
+    load_radio_presets,
     parse_neighbour_count,
 )
 
@@ -118,6 +120,13 @@ def test_load_profiles_universal_has_advert_settings():
     assert values["path.hash.mode"] == "1"
 
 
+def test_load_radio_presets_bundled_returns_versioned_presets():
+    presets = load_radio_presets()
+    assert presets
+    assert all(isinstance(p, RadioPreset) for p in presets)
+    assert any(p.name == "Australia Mid" and p.value == "915.075,125,9,5" for p in presets)
+
+
 def test_load_profiles_from_custom_file(tmp_path):
     custom = tmp_path / "profiles.yaml"
     custom.write_text(
@@ -133,3 +142,31 @@ def test_load_profiles_from_custom_file(tmp_path):
     assert len(profiles) == 1
     assert profiles[0].name == "test"
     assert universal == []
+
+
+def test_load_radio_presets_from_custom_file(tmp_path):
+    custom = tmp_path / "profiles.yaml"
+    custom.write_text(
+        "version: 1\n"
+        "profiles: []\n"
+        "universal: []\n"
+        "radio_presets:\n"
+        "  - name: QH WIP\n"
+        "    value: '915.800,250,10,5'\n"
+        "    description: Test mesh\n"
+    )
+    presets = load_radio_presets(profiles_file=custom)
+    assert presets == [RadioPreset("QH WIP", "915.800,250,10,5", "Test mesh")]
+
+
+def test_load_radio_presets_falls_back_to_universal_radio(tmp_path):
+    custom = tmp_path / "profiles.yaml"
+    custom.write_text(
+        "profiles: []\n"
+        "universal:\n"
+        "  - key: radio\n"
+        "    value: '915.075,125,9,5'\n"
+        "    description: Old schema radio\n"
+    )
+    presets = load_radio_presets(profiles_file=custom)
+    assert presets == [RadioPreset("Profile radio", "915.075,125,9,5", "Old schema radio")]

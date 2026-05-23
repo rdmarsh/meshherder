@@ -983,8 +983,15 @@ def test_exec_daemon_error_exits_nonzero():
 _SCAN_RESP_ONE = {"ok": True, "data": {
     "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
     "gateway_radio": "915.800,250,10,5",
+    "radio_options": [{"label": "gateway/home radio", "value": "915.800,250,10,5"}],
+    "group_options": ["default"],
 }}
-_SCAN_RESP_NONE = {"ok": True, "data": {"nodes": [], "gateway_radio": "915.800,250,10,5"}}
+_SCAN_RESP_NONE = {"ok": True, "data": {
+    "nodes": [],
+    "gateway_radio": "915.800,250,10,5",
+    "radio_options": [{"label": "gateway/home radio", "value": "915.800,250,10,5"}],
+    "group_options": ["default"],
+}}
 
 
 def _commission_input(*lines: str) -> str:
@@ -1040,6 +1047,49 @@ def test_commission_new_cancel_aborts():
     assert "cancelled" in result.output.lower()
 
 
+def test_commission_new_no_at_confirm_aborts():
+    """Answering 'n' at the confirm prompt aborts instead of proceeding as yes."""
+    runner = CliRunner()
+    inp = _commission_input(
+        "n",          # mode: new
+        "Test Site",  # label
+        "",           # name (default to label)
+        "",           # group
+        "",           # admin password
+        "",           # guest password
+        "",           # radio
+        "n",          # no at confirm
+    )
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+
+    assert mock_rpc.call_count == 1
+    assert result.exit_code == 0
+    assert "cancelled" in result.output.lower()
+
+
+def test_commission_new_quit_at_radio_prompt_aborts():
+    """Radio menu accepts q/quit-style cancellation."""
+    runner = CliRunner()
+    inp = _commission_input(
+        "n",          # mode: new
+        "Test Site",  # label
+        "",           # name
+        "",           # group
+        "",           # admin password
+        "",           # guest password
+        "q",          # cancel at radio menu
+    )
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+
+    assert mock_rpc.call_count == 1
+    assert result.exit_code == 0
+    assert "cancelled" in result.output.lower()
+
+
 def test_commission_new_admin_password_defaults_to_password():
     """New node wizard has useful defaults when user presses Enter."""
     runner = CliRunner()
@@ -1050,7 +1100,9 @@ def test_commission_new_admin_password_defaults_to_password():
         "group": None,
         "target_freq": "915.800,250,10,5",
     }}
-    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
+    presets = [("Australia Mid", "915.075,125,9,5")]
+    with patch("mch.cli._profile_radio_options", return_value=presets), \
+         patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
             "n", "Test Site", "", "", "", "", "", "y",
             # label, name, group, admin_pw, guest_pw, radio, confirm
@@ -1061,6 +1113,190 @@ def test_commission_new_admin_password_defaults_to_password():
     assert req["admin_password"] == "password"
     assert req["group"] == "default"
     assert req["guest_password"] == "guest"
+
+
+def test_commission_new_can_choose_config_group():
+    """The new-node wizard offers groups from config.yaml."""
+    runner = CliRunner()
+    scan_resp = {"ok": True, "data": {
+        "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
+        "gateway_radio": "915.800,250,10,5",
+        "radio_options": [{"label": "gateway/home radio", "value": "915.800,250,10,5"}],
+        "group_options": ["QH", "test"],
+    }}
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": "a695e2be",
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": "test",
+        "target_freq": "915.800,250,10,5",
+    }}
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "Test Site", "", "2", "", "", "", "y",
+                # mode, label, name, group choice, admin_pw, guest_pw, radio, confirm
+            ),
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Groups:" in result.output
+    assert "1. QH" in result.output
+    assert "2. test" in result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["group"] == "test"
+
+
+def test_commission_new_group_defaults_to_first_config_group():
+    """When no default group exists, Enter selects the first configured group."""
+    runner = CliRunner()
+    scan_resp = {"ok": True, "data": {
+        "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
+        "gateway_radio": "915.800,250,10,5",
+        "radio_options": [{"label": "gateway/home radio", "value": "915.800,250,10,5"}],
+        "group_options": ["QH"],
+    }}
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": "a695e2be",
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": "QH",
+        "target_freq": "915.800,250,10,5",
+    }}
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "Test Site", "", "", "", "", "", "y",
+                # mode, label, name, group default, admin_pw, guest_pw, radio, confirm
+            ),
+        )
+
+    assert result.exit_code == 0, result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["group"] == "QH"
+
+
+def test_commission_new_can_choose_profile_radio_option():
+    """The new-node wizard offers radio choices beyond the gateway default."""
+    runner = CliRunner()
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": "a695e2be",
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": None,
+        "target_freq": "915.075,125,9,5",
+    }}
+    presets = [("Australia Mid", "915.075,125,9,5")]
+    with patch("mch.cli._profile_radio_options", return_value=presets), \
+         patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "Test Site", "", "", "", "", "2", "y",
+                # mode, label, name, group, admin_pw, guest_pw, radio choice, confirm
+            ),
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "gateway/home radio" in result.output
+    assert "Australia Mid" in result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["target_freq"] == "915.075,125,9,5"
+
+
+def test_commission_new_can_choose_config_radio_option():
+    """The new-node wizard offers radio choices from config.yaml."""
+    runner = CliRunner()
+    scan_resp = {"ok": True, "data": {
+        "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
+        "gateway_radio": "915.800,250,10,5",
+        "radio_options": [
+            {"label": "gateway/home radio", "value": "915.800,250,10,5"},
+            {"label": "group repeaters", "value": "916.575,62.5,7,8"},
+        ],
+    }}
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": "a695e2be",
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": None,
+        "target_freq": "916.575,62.5,7,8",
+    }}
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "Test Site", "", "", "", "", "2", "y",
+                # mode, label, name, group, admin_pw, guest_pw, radio choice, confirm
+            ),
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "group repeaters" in result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["target_freq"] == "916.575,62.5,7,8"
+
+
+def test_commission_new_can_paste_radio_tuple():
+    """The radio menu accepts a pasted freq,bw,sf,cr tuple."""
+    runner = CliRunner()
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": "a695e2be",
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": None,
+        "target_freq": "916.575,62.5,7,8",
+    }}
+    presets = [("Australia Mid", "915.075,125,9,5")]
+    with patch("mch.cli._profile_radio_options", return_value=presets), \
+         patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "Test Site", "", "", "", "", "p", "916.575,62.5,7,8", "y",
+                # mode, label, name, group, admin_pw, guest_pw, paste, tuple, confirm
+            ),
+        )
+
+    assert result.exit_code == 0, result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["target_freq"] == "916.575,62.5,7,8"
+
+
+def test_commission_new_blank_paste_returns_to_radio_menu():
+    """Blank input in paste mode returns to the radio menu instead of trapping the user."""
+    runner = CliRunner()
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": "a695e2be",
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": None,
+        "target_freq": "915.800,250,10,5",
+    }}
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "Test Site", "", "", "", "", "p", "", "1", "y",
+                # mode, label, name, group, admin_pw, guest_pw, paste, blank, radio, confirm
+            ),
+        )
+
+    assert result.exit_code == 0, result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["target_freq"] == "915.800,250,10,5"
 
 
 def test_default_commission_label_uses_managed_pubkey_prefix():
