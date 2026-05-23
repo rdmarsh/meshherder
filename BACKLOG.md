@@ -288,6 +288,18 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Research / Live-Test
 
+- Test `clkreboot` as the final commissioning step instead of bare `reboot`.
+  - Both commissioning flows (`commission new`, `commission replace`) end with a fire-and-forget
+    `reboot`. `clkreboot` syncs the node's clock from the message timestamp before rebooting.
+  - Unknown: does MeshCore firmware persist the synced time to flash before the reboot, so the
+    node comes up with correct time? If yes, `clkreboot` is better. If the clock resets to
+    epoch 0 on every boot, `clkreboot` makes no difference and the next `clock sync` operation
+    handles it anyway.
+  - Test with the bench Seeed nRF: send `clkreboot`, watch what time the node reports on
+    next contact via `clock` command. Compare against bare `reboot` to see if there is a
+    difference.
+  - If time persists: replace `reboot` with `clkreboot` in both commissioning sequences.
+
 - Test `tempradio` followed by `set radio` as a possible no-reboot commissioning radio switch.
   - Current confirmed behavior on Heltec V3 / MeshCore v1.15-era firmware: `set radio` returns
     `OK - reboot to apply`; commissioning should wait for that response and then send one reboot.

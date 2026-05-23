@@ -298,16 +298,44 @@ async def test_cycle_enforces_drifted_setting(db):
     cfg.facts = []  # skip facts for this test
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    # get powersaving → returns "off" (drift); set → returns "ok"
+    # powersaving (bare read) → "off" (drift); powersaving on (bare write) → "ok"
     gw.send_command = AsyncMock(side_effect=[
-        CommandResult(success=True, text="off"),   # get powersaving
-        CommandResult(success=True, text="ok"),    # set powersaving on
+        CommandResult(success=True, text="off"),   # powersaving
+        CommandResult(success=True, text="ok"),    # powersaving on
     ])
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
     assert results[0].settings_enforced == 1
     assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
+
+
+async def test_bare_command_key_uses_bare_read_and_write(db):
+    """Keys like 'powersaving' use bare commands — no 'get'/'set' prefix.
+    Read: 'powersaving' not 'get powersaving'.
+    Write: 'powersaving on' not 'set powersaving on'."""
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="off"),  # read: powersaving
+        CommandResult(success=True, text="ok"),   # write: powersaving on
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    sent = [c.args[1] for c in gw.send_command.await_args_list]
+    assert "powersaving" in sent, f"expected bare 'powersaving' read, got: {sent}"
+    assert "powersaving on" in sent, f"expected bare 'powersaving on' write, got: {sent}"
+    assert "get powersaving" not in sent, f"'get powersaving' must not be sent"
+    assert "set powersaving on" not in sent, f"'set powersaving on' must not be sent"
 
 
 async def test_cycle_updates_db_name_when_name_is_enforced(db):

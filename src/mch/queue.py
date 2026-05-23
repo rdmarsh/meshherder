@@ -45,6 +45,11 @@ from mch.models import (
 
 log = logging.getLogger(__name__)
 
+# Keys whose firmware CLI does not follow the standard `get <key>` / `set <key> <value>` pattern.
+# These use a bare read command (e.g. `powersaving` returns "on" or "off") and a bare write
+# command (e.g. `powersaving on`) — no `get`/`set` prefix.
+_BARE_COMMAND_KEYS: frozenset[str] = frozenset({"powersaving"})
+
 
 # ---------------------------------------------------------------------------
 # policy resolution
@@ -782,8 +787,9 @@ class WorkQueue:
             if policy == SettingPolicy.SKIP:
                 continue
 
-            # get current value
-            res = await self._send_authed(contact, f"get {key}", node, node_cfg)
+            # get current value — bare command for keys that don't use `get <key>`
+            read_cmd = key if key in _BARE_COMMAND_KEYS else f"get {key}"
+            res = await self._send_authed(contact, read_cmd, node, node_cfg)
             if not res.success:
                 log.warning("get %s failed for %s: %s", key, pubkey[:12], res.error)
                 continue
@@ -808,8 +814,9 @@ class WorkQueue:
                 drifted += 1
                 if policy == SettingPolicy.ENFORCE:
                     log.info("  enforcing %s: observed=%r desired=%r", key, observed, desired)
+                    write_cmd = f"{key} {desired}" if key in _BARE_COMMAND_KEYS else f"set {key} {desired}"
                     set_res = await self._send_authed(
-                        contact, f"set {key} {desired}", node, node_cfg
+                        contact, write_cmd, node, node_cfg
                     )
                     if set_res.success:
                         enforced += 1
