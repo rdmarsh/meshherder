@@ -32,14 +32,6 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
-- `mch validate` defaults to the wrong config path.
-  - Today it falls back to `~/config.yaml` if no `--config` flag is given. Operators expect
-    it to validate the config that `mchd` is actually running with (`/etc/meshherder/config.yaml`
-    under the shipped systemd unit).
-  - Default to mchd's config; also print the path being checked at the top of output so a
-    divergence is obvious. Keep `--config <path>` for explicit overrides.
-  - Overlaps with the in-progress `secrets_identity_warnings` work — land together.
-
 - Wizard hardcodes `group: default` even when no `default` group is defined.
   - `mch commission new` always offers `default` as the group prompt's default. If the
     operator's `config.yaml` defines only e.g. `QH`, the pasted snippet then fails reload
@@ -315,6 +307,10 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Fixed bare `mch validate` to check `/etc/meshherder/config.yaml`, matching the
+  shipped daemon config path, instead of preferring a `config.yaml` in the current working
+  directory. The command now prints the selected config path before validation; use
+  `--config <path>` for working-copy validation.
 - 2026-05-23: `mch validate` warns when a `secrets.yaml` `prv_key` derives a public key
   that doesn't match the `pubkey_prefix` it is filed under — catches typos and stale
   secrets entries early.

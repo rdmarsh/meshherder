@@ -262,30 +262,36 @@ nodes:
 
     mock_rpc.assert_not_called()
     assert result.exit_code == 0
+    assert f"checking config: {config}" in result.output
     assert "config ok:" in result.output
     assert "nodes: 1" in result.output
     assert "secrets ok:" in result.output
 
 
-def test_validate_without_config_option_uses_local_config(tmp_path):
-    runner = CliRunner()
-    with runner.isolated_filesystem(temp_dir=tmp_path):
-        config = Path("config.yaml")
-        config.write_text("""\
+def test_validate_without_config_option_uses_default_config_not_cwd(tmp_path):
+    default_config = tmp_path / "etc" / "meshherder" / "config.yaml"
+    default_config.parent.mkdir(parents=True)
+    default_config.write_text("""\
 nodes:
   - pubkey_prefix: aabbccdd
     label: site-a
 """)
-        secrets = Path("secrets.yaml")
-        secrets.write_text("nodes: {}\n")
-        secrets.chmod(0o600)
+    default_secrets = default_config.parent / "secrets.yaml"
+    default_secrets.write_text("nodes: {}\n")
+    default_secrets.chmod(0o600)
 
-        with patch("mch.cli._rpc") as mock_rpc:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("config.yaml").write_text("typo: true\n")
+
+        with patch("mch.cli._rpc") as mock_rpc, \
+             patch("mch.cli.DEFAULT_CONFIG", default_config):
             result = runner.invoke(cli, ["validate"])
 
     mock_rpc.assert_not_called()
     assert result.exit_code == 0
-    assert "config ok:" in result.output
+    assert f"checking config: {default_config}" in result.output
+    assert f"config ok: {default_config.resolve()}" in result.output
     assert "nodes: 1" in result.output
 
 
