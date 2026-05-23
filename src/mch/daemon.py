@@ -20,6 +20,7 @@ import signal
 import sys
 from contextlib import suppress
 from dataclasses import fields
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from mch.command_safety import blocked_exec_command
 from mch.config import Config
 from mch.config import load as load_config
 from mch.db import Database
+from meshcore.events import EventType
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
 from mch.models import NodeState, SettingPolicy
@@ -42,6 +44,18 @@ log = logging.getLogger(__name__)
 
 FileSignature = tuple[int, int] | None
 CONFIG_WATCH_INTERVAL_SECONDS = 10.0
+
+UTC = timezone.utc
+
+
+async def _handle_advert(db: Database, pubkey: str) -> None:
+    """Update last_seen for a known managed node when it sends an advert."""
+    node = await db.get_node(pubkey)
+    if node is None:
+        return
+    node.last_seen = datetime.now(UTC)
+    await db.upsert_node(node)
+    log.debug("advert from %s — last_seen updated", pubkey[:12])
 
 
 class ClientDisconnected(Exception):
@@ -208,8 +222,49 @@ async def _dispatch(
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
         facts = await db.get_facts(node.pubkey)
-        settings = await db.get_settings(node.pubkey)
+        db_settings = {s.key: s for s in await db.get_settings(node.pubkey)}
         logs = await db.get_logs(node.pubkey, limit=20)
+
+        # Merge desired config with DB observations so newly-added settings are
+        # visible even before the next sync cycle.
+        node_cfg = next(
+            (nc for nc in config.nodes if node.pubkey.startswith(nc.pubkey_prefix)),
+            None,
+        )
+        groups = {g.name: g for g in config.groups}
+        group_cfg = groups.get(node_cfg.group) if node_cfg and node_cfg.group else None
+
+        settings_out: list[dict[str, Any]] = []
+        config_keys: set[str] = set()
+        if node_cfg:
+            for key in sorted(all_setting_keys(node_cfg, group_cfg)):
+                policy = resolve_policy(key, node_cfg, group_cfg)
+                desired = resolve_desired(key, node_cfg, group_cfg)
+                if policy == SettingPolicy.SKIP or desired is None:
+                    continue
+                config_keys.add(key)
+                known = db_settings.get(key)
+                observed = known.observed if known else None
+                drift = observed is not None and observed != desired
+                settings_out.append({
+                    "key": key,
+                    "desired": desired,
+                    "observed": observed,
+                    "policy": policy.value,
+                    "drift": drift,
+                })
+
+        # DB settings no longer in config (stale/removed keys)
+        for key, s in sorted(db_settings.items()):
+            if key not in config_keys:
+                settings_out.append({
+                    "key": key,
+                    "desired": s.desired,
+                    "observed": s.observed,
+                    "policy": s.policy.value,
+                    "drift": s.drift,
+                })
+
         return {
             "ok": True,
             "data": {
@@ -227,18 +282,7 @@ async def _dispatch(
                     or any(node.pubkey.startswith(p) for p in config.secrets)
                 ),
                 "facts": facts,
-                "settings": [
-                    {
-                        "key": s.key,
-                        "desired": s.desired,
-                        "observed": s.observed,
-                        "policy": s.policy.value,
-                        "drift": s.drift,
-                        "last_checked": s.last_checked.isoformat() if s.last_checked else None,
-                        "last_set": s.last_set.isoformat() if s.last_set else None,
-                    }
-                    for s in settings
-                ],
+                "settings": settings_out,
                 "logs": logs,
             },
         }
@@ -564,6 +608,14 @@ class Daemon:
         if config.gateway.advert_on_start == "zerohop":
             log.info("sending startup advert.zerohop")
             await self._gateway.advert(zerohop=True)
+
+        # passive last_seen: update DB when a managed node advertises
+        db = self._db
+        def _advert_event_cb(event: Any) -> None:
+            pubkey = (event.payload or {}).get("public_key", "")
+            if pubkey:
+                asyncio.create_task(_handle_advert(db, pubkey))
+        self._gateway.subscribe(EventType.ADVERTISEMENT, _advert_event_cb)
 
         # messenger: DM control + channel announcements
         msg_cfg = config.messenger

@@ -4,6 +4,34 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-24 - Status view improvements and passive last_seen
+
+**`clock` bare-command fix**: `_collect_facts()` was sending `get clock` instead of bare
+`clock`, causing nodes to return `??: clock`. Added `"clock"` to the bare-command tuple
+alongside `ver`, `board`, and `neighbors`.
+
+**last_seen vs last_connected now distinct**: `last_seen` updates passively via an
+`ADVERTISEMENT` event subscription set up at daemon startup — any time a managed node
+broadcasts an advert on the mesh, its `last_seen` is updated immediately without waiting
+for the next sync. `last_connected` still only updates when the work queue successfully
+exchanges commands with the node. Both fields now show as full datetime + relative time
+in the node detail view (`2026-05-24 00:22:00 (  2m ago)`).
+
+**Settings deception fixed**: `mch status <node>` detail view now merges desired config
+settings (from both node and group config) with DB observations. New settings added to
+config show immediately with their desired values and `-` for observed — clearly pending
+rather than invisible. Previously, only settings that had been synced at least once
+appeared, making `state: configured` look complete when new config had never been applied.
+
+**Settings table column widths**: now computed from content display width using
+`_wlen()` / `_wpad()` (via `unicodedata.east_asian_width`), so emoji-containing values
+(e.g. `🦷 Quakers Hill`) no longer push subsequent columns out of alignment. The drift
+indicator column header `~` is only shown when at least one row is actually drifted.
+
+**Radio debug logging**: added `log.debug("set_radio: ...")` before every
+`mc.commands.set_radio()` call in `hop_radio`, `restore_radio`, and `set_radio` in
+`gateway.py`. Visible at DEBUG log level without cluttering production INFO logs.
+
 ## 2026-05-23 - Clock sync, settings vs operations, and powersaving fix
 
 **Clock sync mechanism confirmed**: `send_cmd` (meshcore_py) embeds `int(time.time())` from the
