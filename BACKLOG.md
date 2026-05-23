@@ -114,6 +114,11 @@ keep `DESIGN.md` for stable architecture notes.
     between config and secrets status, and it mentions secrets before confirming the secrets file.
   - Revisit after core validation behavior settles.
 
+- Revisit retired-node command naming.
+  - `mch remove <node>` works, but `mch prune <node>` might be a better fit as the single-node form
+    of `mch prune`.
+  - If changed, keep `mch remove` as an alias or compatibility path until the CLI settles.
+
 ## Wishlist
 
 - DM-triggered sync for already-managed nodes, using the same authorization and operation-lock
