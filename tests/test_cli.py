@@ -4,6 +4,7 @@ import asyncio
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -322,15 +323,24 @@ def test_validate_permission_denied_suggests_sudo(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text("gateway: {}\n")
     denied = PermissionError(13, "Permission denied", "/etc/meshherder/secrets.yaml")
+    config_only = SimpleNamespace(
+        config_path=str(config.resolve()),
+        nodes=[],
+        groups=[],
+        secrets={},
+        secrets_path="/etc/meshherder/secrets.yaml",
+    )
 
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc, \
-         patch("mch.cli.load_config", side_effect=denied):
+         patch("mch.cli.load_config", side_effect=[denied, config_only]):
         result = runner.invoke(cli, ["validate", "--config", str(config)])
 
     mock_rpc.assert_not_called()
     assert result.exit_code != 0
-    assert "cannot read config or secrets file" in result.output
+    assert "config ok:" in result.output
+    assert "secrets: not checked" in result.output
+    assert "cannot read secrets file" in result.output
     assert "sudo mch validate" in result.output
 
 

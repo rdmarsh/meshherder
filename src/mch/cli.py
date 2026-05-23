@@ -173,14 +173,25 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
     try:
         cfg = load_config(config_path, secrets_path=secrets_path)
     except PermissionError as exc:
-        if getattr(exc, "errno", None) == 13:
+        if getattr(exc, "errno", None) != 13:
+            click.echo(f"error: config validation failed: {exc}", err=True)
+            raise SystemExit(1) from None
+        try:
+            cfg = load_config(config_path, secrets_path=secrets_path, load_secrets=False)
+        except (ValueError, PermissionError, OSError) as config_exc:
             click.echo(
-                f"error: cannot read config or secrets file: {exc.filename or exc}",
+                f"error: config validation failed: {config_exc}",
                 err=True,
             )
-            click.echo("  try: sudo mch validate", err=True)
-        else:
-            click.echo(f"error: config validation failed: {exc}", err=True)
+            raise SystemExit(1) from None
+
+        click.echo(f"config ok: {cfg.config_path}")
+        click.echo(f"nodes: {len(cfg.nodes)}  groups: {len(cfg.groups)}  secrets: not checked")
+        click.echo(
+            f"warning: cannot read secrets file: {exc.filename or cfg.secrets_path or exc}",
+            err=True,
+        )
+        click.echo("  try: sudo mch validate", err=True)
         raise SystemExit(1) from None
     except (ValueError, OSError) as exc:
         click.echo(f"error: config validation failed: {exc}", err=True)

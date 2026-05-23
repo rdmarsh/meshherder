@@ -167,7 +167,12 @@ class Config:
     secrets_path: str | None = None
 
 
-def load(config_path: Path, secrets_path: Path | None = None) -> Config:
+def load(
+    config_path: Path,
+    secrets_path: Path | None = None,
+    *,
+    load_secrets: bool = True,
+) -> Config:
     config_path = config_path.resolve()
     raw = yaml.safe_load(config_path.read_text())
 
@@ -238,7 +243,7 @@ def load(config_path: Path, secrets_path: Path | None = None) -> Config:
     if not secrets_path.is_absolute():
         secrets_path = config_path.parent / secrets_path
 
-    cfg.secrets = _load_secrets(secrets_path)
+    cfg.secrets = _load_secrets(secrets_path) if load_secrets else {}
     cfg.config_path = str(config_path)
     cfg.secrets_path = str(secrets_path.resolve())
 
