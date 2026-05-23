@@ -32,14 +32,28 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
-- Fresh-mode partial-commission recovery.
-  - `commission new` generates the private key in the daemon and only prints it in the
-    final `secrets.yaml` snippet. If the run fails between `set prv.key` and the snippet
-    print, the operator loses the only copy of the new identity and the node is bricked.
-  - Options to consider: persist the generated key to the DB before sending `set prv.key`,
-    or emit the snippet earlier with a clear "incomplete" marker.
-  - Different problem from the replacement-mode retry (which is now handled by the managed
-    password fallback): in fresh mode there is no pre-existing secrets entry to fall back to.
+- Group-aware defaults for `commission new`.
+  - Today the wizard pulls radio defaults from the gateway node's home radio settings. It
+    should also honour `config.yaml` group settings: when the operator picks group
+    `default` (or any named group), pre-fill radio/region/other applicable fields from that
+    group. If no group match, fall back to a `default` group if present, then to the
+    gateway's radio.
+  - Same pattern for `secrets.yaml`: if a `default:` entry is present, use it as the base
+    for the new node before applying form values.
+  - Decide where guest password lives. It is not really a secret (any user holds it), so
+    it could live alongside other group settings in `config.yaml` rather than in
+    `secrets.yaml`. The admin password and `prv_key` are the only true secrets.
+  - Keep the form override behaviour: the operator's explicit input always wins.
+
+- Persist daemon-generated `prv_key` earlier in `commission new`.
+  - Today the CLI wizard generates `prv_key` once before the retry loop (`cli.py:1129`)
+    and passes the same value on every RPC, so in-session retries keep the same identity.
+  - If the wizard itself is killed (Ctrl-C, terminal closed, ssh dropout) mid-run, the
+    `prv_key` is lost while the node may still be holding it. The node is then bricked
+    until manual factory reset.
+  - Options to consider: write the generated key to a short-lived state file before the
+    first RPC, or have the daemon record commissioning attempts in the DB. Either path
+    must redact key material in logs and clean up the record on successful commission.
 
 - Finish retired/stale node lifecycle handling.
   - `mch prune` already lists and can delete DB ghosts.
@@ -166,6 +180,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: `commission new` falls back to the user-supplied admin password when factory
+  login fails. Recovers from a previous in-session attempt that already changed the admin
+  password before a later command (e.g. `set prv.key`) timed out.
 - 2026-05-23: Replacement commissioning now falls back to the managed password from
   `secrets.yaml` when factory login fails. Recovers from a previous partial commission
   that changed the admin password before timing out on a later command.
