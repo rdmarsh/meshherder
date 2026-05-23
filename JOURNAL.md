@@ -100,6 +100,21 @@ expensive public-key derivation; `saveIdentity` writes to flash. Then the reply
 goes out — the reply is always sent, it just takes time. There is no remote-vs-
 serial gate on `set prv.key` (only `get prv.key` is serial-only).
 
+### Live confirmation (0.1.2)
+
+After deploying 0.1.2 with the 180s per-command timeout, `mch commission` on
+luna completed end-to-end against the bricked bench node:
+
+- `setting name`, `setting guest password`, `setting password` → all fast.
+- `setting generated private key` → completed within 180s (previously timed out at 30s).
+- `setting radio` → completed within 180s.
+- `reboot` → fire-and-forget.
+- `verifying identity (2/3)` → new pubkey visible after the second post-reboot scan.
+
+Direct USB check after reboot: live pubkey, radio, and name all matched the
+wizard's snippet. The bricked node is now fully commissioned. The "set prv.key
+times out" failure mode is closed for v1.15-era firmware.
+
 ## 2026-05-23 - New-Mode Commission Fallback to User Password
 
 - After shipping the replace-mode fallback (entry below), a live `commission new` run on the

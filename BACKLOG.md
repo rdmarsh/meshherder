@@ -180,6 +180,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Raised commission timeout to 180s for `set prv.key` and `set radio`. These
+  derive a public key and write to flash before replying on v1.15-era firmware, so the 30s
+  default was too short. Bench-measured and live-confirmed end-to-end on Heltec V3.
 - 2026-05-23: `commission new` falls back to the user-supplied admin password when factory
   login fails. Recovers from a previous in-session attempt that already changed the admin
   password before a later command (e.g. `set prv.key`) timed out.
