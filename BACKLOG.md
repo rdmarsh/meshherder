@@ -32,6 +32,75 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
+- `mch validate` defaults to the wrong config path.
+  - Today it falls back to `~/config.yaml` if no `--config` flag is given. Operators expect
+    it to validate the config that `mchd` is actually running with (`/etc/meshherder/config.yaml`
+    under the shipped systemd unit).
+  - Default to mchd's config; also print the path being checked at the top of output so a
+    divergence is obvious. Keep `--config <path>` for explicit overrides.
+  - Overlaps with the in-progress `secrets_identity_warnings` work — land together.
+
+- Wizard hardcodes `group: default` even when no `default` group is defined.
+  - `mch commission new` always offers `default` as the group prompt's default. If the
+    operator's `config.yaml` defines only e.g. `QH`, the pasted snippet then fails reload
+    validation with `references unknown group 'default'`.
+  - Wizard should read available groups from the live config and offer those as choices
+    (or accept `-` / blank for no group); reject typed groups not in the loaded config
+    rather than emitting them into the snippet.
+
+- Auto-preempt a scheduled sync when an operator requests `commission`/`exec`.
+  - Today an interactive `mch commission` against a node whose scheduled sync just kicked
+    off fails with `busy: scheduled sync <prefix>`, and the operator has to mash Enter to
+    retry until the sync finishes. This is confusing and feels broken even though it's the
+    safety lock working as designed.
+  - Operator commands should preempt at the next safe boundary (sync ops are between-command
+    interruptible). Implementation idea: a "preempt requested" flag the sync loop checks
+    between commands; on set, the loop yields after the current command completes and
+    releases the operation lock so commission can take over. Never interrupt mid-command —
+    leaving a node mid-write is the failure mode we're avoiding.
+
+- Duplicate-label warning in `mch validate` and `mch status`.
+  - Live `mch status` showed two configured nodes both labelled `qh-wold1` (different
+    pubkey prefixes), which only became obvious because one was a ghost. Labels are
+    operator-chosen and not enforced unique by the loader.
+  - Add a validation pass that flags any label used by more than one `pubkey_prefix` in
+    `config.yaml`. Surface both as a `validate` warning and in the `mch status` issues
+    section.
+
+- Consider mapping-style YAML for `nodes:` in `config.yaml`.
+  - Today nodes are a YAML list of mappings; secrets is already a mapping keyed by prefix.
+    Operator suggested matching secrets' shape:
+    ```yaml
+    nodes:
+      81d6bf19:
+        label: 81d6bf1950a0
+        group: default
+    ```
+  - Pros: shorter, consistent with secrets, YAML key uniqueness enforces no duplicate
+    `pubkey_prefix`.
+  - Cons: needs a migration for every existing operator config; loses any meaning of
+    `nodes:` order (though most parsers preserve insertion order in practice); the loader,
+    validation messages, and examples all need updating.
+  - Decision deferred — capture as a possible future config shape, not committed.
+
+- Add latitude/longitude to the `commission new` wizard.
+  - Prompt for `lat` and `lon` during the wizard with default `0,0` (treated as blank /
+    unset). Persist into the generated `config.yaml` snippet only if the operator entered
+    non-zero values, or emit `lat: 0` / `lon: 0` as explicit placeholders — choice TBD.
+  - When implemented, also write the values to the node via `set lat` / `set lon` during
+    commissioning (these don't require reboot per the MeshCore CLI reference).
+
+- Investigate post-replace "Heltec Repeater" name regression.
+  - Observed 2026-05-23: after a successful `commission replace` of `81d6bf19`, the node
+    came up named `Heltec Repeater` instead of the label-derived name. Replace mode does
+    not send `set name` (only `set guest.password`, `password`, `set prv.key`, `set radio`,
+    `reboot`) — so this is the firmware picking a default name when identity changes.
+  - Two paths to consider: (a) add `set name <label>` to the replace command sequence as
+    a normal idempotent push; (b) leave the wizard alone and rely on declared
+    `settings.name.desired` to converge on the next sync. Path (a) gives an immediate
+    consistent name without requiring a settings declaration; path (b) keeps replace mode
+    strictly about identity. Pick after deciding the policy.
+
 - Configurable default label/name format in the commission wizard.
   - Today the wizard defaults label and name to the firmware's 12-hex-char convention
     (first 12 hex of the derived pubkey), e.g. `81d6bf1950a0`. Operators have asked for a
@@ -198,6 +267,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Live-tested `commission replace` end-to-end against the bench node.
+  Erased via USB → discovered as factory → `_login_for_replace` path → restored the
+  `81d6bf19` identity → reboot → live pubkey/radio matched the original on USB check.
 - 2026-05-23: Raised commission timeout to 180s for `set prv.key` and `set radio`. These
   derive a public key and write to flash before replying on v1.15-era firmware, so the 30s
   default was too short. Bench-measured and live-confirmed end-to-end on Heltec V3.

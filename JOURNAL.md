@@ -115,6 +115,35 @@ Direct USB check after reboot: live pubkey, radio, and name all matched the
 wizard's snippet. The bricked node is now fully commissioned. The "set prv.key
 times out" failure mode is closed for v1.15-era firmware.
 
+### Live confirmation: `commission replace` (same session)
+
+To validate `_login_for_replace`, the just-commissioned `81d6bf19` was erased
+via USB (`meshcore-cli -r -s /dev/cu.usbserial-0001 erase`, "Erase filesystem
+(serial only)") and re-discovered as a factory-fresh node with a new pubkey
+`c26d49f6d122...`. The operator pasted the original `81d6bf19` config/secrets
+snippet into luna's config files, reloaded mchd, and ran `mch commission` →
+replace → selected `81d6bf19`. The wizard hit the same 180s flow for the
+slow commands; direct USB check after reboot confirmed the original pubkey
+restored from the secrets `prv_key`.
+
+### Side observations from the live runs
+
+- **Wizard's `group: default` was rejected by hot-reload.** Luna's `config.yaml`
+  defines `QH` only. Tracked in `BACKLOG.md` — wizard should read live config
+  and offer existing groups.
+- **`mch validate` defaults to `~/config.yaml` instead of the mchd path.** Real
+  bug — caught the file divergence here. Tracked.
+- **`busy: scheduled sync` UX during commission** — scheduled sync of the just-
+  added node 81d6bf19 grabbed the operation lock; commission had to retry
+  several times before the sync window closed. Tracked.
+- **Duplicate label spotted via `mch status`** — `2fd9c7bbc93d qh-wold1`
+  (configured) and `1fd9c7bb qh-wold1` (ghost) share the same label. Loader
+  doesn't flag this. Tracked.
+- **Post-replace name regression to "Heltec Repeater".** Replace mode does not
+  send `set name`; on identity change the firmware appears to fall back to a
+  hardware-default name. Tracked — decision pending whether replace should
+  always push `set name <label>`.
+
 ## 2026-05-23 - New-Mode Commission Fallback to User Password
 
 - After shipping the replace-mode fallback (entry below), a live `commission new` run on the
