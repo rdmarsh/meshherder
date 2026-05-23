@@ -55,7 +55,7 @@ class _NoDuplicateKeysLoader(yaml.SafeLoader):
             for key_node, _ in node.value:
                 key = key_node.value  # raw string before type coercion
                 if key in seen:
-                    raise ValueError(f"duplicate key {key!r} in secrets file")
+                    raise ValueError(f"duplicate YAML key {key!r}")
                 seen.add(key)
         return super().construct_mapping(node, deep=deep)
 
@@ -174,7 +174,10 @@ def load(
     load_secrets: bool = True,
 ) -> Config:
     config_path = config_path.resolve()
-    raw = yaml.safe_load(config_path.read_text())
+    try:
+        raw = yaml.load(config_path.read_text(), Loader=_NoDuplicateKeysLoader)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"config file is not valid YAML: {exc}") from exc
 
     if not isinstance(raw, dict):
         kind = type(raw).__name__ if raw is not None else "empty file"
