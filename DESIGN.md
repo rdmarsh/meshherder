@@ -90,6 +90,36 @@ The global setting policy fallback is `audit`. A desired setting is read and com
 but mchd only writes to a node when the setting, node, or group explicitly opts in with
 `policy: enforce` or `default_policy: enforce`.
 
+## Settings vs operations
+
+**Settings** model desired state for a key that can be read back. Each sync cycle mchd sends
+`get <key>`, compares the result to `desired`, and acts according to the policy (`audit`,
+`enforce`, `skip`). The comparison gives convergence: if a node drifts or gets reflashed, the
+next sync detects it and corrects it (under `enforce`).
+
+**Operations** are scheduled commands with no read-back or desired-value comparison. mchd sends
+the command string, records success or failure, and re-runs it after `every_hours` have elapsed
+since the last successful run.
+
+Use operations for commands that:
+- have no read-back equivalent (e.g. `region put`, `region save` — there is no `get region`)
+- are inherently temporal or side-effectful, not convergent (e.g. `clock sync`, `reboot`)
+
+The region commands are the clearest example of the tension: they configure desired state but
+cannot be read back, so they cannot be modelled as settings. The workaround is to put them in
+operations with a very long `every_hours` (e.g. 87600 = 10 years) so they run once at first
+contact and are effectively never repeated.
+
+**Bare-command keys** are settings that don't follow the standard `get <key>` / `set <key> <value>`
+pattern. `powersaving` is the current example: bare `powersaving` returns `on` or `off`, and the
+write is `powersaving on` / `powersaving off` — no `get` or `set` prefix. mchd handles this via
+`_BARE_COMMAND_KEYS` in `queue.py`; add new keys there as needed.
+
+**Clock sync** is a genuine operation: `send_cmd` embeds the host's current Unix timestamp in
+every packet, so the firmware on the receiving node can use that timestamp to set its clock when
+it processes `clock sync`. The correct time comes from the Mac's NTP clock, not from the gateway
+node's own (potentially stale) clock.
+
 `mch plan` is read-only. It compares YAML desired state with the DB's known state and shows:
 planned writes for enforced drift, audit drift that will not write, and values that must be
 observed by a sync before a write can be predicted. It does not send mesh commands.

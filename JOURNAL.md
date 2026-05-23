@@ -4,6 +4,28 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-23 - Clock sync, settings vs operations, and powersaving fix
+
+**Clock sync mechanism confirmed**: `send_cmd` (meshcore_py) embeds `int(time.time())` from the
+host in every command packet. When a managed node receives `clock sync` over the mesh, it can use
+that embedded timestamp to set its clock — so time accuracy comes from the Mac's NTP clock, not
+the gateway node's own clock. The `clock sync` operation in `config.yaml` (every 6 hours) is the
+correct approach.
+
+**Settings vs operations**: Settings use `get <key>` / `set <key> <value>` with drift detection;
+operations are fire-and-forget scheduled commands. Region commands (`region put`, `region save`)
+must be operations because there is no `get region` read-back. `clock sync` and `reboot` are
+genuine operations. See DESIGN.md for the full explanation.
+
+**powersaving bug found and fixed**: `powersaving` as a setting was sending `get powersaving`
+(read) and `set powersaving on` (write) — both wrong. The firmware CLI uses bare `powersaving`
+to read (returns "on"/"off") and `powersaving on` / `powersaving off` to write. Fixed via
+`_BARE_COMMAND_KEYS` in `queue.py`; the set is extensible as more non-standard keys are found.
+
+**clkreboot open question**: commissioning ends with bare `reboot`. `clkreboot` would sync the
+clock before rebooting. Unknown whether MeshCore persists time to flash across a reboot. Needs
+live bench test — see BACKLOG Research section.
+
 ## 2026-05-23 - Bench Investigation of the set prv.key Timeout
 
 After shipping the new-mode fallback, the next live commission failed at the same
