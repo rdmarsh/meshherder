@@ -575,6 +575,52 @@ def test_prune_yes_reports_deleted_count():
     assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
 
 
+# ------ remove ------
+
+def _remove_resp(deleted=0, configured=False):
+    return {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8,
+        "label": "old-site",
+        "name": "Old Site",
+        "state": "configured",
+        "last_seen": None,
+        "configured": configured,
+        "deleted": deleted,
+    }}
+
+
+def test_remove_prompt_can_decline_delete():
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[_remove_resp()]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "remove", "old-site"],
+            input="n\n",
+        )
+    assert result.exit_code == 0
+    mock_rpc.assert_called_once()
+    assert "Delete this local DB state?" in result.output
+    assert "not deleted" in result.output
+
+
+def test_remove_yes_deletes_without_prompt():
+    result = _run_multi(["remove", "old-site", "--yes"], _remove_resp(), _remove_resp(deleted=1))
+    assert result.exit_code == 0
+    assert "local DB node state" in result.output
+    assert "deleted 1 node(s)" in result.output
+    assert "config.yaml, secrets.yaml, and gateway favourites are left unchanged" in result.output
+
+
+def test_remove_configured_node_mentions_force_when_used():
+    result = _run_multi(
+        ["remove", "site-a", "--force", "--yes"],
+        _remove_resp(configured=True),
+        _remove_resp(deleted=1, configured=True),
+    )
+    assert result.exit_code == 0
+    assert "still present in config.yaml" in result.output
+
+
 # ------ plan ------
 
 def _plan_resp(writes=None, audits=None, unknown=None):

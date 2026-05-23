@@ -433,6 +433,7 @@ mch logs <prefix>             Activity for one node
 mch contacts                  Repeater nodes visible to the gateway not yet in config
 mch prune                     List DB nodes no longer present in config.yaml
 mch prune --yes               Delete listed local DB state for retired nodes
+mch remove <label|prefix>     Delete one node's local DB state
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node immediately; CLI waits for the result
 mch exec <node> <command>     Run a raw MeshCore CLI command on a node (e.g. ver, stats-radio)
@@ -451,6 +452,8 @@ but does not automatically delete historical DB state. Run `mch prune` to review
 and `mch prune --yes` to delete their local facts, settings, operations, and logs. It does not edit
 `config.yaml`, `secrets.yaml`, or gateway favourites. Secrets entries without matching config nodes
 are allowed; operators may keep passwords or private keys there for replacement hardware.
+Use `mch remove <label|prefix>` to delete one retired node's local DB state. It refuses nodes still
+present in `config.yaml` unless `--force` is supplied.
 
 `mch sync <prefix>` runs that node immediately and waits — the CLI returns once the sync is
 complete. It collects facts, checks and enforces settings, runs any due operations, then

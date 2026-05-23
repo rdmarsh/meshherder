@@ -361,6 +361,38 @@ async def _dispatch(
             },
         }
 
+    if cmd == "remove":
+        query = str(req.get("query") or "")
+        if not query:
+            return {"ok": False, "error": "missing node"}
+        node = await _resolve_node(query, db)
+        if not node:
+            return {"ok": False, "error": f"no such node: {query}"}
+
+        configured = _is_configured_node(node.pubkey, config)
+        if configured and not bool(req.get("force", False)):
+            return {
+                "ok": False,
+                "error": (
+                    f"{node.label or node.name or node.pubkey[:8]!r} is still in config.yaml"
+                    " - remove it from config first, or use --force"
+                ),
+            }
+
+        data = {
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+            "state": node.state.value,
+            "last_seen": node.last_seen.isoformat() if node.last_seen else None,
+            "configured": configured,
+            "deleted": 0,
+        }
+        if not bool(req.get("dry_run", True)):
+            await db.delete_node(node.pubkey)
+            data["deleted"] = 1
+        return {"ok": True, "data": data}
+
     if cmd == "logs":
         pubkey = req.get("pubkey")
         limit = int(req.get("limit", 50))
