@@ -32,6 +32,24 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
+- Configurable default label/name format in the commission wizard.
+  - Today the wizard defaults label and name to the firmware's 12-hex-char convention
+    (first 12 hex of the derived pubkey), e.g. `81d6bf1950a0`. Operators have asked for a
+    project-identifying default such as `mch_81d6bf19`.
+  - Add a `commission.default_label_format` (and maybe `default_name_format`) string in
+    `config.yaml` with placeholders like `{prefix8}` / `{prefix12}`.
+  - Keep the firmware-style default as a fallback if not configured.
+
+- Allow resurrecting an archived node from secrets-only.
+  - Use case: operator pruned a node months ago (removed from `config.yaml`, `mch prune`d
+    the DB), but kept the `secrets.yaml` entry as an archive. Currently `commission replace`
+    only lists prefixes that are in BOTH `config.nodes` and `config.secrets`.
+  - Extend `list_replace` to also surface secrets-only entries with an `(archived)` tag,
+    so the operator can pick one and the wizard prints a fresh `config.yaml` snippet
+    alongside the usual replacement flow.
+  - Behaviour after restore should be the same as today's replace: the operator pastes
+    the snippet and `mch sync <prefix>` converges normal settings.
+
 - Group-aware defaults for `commission new`.
   - Today the wizard pulls radio defaults from the gateway node's home radio settings. It
     should also honour `config.yaml` group settings: when the operator picks group
