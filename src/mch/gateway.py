@@ -140,6 +140,11 @@ class Gateway:
         """Register an async callback for incoming DMs (not command responses)."""
         self._dm_callback = callback
 
+    def subscribe(self, event_type: EventType, callback: Any) -> Any:
+        """Subscribe to a meshcore dispatcher event. Returns a Subscription for unsubscribing."""
+        mc = self._require_connected()
+        return mc.subscribe(event_type, callback)
+
     # ------------------------------------------------------------------
     # background receive loop
     # ------------------------------------------------------------------
@@ -260,6 +265,7 @@ class Gateway:
             "hopping radio: %.3f/%g/SF%d → %.3f/%g/SF%d",
             saved_freq, saved_bw, saved_sf, freq, bw, sf,
         )
+        log.debug("set_radio: %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
         await mc.commands.set_radio(freq, bw, sf, cr)
         await asyncio.sleep(0.5)  # let radio settle before sending
         self.info["radio_freq"] = freq
@@ -273,6 +279,7 @@ class Gateway:
     ) -> None:
         """Restore the gateway radio config after a frequency hop."""
         mc = self._require_connected()
+        log.debug("set_radio (restore): %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
         await mc.commands.set_radio(freq, bw, sf, cr)
         self.info["radio_freq"] = freq
         self.info["radio_bw"] = bw
@@ -426,6 +433,7 @@ class Gateway:
     ) -> None:
         """Permanently change gateway radio settings. Caller is responsible for save/restore."""
         mc = self._require_connected()
+        log.debug("set_radio: %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
         result = await mc.commands.set_radio(freq, bw, sf, cr)
         if result.type == EventType.ERROR:
             raise GatewayError(f"set_radio failed: {result.payload}")

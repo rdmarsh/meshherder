@@ -993,8 +993,25 @@ async def test_seed_node_labels_skips_unknown_nodes(db):
 
 
 # ---------------------------------------------------------------------------
-# neighbors fact collection
+# neighbors / clock fact collection
 # ---------------------------------------------------------------------------
+
+async def test_collect_facts_clock_sends_bare_command(db):
+    """'clock' in facts list sends bare 'clock', not 'get clock'."""
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["clock"]
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="2026-05-24 00:00:00"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    calls = [call.args[1] for call in gw.send_command.call_args_list]
+    assert "clock" in calls
+    assert "get clock" not in calls
+
 
 async def test_collect_facts_neighbors_sends_bare_command(db):
     """'neighbors' in facts list sends bare 'neighbors', not 'get neighbors'."""

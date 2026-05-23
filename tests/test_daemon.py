@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
-from mch.daemon import Daemon, _dispatch
+from mch.daemon import Daemon, _dispatch, _handle_advert
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
 from mch.queue import OperationBusyError
@@ -1052,3 +1052,28 @@ async def test_status_dispatch_open_nodes_in_array(db, wq, config):
 
     assert resp["ok"] is True
     assert len(resp["data"]["open_nodes"]) == 1
+
+
+# ------------------------------------------------------------------
+# passive last_seen update from ADVERTISEMENT events
+# ------------------------------------------------------------------
+
+async def test_handle_advert_updates_last_seen_for_known_node(db):
+    """Advert from a known node updates last_seen in the DB."""
+    pubkey = "aabbccdd" * 8
+    node = Node(pubkey=pubkey, name="Known Node", state=NodeState.CONFIGURED, last_seen=None)
+    await db.upsert_node(node)
+
+    await _handle_advert(db, pubkey)
+
+    updated = await db.get_node(pubkey)
+    assert updated is not None
+    assert updated.last_seen is not None
+
+
+async def test_handle_advert_ignores_unknown_node(db):
+    """Advert from a node not in the DB does nothing — no insert."""
+    await _handle_advert(db, "deadbeef" * 8)
+
+    nodes = await db.get_all_nodes()
+    assert nodes == []

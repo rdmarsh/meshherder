@@ -63,6 +63,14 @@ def _ago(iso: str | None) -> str:
         return iso[:16].replace("T", " ")
 
 
+def _ago_with_ts(iso: str | None) -> str:
+    """Format as 'YYYY-MM-DD HH:MM:SS (  Xm ago)' for detail views."""
+    if not iso:
+        return "never"
+    ts = iso[:19].replace("T", " ")
+    return f"{ts} ({_ago(iso)})"
+
+
 async def _request(
     socket_path: str,
     cmd: dict[str, Any],
@@ -347,15 +355,12 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
 
 def _render_node_detail(data: dict[str, Any]) -> None:
     """Render the full per-node detail view."""
-    def _ts(v: str | None) -> str:
-        return (v or "")[:19].replace("T", " ") or "never"
-
     click.echo(f"label:       {data.get('label') or '-'}")
     click.echo(f"group:       {data.get('group') or '-'}")
     click.echo(f"mesh name:   {data['name']}")
     click.echo(f"state:       {data['state']}")
-    click.echo(f"last seen:   {_ago(data.get('last_seen'))}")
-    click.echo(f"last conn:   {_ts(data.get('last_connected'))}")
+    click.echo(f"last seen:   {_ago_with_ts(data.get('last_seen'))}")
+    click.echo(f"last conn:   {_ago_with_ts(data.get('last_connected'))}")
     click.echo(f"pubkey:      {data['pubkey']}")
     click.echo(f"authed:      {'yes' if data.get('auth_cached') else 'no'}")
     click.echo(f"passwd:      {'yes' if data.get('passwd_known') else 'no'}")
@@ -373,16 +378,22 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         any_drift = any(s["drift"] for s in settings)
         legend = "  (~ = drifted from desired)" if any_drift else ""
         click.echo(f"settings:{legend}")
-        sfmt = "  {:<2}  {:<22}  {:<14}  {:<14}  {}"
-        click.echo(sfmt.format("~", "KEY", "DESIRED", "OBSERVED", "POLICY"))
-        click.echo(sfmt.format("-", "---", "-------", "--------", "------"))
+        # column widths based on content display width, not char count
+        col_key = max(3, max(_wlen(s["key"]) for s in settings))
+        col_des = max(7, max(_wlen(s.get("desired") or "-") for s in settings))
+        col_obs = max(8, max(_wlen(s.get("observed") or "-") for s in settings))
+        def _srow(flag: str, key: str, desired: str, observed: str, policy: str) -> str:
+            return f"  {_wpad(flag, 2)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}  {_wpad(observed, col_obs)}  {policy}"
+        drift_hdr = "~" if any_drift else " "
+        click.echo(_srow(drift_hdr, "KEY", "DESIRED", "OBSERVED", "POLICY"))
+        click.echo(_srow("-", "---", "-------", "--------", "------"))
         for s in settings:
             drift_flag = "~" if s["drift"] else " "
-            click.echo(sfmt.format(
+            click.echo(_srow(
                 drift_flag,
-                s["key"][:22],
-                (s.get("desired") or "-")[:14],
-                (s.get("observed") or "-")[:14],
+                s["key"],
+                s.get("desired") or "-",
+                s.get("observed") or "-",
                 s["policy"],
             ))
         click.echo("")
