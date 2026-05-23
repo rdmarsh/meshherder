@@ -150,6 +150,23 @@ async def _login_for_replace(
     )
 
 
+_DEFAULT_COMMAND_TIMEOUT = 30.0
+# Commands that derive a public key and write to flash before replying.
+# Bench-measured on Heltec V3 / MeshCore v1.15.0: a valid `set prv.key` replies
+# `OK, reboot to apply! New pubkey: <hex>` within 180s but well after the 30s
+# default. `set radio` showed the same pattern in the 2026-05-22 incident.
+_SLOW_COMMAND_TIMEOUT = 180.0
+_SLOW_COMMAND_PREFIXES = ("set prv.key", "set radio")
+
+
+def _command_timeout(command: str) -> float:
+    """Return the response timeout to use for a commissioning command."""
+    for prefix in _SLOW_COMMAND_PREFIXES:
+        if command.startswith(prefix):
+            return _SLOW_COMMAND_TIMEOUT
+    return _DEFAULT_COMMAND_TIMEOUT
+
+
 async def _send_commission_command(
     gateway: Gateway,
     contact: dict[str, Any],
@@ -158,8 +175,9 @@ async def _send_commission_command(
     fire_and_forget: bool,
 ) -> str | None:
     """Send one commissioning command and return an operator-safe error if it failed."""
+    timeout = _command_timeout(command)
     result = await gateway.send_command(
-        contact, command, timeout=30.0, await_response=not fire_and_forget
+        contact, command, timeout=timeout, await_response=not fire_and_forget
     )
     if not result.success and not fire_and_forget:
         return f"commission failed at {_redact_command(command)!r}: {result.error}"
