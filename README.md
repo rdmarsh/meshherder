@@ -88,10 +88,11 @@ sudo ln -sf /opt/meshherder/.venv/bin/mchd /usr/local/bin/mchd
 sudo ln -sf /opt/meshherder/.venv/bin/mch  /usr/local/bin/mch
 ```
 
-Install the manual page:
+Install the manual pages:
 
 ```bash
 sudo install -D -m 644 docs/man/mch.1 /usr/local/share/man/man1/mch.1
+sudo install -D -m 644 docs/man/mchd.8 /usr/local/share/man/man8/mchd.8
 ```
 
 #### Create the system user and directories
@@ -425,10 +426,12 @@ Add the setting to a group in `config.yaml`, assign nodes to the group, restart 
 
 ## CLI reference
 
-The same command summary is available as a manual page after install:
+The same command summary is available as a manual page after install. The daemon
+has its own operational page:
 
 ```bash
 man mch
+man mchd
 ```
 
 ```

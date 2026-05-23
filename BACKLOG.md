@@ -119,6 +119,13 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Wishlist
 
+- Support alternate config/secrets locations end-to-end.
+  - Let `mch validate` check a working copy in a different location, such as a home directory,
+    before copying it into production.
+  - Let `mchd` read config and secrets from operator-chosen paths instead of assuming `/etc/meshherder`.
+  - Keep the current production layout as the default, but stop hardcoding it where flexibility
+    helps safer edits.
+
 - DM-triggered sync for already-managed nodes, using the same authorization and operation-lock
   model as existing CLI-triggered sync.
 - Channel or room-server reporting for fleet status.
@@ -157,6 +164,7 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Added a static `mchd(8)` man page for daemon operation and troubleshooting.
 - 2026-05-23: Added a static `mch(1)` man page and README install instructions.
 - 2026-05-23: Added `mch remove <node>` for deleting one node's local DB state, with `--force` for
   nodes still present in config.
