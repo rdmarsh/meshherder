@@ -270,6 +270,13 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Wishlist
 
+- **Settings table: `?` indicator for unobserved rows**: rows with `observed = -` (never
+  synced) have no left-column indicator, making them look the same as clean rows. Add a
+  `?` flag for "not yet observed", keeping `~` for "observed but drifted". Three states:
+  blank = in sync, `?` = not yet checked, `~` = checked and wrong. Update the legend line
+  accordingly. Fix is in `cli.py` `_render_node_detail` — check `s.get("observed") is None`
+  before checking `s["drift"]`.
+
 - **`_ago` leading-space cosmetic**: `_ago` right-justifies to 3 chars (`{n:>3}`), so
   single-digit values get 2 leading spaces and 2-digit get 1 — visible in `_ago_with_ts`
   as `(  5m ago)` vs `( 44m ago)`. Options: drop padding or use fixed 2-digit format.
