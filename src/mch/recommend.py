@@ -35,6 +35,13 @@ class UniversalSetting:
     description: str
 
 
+@dataclass
+class RadioPreset:
+    name: str
+    value: str
+    description: str
+
+
 def parse_neighbour_count(raw: str) -> int:
     """Count neighbour entries from the `neighbors` command output."""
     return sum(
@@ -63,6 +70,50 @@ def load_profiles(
     3. profiles_url if given — fetch, write cache, use it
     4. Bundled default
     """
+    raw = _load_profile_data(profiles_url=profiles_url, profiles_file=profiles_file)
+    if raw is None:
+        raise RuntimeError("could not load profiles — bundled file missing")
+
+    return _parse(raw)
+
+
+def load_radio_presets(
+    profiles_url: str | None = None,
+    profiles_file: Path | None = None,
+) -> list[RadioPreset]:
+    """Load named radio presets from the same profile source as recommendations."""
+    raw = _load_profile_data(profiles_url=profiles_url, profiles_file=profiles_file)
+    if raw is None:
+        raise RuntimeError("could not load profiles — bundled file missing")
+
+    presets = [
+        RadioPreset(
+            name=str(p["name"]),
+            value=str(p["value"]),
+            description=p.get("description", ""),
+        )
+        for p in raw.get("radio_presets", [])
+    ]
+    if presets:
+        return presets
+
+    # Backward compatibility for v0/unversioned profile files.
+    for item in raw.get("universal", []):
+        if item.get("key") == "radio":
+            return [
+                RadioPreset(
+                    name="Profile radio",
+                    value=str(item["value"]),
+                    description=item.get("description", ""),
+                )
+            ]
+    return []
+
+
+def _load_profile_data(
+    profiles_url: str | None = None,
+    profiles_file: Path | None = None,
+) -> dict[str, Any] | None:
     raw: dict[str, Any] | None = None
 
     if profiles_file:
@@ -86,10 +137,7 @@ def load_profiles(
     if raw is None:
         raw = _load_yaml(_BUNDLED)
 
-    if raw is None:
-        raise RuntimeError("could not load profiles — bundled file missing")
-
-    return _parse(raw)
+    return raw
 
 
 def _load_yaml(path: Path) -> dict[str, Any] | None:

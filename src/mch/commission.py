@@ -70,6 +70,40 @@ def _parse_radio_tuple(raw: str | None) -> tuple[float, float, int, int]:
     return round(float(freq), 3), float(bw), int(sf), int(cr)
 
 
+def _format_radio(radio: Any) -> str:
+    return f"{radio.freq:.3f},{radio.bw:g},{radio.sf},{radio.cr}"
+
+
+def _config_radio_options(config: Config) -> list[dict[str, str]]:
+    """Return distinct radio choices already declared in config.yaml."""
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(label: str, value: str | None) -> None:
+        if not value or value in seen:
+            return
+        seen.add(value)
+        options.append({"label": label, "value": value})
+
+    if config.gateway.radio:
+        add("gateway/home radio", _format_radio(config.gateway.radio))
+
+    for group in config.groups:
+        setting = group.settings.get("radio")
+        if setting and setting.desired:
+            add(f"group {group.name}", setting.desired)
+
+    for node in config.nodes:
+        node_label = node.label or node.pubkey_prefix
+        setting = node.settings.get("radio")
+        if setting and setting.desired:
+            add(f"node {node_label}", setting.desired)
+        if node.via:
+            add(f"node {node_label}", _format_radio(node.via))
+
+    return options
+
+
 async def _login_factory(
     gateway: Gateway,
     contact: dict[str, Any],
@@ -293,15 +327,23 @@ async def handle_commission(
             await progress(msg)
 
     if mode == "scan":
-        # Discover unmanaged nodes and return them with the gateway's home radio string.
+        # Discover unmanaged nodes and return radio choices from the loaded config.
         async with wq.commission_session() as gateway:
             try:
                 unknown = await discover_unmanaged(gateway, db, config)
-                r = config.gateway.radio
+                radio_options = _config_radio_options(config)
                 gateway_radio = (
-                    f"{r.freq:.3f},{r.bw:g},{r.sf},{r.cr}" if r else None
+                    _format_radio(config.gateway.radio) if config.gateway.radio else None
                 )
-                return {"ok": True, "data": {"nodes": unknown, "gateway_radio": gateway_radio}}
+                return {
+                    "ok": True,
+                    "data": {
+                        "nodes": unknown,
+                        "gateway_radio": gateway_radio,
+                        "radio_options": radio_options,
+                        "group_options": [group.name for group in config.groups],
+                    },
+                }
             except Exception as exc:
                 log.exception("commission scan error: %s", exc)
                 return {"ok": False, "error": str(exc)}
