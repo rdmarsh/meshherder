@@ -442,6 +442,10 @@ mch stop                      Stop mchd via systemd
 mch restart                   Restart mchd via systemd
 ```
 
+`mch validate` checks whatever it can read. On a production install, an ordinary operator account
+can validate the group-readable config file but may need `sudo mch validate` to validate the
+mode-600 secrets file as well.
+
 `mch prune` is deliberately conservative: removing a node from `config.yaml` stops future syncs,
 but does not automatically delete historical DB state. Run `mch prune` to review retired DB nodes
 and `mch prune --yes` to delete their local facts, settings, operations, and logs. It does not edit
