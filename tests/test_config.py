@@ -368,6 +368,37 @@ def test_list_config_raises(tmp_path):
         load(p)
 
 
+def test_invalid_config_yaml_raises_value_error(tmp_path):
+    """Malformed config YAML raises ValueError instead of leaking a PyYAML traceback."""
+    p = tmp_path / "config.yaml"
+    p.write_text('gateway:\n  name: "unterminated\n  device: /dev/meshcore0\n')
+    with pytest.raises(ValueError, match="config file is not valid YAML"):
+        load(p)
+
+
+def test_duplicate_config_keys_raise(tmp_path):
+    """Duplicate keys in config.yaml are rejected instead of silently overwriting."""
+    p = _write_config(tmp_path, """\
+        gateway:
+          radio: "915.075,125,9,5"
+          radio: "915.800,250,10,5"
+    """)
+    with pytest.raises(ValueError, match="duplicate YAML key 'radio'"):
+        load(p)
+
+
+def test_duplicate_node_mapping_keys_raise(tmp_path):
+    """Duplicate keys inside a node mapping are rejected."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            label: first
+            label: second
+    """)
+    with pytest.raises(ValueError, match="duplicate YAML key 'label'"):
+        load(p)
+
+
 def test_gateway_list_raises_clear_error(tmp_path):
     """gateway: must be a mapping, not an implementation TypeError."""
     p = _write_config(tmp_path, """\
