@@ -117,8 +117,7 @@ def _commission_busy_hint(error: str) -> str | None:
 
 
 def _default_config_path() -> Path:
-    local_config = Path("config.yaml")
-    return local_config if local_config.exists() else DEFAULT_CONFIG
+    return DEFAULT_CONFIG
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +150,7 @@ def cli(ctx: click.Context, socket: str) -> None:
     "config_path",
     default=None,
     type=click.Path(dir_okay=False, path_type=Path),
-    show_default="config.yaml, then /etc/meshherder/config.yaml",
+    show_default="/etc/meshherder/config.yaml",
     help="Path to config.yaml",
 )
 @click.option(
@@ -164,6 +163,7 @@ def cli(ctx: click.Context, socket: str) -> None:
 def validate_config(config_path: Path | None, secrets_path: Path | None) -> None:
     """Validate config.yaml and secrets.yaml without contacting mchd."""
     config_path = config_path or _default_config_path()
+    click.echo(f"checking config: {config_path}")
     if not config_path.exists():
         click.echo(f"error: config file not found: {config_path}", err=True)
         raise SystemExit(1)
