@@ -70,6 +70,55 @@ def _parse_radio_tuple(raw: str | None) -> tuple[float, float, int, int]:
     return round(float(freq), 3), float(bw), int(sf), int(cr)
 
 
+async def _login_factory(
+    gateway: Gateway,
+    contact: dict[str, Any],
+    progress: Callable[[str], Awaitable[None]] | None,
+) -> bool:
+    """Try the MeshCore factory default password and emit progress messages."""
+    if progress is not None:
+        await progress("logging in...")
+    ok = await gateway.login(contact, "password")
+    if ok and progress is not None:
+        await progress("login OK")
+    return ok
+
+
+async def _login_for_replace(
+    gateway: Gateway,
+    contact: dict[str, Any],
+    managed_password: str | None,
+    progress: Callable[[str], Awaitable[None]] | None,
+) -> tuple[bool, str | None]:
+    """
+    Try factory password first; fall back to the managed password from secrets.
+
+    Returns (ok, error_message). Falling back recovers from a previous replacement
+    attempt that already changed the admin password before failing on a later
+    command (e.g. set radio timing out). A truly factory-fresh node never reaches
+    the managed branch because the first attempt succeeds. The four mutation
+    commands sent after login are idempotent for the same target values, so
+    re-sending them via the fallback path is safe.
+    """
+    if await _login_factory(gateway, contact, progress):
+        return True, None
+    if managed_password:
+        if progress is not None:
+            await progress("factory login failed; resuming with managed credentials")
+        if await gateway.login(contact, managed_password):
+            if progress is not None:
+                await progress("login OK (managed credentials)")
+            return True, None
+        return False, (
+            "could not authenticate to node — neither the factory password "
+            "nor the managed password from secrets.yaml was accepted"
+        )
+    return False, (
+        "could not authenticate to factory node — ensure it is factory-fresh "
+        "(default password 'password') and retry"
+    )
+
+
 async def _send_commission_command(
     gateway: Gateway,
     contact: dict[str, Any],
@@ -250,18 +299,9 @@ async def handle_commission(
                 contact = await gateway.add_commission_contact(node_info)
 
                 # discover() uses prefix_only=False so we have the full 32-byte pubkey.
-                # Login with the factory default password before sending CLI commands.
-                await _prog("logging in...")
-                if not await gateway.login(contact, "password"):
-                    return {
-                        "ok": False,
-                        "error": (
-                            "could not authenticate to factory node — "
-                            "ensure it is factory-fresh (default password 'password') and retry"
-                        ),
-                    }
-                await _prog("login OK")
-
+                # Login is delegated to the per-mode function: 'new' uses the factory
+                # password only; 'replace' falls back to the managed password from
+                # secrets.yaml so it can recover from a previous partial commission.
                 if mode == "new":
                     return await _commission_new(req, gateway, config, contact, _prog)
                 return await _commission_replace(req, gateway, config, contact, _prog)
@@ -291,6 +331,15 @@ async def _commission_new(
     then applies password, name, and radio. The factory-generated identity is
     discarded so mch can print the private key needed for future replacement.
     """
+    if not await _login_factory(gateway, contact, progress):
+        return {
+            "ok": False,
+            "error": (
+                "could not authenticate to factory node — "
+                "ensure it is factory-fresh (default password 'password') and retry"
+            ),
+        }
+
     # Always set an admin password; fall back to 'password' if not provided.
     admin_password = req.get("admin_password") or "password"
     guest_password = req.get("guest_password")
@@ -389,6 +438,13 @@ async def _commission_replace(
     ns = config.secrets.get(pubkey_prefix)
     if not ns or not ns.prv_key:
         return {"ok": False, "error": f"no prv_key in secrets for {pubkey_prefix!r}"}
+
+    # Login with factory password first; if that fails, try the managed password
+    # from secrets so we can recover a node that was partially commissioned
+    # earlier (admin password already changed, but radio/key not yet rebooted).
+    login_ok, login_error = await _login_for_replace(gateway, contact, ns.password, progress)
+    if not login_ok:
+        return {"ok": False, "error": login_error}
 
     # Password and identity changes go late because either may invalidate the
     # current admin session or contact identity on some firmware builds.

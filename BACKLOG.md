@@ -32,12 +32,14 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
-- Investigate replacement commissioning retry after partial failure.
-  - Observed 2026-05-22: replacement commissioning changed some state, then timed out on
-    `set radio`; immediate retry could no longer authenticate with factory credentials.
-  - Try the just-applied managed password when factory login fails after a partial attempt.
-  - Track commissioning stage closely enough to resume or give precise recovery guidance.
-  - Distinguish a command timeout from a command that likely applied but lost its response.
+- Fresh-mode partial-commission recovery.
+  - `commission new` generates the private key in the daemon and only prints it in the
+    final `secrets.yaml` snippet. If the run fails between `set prv.key` and the snippet
+    print, the operator loses the only copy of the new identity and the node is bricked.
+  - Options to consider: persist the generated key to the DB before sending `set prv.key`,
+    or emit the snippet earlier with a clear "incomplete" marker.
+  - Different problem from the replacement-mode retry (which is now handled by the managed
+    password fallback): in fresh mode there is no pre-existing secrets entry to fall back to.
 
 - Finish retired/stale node lifecycle handling.
   - `mch prune` already lists and can delete DB ghosts.
@@ -164,6 +166,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Replacement commissioning now falls back to the managed password from
+  `secrets.yaml` when factory login fails. Recovers from a previous partial commission
+  that changed the admin password before timing out on a later command.
 - 2026-05-23: Added a static `mchd(8)` man page for daemon operation and troubleshooting.
 - 2026-05-23: Added a static `mch(1)` man page and README install instructions.
 - 2026-05-23: Added `mch remove <node>` for deleting one node's local DB state, with `--force` for
