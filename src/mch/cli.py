@@ -70,7 +70,7 @@ async def _request(
     on_progress: Any = None,
 ) -> dict[str, Any]:
     try:
-        reader, writer = await asyncio.open_unix_connection(socket_path)
+        reader, writer = await asyncio.open_unix_connection(socket_path, limit=2**22)  # 4MB — contacts response can exceed the 64KB default
     except (FileNotFoundError, ConnectionRefusedError):
         click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
         click.echo("  is mchd running?  try: mchd --help", err=True)
