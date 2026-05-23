@@ -221,6 +221,8 @@ documents every available option with comments.
 observed state: last seen times, facts, command history, and sync schedule. `mchd` watches both YAML
 files and reloads them automatically shortly after they change. You can also send `SIGHUP` to the
 daemon to force a reload. Invalid YAML is rejected and the previous in-memory config stays active.
+`mchd` never edits `config.yaml` or `secrets.yaml`; commands such as `mch contacts` and
+`mch commission` print snippets for the operator to review and paste.
 
 A minimal working config:
 
@@ -241,16 +243,19 @@ scheduler:
 nodes:
   - pubkey_prefix: aabbccdd
     label: MyRepeater
-    default_policy: enforce
     settings:
-      owner.info: "Managed by mch"
+      owner.info:
+        desired: "Managed by mch"
+        policy: enforce
 ```
 
 Run `mch contacts` to list repeater nodes visible to the gateway that are not yet in your config,
 with pubkey prefixes ready to paste in.
 
 Settings default to `audit`: mchd reads and reports drift, but does not write to a node unless the
-setting, node, or group explicitly says `policy: enforce` or `default_policy: enforce`.
+setting, node, or group explicitly says `policy: enforce` or `default_policy: enforce`. Prefer
+per-setting `policy: enforce` while bringing a node under management; use `default_policy: enforce`
+only for a group or node where most declared settings should be written.
 
 **Passwords:** nodes that require a login go in `secrets.yaml` (owned by `mch:mch`, mode 0600):
 
@@ -278,6 +283,33 @@ ACL, so subsequent syncs proceed without a password. Keep the entry in `secrets.
 the ACL is cleared (without a factory reset), mchd can re-enrol automatically using the configured
 password. After a factory reset the node's password reverts to unknown, so manual re-enrolment
 is required — mchd will mark the node offline until the password is corrected.
+
+**Changing admin passwords:** do not put `password <new>` in recurring operations or treat the
+admin password as a normal desired setting. mchd stores one current admin password per node (or the
+fleet-wide default) and uses that value when it needs to log in. If a node currently has `hunter2`
+and you want it to become `monkey6`, rotate it as an operator action:
+
+1. Make sure you can reach the node and that `secrets.yaml` still contains the current password.
+2. Change the password with the commissioning flow for new/replacement hardware, or from a trusted
+   direct session where you can recover locally.
+3. Immediately edit that node's `secrets.yaml` entry to the new password and reload mchd.
+4. Run `mch sync <prefix>` and confirm it can still authenticate.
+
+Avoid relying only on `nodes.default.password` during a rotation. A per-node password entry gives
+you an explicit record of the credential that node should accept and avoids accidentally applying a
+fleet-wide password assumption to hardware that has drifted.
+
+As a rule of thumb: `config.yaml` is for ordinary desired state that mchd may audit or enforce;
+`secrets.yaml` is for credentials and identity material mchd can use to authenticate or replace
+hardware. Secrets are not treated as normal drift-corrected settings. The exception is
+commissioning/replacement, where mchd intentionally sends the stored password or `prv_key` to
+blank hardware as mesh commands as part of taking ownership of that node. It still does not edit
+the YAML files.
+
+`mch validate` checks that each configured node's stored `prv_key`, when present, derives a public
+key matching the node's `pubkey_prefix`. A mismatch is reported as a warning with the prefix that
+the private key actually implies. Do not run replacement commissioning with a mismatched key unless
+you intend the replacement hardware to come back under that derived identity.
 
 ### Bench reset / reflash
 

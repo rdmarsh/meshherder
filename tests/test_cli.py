@@ -344,6 +344,29 @@ def test_validate_permission_denied_suggests_sudo(tmp_path):
     assert "sudo mch validate" in result.output
 
 
+def test_validate_warns_when_prv_key_does_not_match_config_prefix(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("""\
+nodes:
+  - pubkey_prefix: aabbccdd
+    label: site-a
+""")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd:\n    prv_key: " + ("10" * 64) + "\n")
+    secrets.chmod(0o600)
+
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(
+            cli, ["validate", "--config", str(config), "--secrets", str(secrets)]
+        )
+
+    mock_rpc.assert_not_called()
+    assert result.exit_code == 0
+    assert "warning:" in result.output
+    assert "does not match config pubkey_prefix" in result.output
+
+
 # ------ status ------
 
 def _status_resp(nodes=None, drifted=None, bad_state=None, ghosts=None, open_nodes=None):

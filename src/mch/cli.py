@@ -18,6 +18,7 @@ import click
 
 from mch.command_safety import blocked_exec_command, confirm_exec_command
 from mch.config import load as load_config
+from mch.config import secrets_identity_warnings
 from mch.meshkey import derive_public_key, generate_private_key
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
@@ -203,6 +204,8 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
         click.echo(f"secrets ok: {cfg.secrets_path}")
     else:
         click.echo("secrets: none found")
+    for warning in secrets_identity_warnings(cfg):
+        click.echo(f"warning: {warning}", err=True)
 
 
 # ---------------------------------------------------------------------------

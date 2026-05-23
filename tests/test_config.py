@@ -226,6 +226,73 @@ def test_secrets_new_format_prv_key(tmp_path):
     assert cfg.secrets["aabbccdd"].prv_key == "deadbeef"
 
 
+def test_secrets_identity_warnings_empty_when_prv_key_matches(tmp_path):
+    """A configured prefix that matches the stored private key produces no warning."""
+    from mch.config import secrets_identity_warnings
+    from mch.meshkey import derive_public_key
+
+    prv_key = "10" * 64
+    prefix = derive_public_key(prv_key)[:8]
+    p = _write_config(tmp_path, f"nodes:\n  - pubkey_prefix: {prefix}\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text(f"nodes:\n  {prefix}:\n    prv_key: {prv_key}\n")
+    secrets.chmod(0o600)
+
+    cfg = load(p, secrets_path=secrets)
+
+    assert secrets_identity_warnings(cfg) == []
+
+
+def test_secrets_identity_warnings_reports_mismatched_prv_key(tmp_path):
+    """A prv_key that derives a different public key is reported with a suggested prefix."""
+    from mch.config import secrets_identity_warnings
+    from mch.meshkey import derive_public_key
+
+    prv_key = "10" * 64
+    derived_prefix = derive_public_key(prv_key)[:8]
+    p = _write_config(tmp_path, "nodes:\n  - pubkey_prefix: aabbccdd\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text(f"nodes:\n  aabbccdd:\n    prv_key: {prv_key}\n")
+    secrets.chmod(0o600)
+
+    cfg = load(p, secrets_path=secrets)
+    warnings = secrets_identity_warnings(cfg)
+
+    assert len(warnings) == 1
+    assert "aabbccdd" in warnings[0]
+    assert derived_prefix in warnings[0]
+
+
+def test_secrets_identity_warnings_reports_invalid_prv_key(tmp_path):
+    """Invalid prv_key values are warnings instead of config-load failures."""
+    from mch.config import secrets_identity_warnings
+
+    p = _write_config(tmp_path, "nodes:\n  - pubkey_prefix: aabbccdd\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd:\n    prv_key: deadbeef\n")
+    secrets.chmod(0o600)
+
+    cfg = load(p, secrets_path=secrets)
+    warnings = secrets_identity_warnings(cfg)
+
+    assert len(warnings) == 1
+    assert "invalid" in warnings[0]
+
+
+def test_secrets_identity_warnings_ignores_orphaned_secret(tmp_path):
+    """Secrets may intentionally keep replacement material for nodes not in config."""
+    from mch.config import secrets_identity_warnings
+
+    p = _write_config(tmp_path, "nodes: []\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd:\n    prv_key: deadbeef\n")
+    secrets.chmod(0o600)
+
+    cfg = load(p, secrets_path=secrets)
+
+    assert secrets_identity_warnings(cfg) == []
+
+
 def test_secrets_new_format_guest_password(tmp_path):
     """guest_password field is loaded from new per-node dict format."""
     p = _write_config(tmp_path, "gateway: {}")
