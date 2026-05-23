@@ -270,6 +270,31 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Wishlist
 
+- **`_ago` leading-space cosmetic**: `_ago` right-justifies to 3 chars (`{n:>3}`), so
+  single-digit values get 2 leading spaces and 2-digit get 1 — visible in `_ago_with_ts`
+  as `(  5m ago)` vs `( 44m ago)`. Options: drop padding or use fixed 2-digit format.
+
+- **`auto` computed values for txdelay/direct.txdelay**: allow `txdelay: "auto"` and
+  `direct.txdelay: "auto"` in config. mchd resolves `"auto"` at sync time using the same
+  formula already in `recommend.py`, keyed off the node's observed `neighbors` fact —
+  more neighbors → lower txdelay → node gets right-of-way. Most settings from `mch suggest`
+  are static and can just be pasted into config directly; `txdelay`/`direct.txdelay` are the
+  only ones that are genuinely dynamic (they change as the mesh grows). The formula lives in
+  `recommend.py` so it stays testable and consistent between `mch suggest` output and actual
+  enforcement. Needs design: what desired value is displayed in `mch plan` and `mch status`
+  when the value is `auto` (show the resolved value? show `auto (1.0)`?); what happens when
+  `neighbors` fact is not yet known (fall back to the unknown-neighbors default of 2.0?).
+  Note on direction: more neighbors → lower txdelay (right-of-way for busier nodes). Some
+  operators argue the opposite — small nodes go first so leaf nodes aren't starved — but the
+  chosen logic prioritises throughput: a high-neighbour hub carries more mesh traffic, so
+  stalling it is more costly than stalling a leaf.
+
+- **Name / owner.info group-level prefix and suffix**: add `name_prefix`, `name_suffix`
+  (and matching `owner.info_prefix` / `owner.info_suffix`) to group config. The daemon
+  assembles the full desired value at sync time, so per-node config stays clean — e.g.
+  `name_prefix: "🦷 "` at group level, `name: "Quakers Hill Corb"` per node. Drift
+  detection compares the assembled string against the observed value.
+
 - Support alternate config/secrets locations end-to-end.
   - Let `mch validate` check a working copy in a different location, such as a home directory,
     before copying it into production.
