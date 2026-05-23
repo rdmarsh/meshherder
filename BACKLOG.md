@@ -43,9 +43,6 @@ keep `DESIGN.md` for stable architecture notes.
 
 - Finish retired/stale node lifecycle handling.
   - `mch prune` already lists and can delete DB ghosts.
-  - Add a single-node removal command for retired nodes.
-  - Refuse removal if the node is still present in `config.yaml`, unless forced.
-  - Delete related facts, settings, operations, and logs with the node row.
   - Add stale/lost status for nodes not seen after a configurable threshold, with compact display
     such as `>99d ago`.
 
@@ -157,6 +154,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Added `mch remove <node>` for deleting one node's local DB state, with `--force` for
+  nodes still present in config.
 - 2026-05-23: Added `mch validate` to check config/secrets locally without contacting `mchd`.
 - 2026-05-22: Added `mch plan` as a read-only desired-vs-known view.
 - 2026-05-22: Removed config-file write access from the daemon/systemd model.

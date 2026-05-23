@@ -636,6 +636,49 @@ def prune(ctx: click.Context, yes: bool) -> None:
     click.echo("secrets.yaml entries and gateway favourites are left unchanged")
 
 
+@cli.command("remove")
+@click.argument("node")
+@click.option("--yes", "-y", is_flag=True, help="Delete without prompting.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Allow deleting local DB state for a node still present in config.yaml.",
+)
+@click.pass_context
+def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
+    """Delete one node's local DB state."""
+    resp = _rpc(
+        ctx.obj["socket"],
+        {"cmd": "remove", "query": node, "dry_run": True, "force": force},
+    )
+    data = _check(resp)
+
+    label = data.get("label") or "-"
+    name = data.get("name") or "-"
+    click.echo("local DB node state:")
+    click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
+    click.echo(f"  label:     {label}")
+    click.echo(f"  mesh name: {name}")
+    click.echo(f"  state:     {data.get('state') or '-'}")
+    click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
+    if data.get("configured"):
+        click.echo("  config:    still present in config.yaml (--force used)")
+    click.echo("")
+    click.echo("This deletes local facts, settings, operations, logs, and the DB node row.")
+    click.echo("config.yaml, secrets.yaml, and gateway favourites are left unchanged.")
+
+    if not yes and not click.confirm("Delete this local DB state?"):
+        click.echo("not deleted")
+        return
+
+    delete_resp = _rpc(
+        ctx.obj["socket"],
+        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": force},
+    )
+    deleted = _check(delete_resp).get("deleted", 0)
+    click.echo(f"deleted {deleted} node(s) from local DB state")
+
+
 # ---------------------------------------------------------------------------
 # suggest
 # ---------------------------------------------------------------------------

@@ -379,6 +379,93 @@ async def test_prune_dispatch_deletes_nodes_outside_config(db, wq, config):
 
 
 # ------------------------------------------------------------------
+# remove command
+# ------------------------------------------------------------------
+
+async def test_remove_dispatch_dry_run_resolves_one_node(db, wq, config):
+    """remove dry-run resolves one DB node without deleting it."""
+    node = Node(
+        pubkey="11223344" * 8,
+        name="Retired",
+        label="old-site",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(node)
+    config.nodes = []
+
+    resp = await _dispatch({"cmd": "remove", "query": "old-site"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["pubkey"] == node.pubkey
+    assert resp["data"]["deleted"] == 0
+    assert await db.get_node(node.pubkey) is not None
+
+
+async def test_remove_dispatch_deletes_one_retired_node(db, wq, config):
+    """remove with dry_run false deletes one node's local DB state."""
+    kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
+    retired = Node(
+        pubkey="11223344" * 8,
+        name="Retired",
+        label="old-site",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(kept)
+    await db.upsert_node(retired)
+    await db.upsert_fact(NodeFact(node_pubkey=retired.pubkey, key="ver", value="v1.14.1"))
+    config.nodes = [NodeConfig(pubkey_prefix=kept.pubkey[:8], label="kept")]
+
+    resp = await _dispatch(
+        {"cmd": "remove", "query": "old-site", "dry_run": False},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["deleted"] == 1
+    assert await db.get_node(kept.pubkey) is not None
+    assert await db.get_node(retired.pubkey) is None
+    assert await db.get_facts(retired.pubkey) == {}
+
+
+async def test_remove_dispatch_refuses_configured_node_without_force(db, wq, config):
+    """remove refuses nodes still present in config unless force is supplied."""
+    node = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="kept")]
+
+    resp = await _dispatch(
+        {"cmd": "remove", "query": "kept", "dry_run": False},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is False
+    assert "still in config.yaml" in resp["error"]
+    assert await db.get_node(node.pubkey) is not None
+
+
+async def test_remove_dispatch_force_deletes_configured_node(db, wq, config):
+    """remove --force allows deleting local state for a configured node."""
+    node = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="kept")]
+
+    resp = await _dispatch(
+        {"cmd": "remove", "query": "kept", "dry_run": False, "force": True},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["configured"] is True
+    assert await db.get_node(node.pubkey) is None
+
+
+# ------------------------------------------------------------------
 # sync command
 # ------------------------------------------------------------------
 
