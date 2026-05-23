@@ -1,0 +1,150 @@
+.TH MCHD 8 "2026-05-23" "meshherder 0.1.0" "System Administration"
+.SH NAME
+mchd \- Mesh Herder daemon for managing MeshCore repeater nodes
+.SH SYNOPSIS
+.B mchd
+[\fB--config\fR \fIPATH\fR]
+[\fB--log-level\fR \fILEVEL\fR]
+.SH DESCRIPTION
+.B mchd
+is the Mesh Herder daemon. It opens one serial connection to the local MeshCore
+gateway node, reads desired fleet state from
+.IR config.yaml ,
+stores observed state in SQLite, and processes managed nodes one at a time.
+.PP
+The daemon owns all gateway traffic. The
+.BR mch (1)
+command talks to
+.B mchd
+over a Unix socket for status, validation-independent operations, sync requests,
+commissioning, and carefully checked one-off commands.
+.PP
+Configuration files remain operator-owned. The daemon reads
+.I config.yaml
+and
+.I secrets.yaml
+on startup and hot-reloads them after file changes. If a reload fails
+validation, the previous in-memory config remains active.
+.SH OPTIONS
+.TP
+.B \-c, \-\-config \fIPATH\fR
+Path to
+.IR config.yaml .
+The packaged systemd unit uses
+.IR /etc/meshherder/config.yaml .
+.TP
+.B \-\-log-level \fILEVEL\fR
+Set logging level. Valid values are
+.BR DEBUG ,
+.BR INFO ,
+.BR WARNING ,
+and
+.BR ERROR .
+The default is
+.BR INFO .
+.SH FILES
+.TP
+.I /etc/meshherder/config.yaml
+Desired fleet state. This includes gateway settings, scheduler settings, groups,
+nodes, facts to collect, messenger settings, and paths such as
+.I db_path
+and
+.IR socket_path .
+.TP
+.I /etc/meshherder/secrets.yaml
+Node passwords and private keys. This file is usually mode 600 and owned by the
+service account.
+.TP
+.I /var/lib/meshherder/mch.db
+SQLite database containing observed node state, collected facts, command
+history, settings state, logs, and sync schedule.
+.TP
+.I /run/meshherder/mchd.sock
+Default Unix socket used by
+.BR mch (1).
+.TP
+.I /dev/meshcore0
+Recommended stable symlink for the USB-attached gateway node.
+.SH SYSTEMD
+The packaged service unit is named
+.BR mchd.service .
+Install and start it with:
+.PP
+.nf
+sudo cp systemd/mchd.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mchd
+.fi
+.PP
+Check status and follow logs with:
+.PP
+.nf
+systemctl status mchd
+journalctl -u mchd -f
+.fi
+.PP
+The unit runs as the
+.B mch
+system user, grants serial access through the
+.B dialout
+group, creates
+.IR /run/meshherder ,
+and keeps
+.I /etc/meshherder
+read-only to the daemon.
+.SH RELOAD
+.B mchd
+watches
+.I config.yaml
+and
+.I secrets.yaml
+and reloads them shortly after changes. You can also force a reload with:
+.PP
+.nf
+sudo systemctl kill -s HUP mchd
+.fi
+.PP
+Gateway device, database path, and socket path changes require a daemon restart.
+.SH OPERATION
+The daemon processes nodes sequentially to avoid hammering the mesh. Between
+nodes it waits the configured
+.I inter_node_delay_seconds
+unless there is only one node in the run.
+.PP
+Manual sync, scheduled sync, raw exec, and commissioning share one high-level
+gateway operation lock. If another workflow owns the gateway, CLI operations
+return a
+.B busy
+message instead of overlapping radio traffic.
+.SH TROUBLESHOOTING
+.TP
+.B Cannot connect to daemon
+Check that
+.B mchd.service
+is running and that your user is in the
+.B mch
+group so it can access the Unix socket.
+.TP
+.B Gateway device missing
+Check the USB device and the
+.I /dev/meshcore0
+udev symlink. The systemd unit waits for
+.I dev-meshcore0.device
+when the recommended udev rule is installed.
+.TP
+.B Config reload failed
+Run
+.B mch validate
+or
+.B sudo mch validate
+to check config and secrets. The daemon keeps the last valid config after a bad
+reload.
+.TP
+.B Node remains partial
+Use
+.B mch logs \fILABEL_OR_PREFIX\fR
+to inspect recent per-node activity and failed commands.
+.SH SEE ALSO
+.BR mch (1),
+.BR systemctl (1),
+.BR journalctl (1)
