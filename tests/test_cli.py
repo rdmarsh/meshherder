@@ -241,6 +241,60 @@ def test_rpc_timeout_shows_clean_error():
     assert "Traceback" not in combined
 
 
+# ------ validate ------
+
+def test_validate_valid_config(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("""\
+nodes:
+  - pubkey_prefix: aabbccdd
+    label: site-a
+""")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n  aabbccdd: nodepass\n")
+    secrets.chmod(0o600)
+
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(cli, ["validate", "--config", str(config)])
+
+    mock_rpc.assert_not_called()
+    assert result.exit_code == 0
+    assert "config ok:" in result.output
+    assert "nodes: 1" in result.output
+    assert "secrets ok:" in result.output
+
+
+def test_validate_invalid_config_exits_nonzero(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("typo: true\n")
+
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(cli, ["validate", "--config", str(config)])
+
+    mock_rpc.assert_not_called()
+    assert result.exit_code != 0
+    assert "validation failed" in result.output
+    assert "unknown config key" in result.output
+
+
+def test_validate_explicit_missing_secrets_exits_nonzero(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("gateway: {}\n")
+
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["validate", "--config", str(config), "--secrets", str(tmp_path / "missing.yaml")],
+        )
+
+    mock_rpc.assert_not_called()
+    assert result.exit_code != 0
+    assert "secrets file not found" in result.output
+
+
 # ------ status ------
 
 def _status_resp(nodes=None, drifted=None, bad_state=None, ghosts=None, open_nodes=None):

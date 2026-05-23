@@ -56,12 +56,6 @@ keep `DESIGN.md` for stable architecture notes.
   - Update success text to mention both inspection and action:
     `mch status <prefix>` and `mch sync <prefix>`.
 
-- Add `mch validate`.
-  - Load active config/secrets or explicit paths.
-  - Reuse daemon validation rules.
-  - Print clear field-level errors.
-  - Exit `0` when valid and nonzero when invalid.
-
 - Add field-aware validation before sending values to nodes.
   - Reject non-numeric values for numeric fields.
   - Reject out-of-range numbers.
@@ -158,6 +152,7 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Added `mch validate` to check config/secrets locally without contacting `mchd`.
 - 2026-05-22: Added `mch plan` as a read-only desired-vs-known view.
 - 2026-05-22: Removed config-file write access from the daemon/systemd model.
 - 2026-05-22: Implemented config/secrets hot reload with last-known-good behavior.
