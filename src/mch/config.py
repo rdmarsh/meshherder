@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from mch.meshkey import derive_public_key
 from mch.models import SettingPolicy
 
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
@@ -251,6 +252,33 @@ def load(
     cfg.secrets_path = str(secrets_path.resolve())
 
     return cfg
+
+
+def secrets_identity_warnings(cfg: Config) -> list[str]:
+    """Return warnings for secrets private keys that do not match config prefixes."""
+    node_prefixes = {n.pubkey_prefix for n in cfg.nodes}
+    warnings: list[str] = []
+
+    for prefix, secrets in sorted(cfg.secrets.items()):
+        if prefix == "default" or not secrets.prv_key:
+            continue
+        if prefix not in node_prefixes:
+            continue
+        try:
+            pubkey = derive_public_key(str(secrets.prv_key))
+        except (TypeError, ValueError) as exc:
+            warnings.append(f"secrets.nodes.{prefix}.prv_key is invalid: {exc}")
+            continue
+
+        if not pubkey.startswith(prefix):
+            suggested = pubkey[: max(len(prefix), _MIN_PREFIX_LEN)]
+            warnings.append(
+                f"secrets.nodes.{prefix}.prv_key derives public key {pubkey[:12]}..., "
+                f"which does not match config pubkey_prefix {prefix!r}; "
+                f"expected prefix would start with {suggested!r}"
+            )
+
+    return warnings
 
 
 def _mapping(raw: Any, context: str) -> dict[str, Any]:

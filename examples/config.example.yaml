@@ -120,6 +120,9 @@ messenger:
 #
 # The 'default_policy' on a group or node applies to every key that does not
 # have its own explicit policy. Individual keys can override the default.
+# Prefer per-setting policy while introducing a node or mixed group. Use
+# default_policy: enforce only for nodes/groups where most declared settings
+# should be written.
 
 # Groups: shared settings and policies applied to all nodes in the group.
 # A node inherits its group default_policy and settings, then applies its own
@@ -219,6 +222,11 @@ nodes:
   # which enforce a desired state. An operation just fires a command and records
   # whether it succeeded. 'every_hours' sets the minimum gap between runs; mchd
   # will run the command if it has not run successfully within that window.
+  #
+  # Do not use recurring operations for admin password rotation. mchd stores one
+  # current admin password per node in secrets.yaml; change passwords as an
+  # operator action, edit secrets.yaml immediately, reload mchd, and confirm
+  # with `mch sync <prefix>`. mchd never edits config.yaml or secrets.yaml.
   - pubkey_prefix: 11223344
     label: SiteD-Remote
     group: solar-nodes

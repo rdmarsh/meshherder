@@ -89,6 +89,36 @@ keep `DESIGN.md` for stable architecture notes.
     non-zero values, or emit `lat: 0` / `lon: 0` as explicit placeholders — choice TBD.
   - When implemented, also write the values to the node via `set lat` / `set lon` during
     commissioning (these don't require reboot per the MeshCore CLI reference).
+  - **Name length interacts with location**: per the MeshCore CLI reference, a node's
+    advertised name is capped at **32 bytes when no location is set, dropping to 24 bytes
+    once `lat`/`lon` are non-zero** (the 8 bytes go to the lat+lon floats in the advert).
+    The wizard currently caps at 31 bytes regardless. After adding lat/lon prompts, the
+    name truncation logic in `cli.py:_commission_new_wizard` must account for whether
+    location is being set: cap at 24 if yes, 32 if no. Also surface this in the prompt
+    text so operators understand why the name they typed got rejected.
+
+- `mch adopt <node-id>`: bring an existing in-the-wild node under management.
+  - Use case: a repeater is already deployed and operational on the mesh, possibly
+    commissioned by someone else or by a previous tool. Operator wants to start managing
+    it with mch without re-flashing, re-commissioning, or hand-transcribing settings.
+  - Flow (sketch):
+    1. Operator runs `mch adopt <prefix>` or picks from a list of currently-discovered
+       repeaters that are NOT in `config.yaml`.
+    2. mchd queries the node via the existing CLI: `ver`, `board`, `get name`,
+       `get public.key`, `get radio`, `get lat`, `get lon`, `get role`, `get owner.info`,
+       any other observable fields.
+    3. Operator is prompted for the admin password (the only thing mchd can't read).
+    4. mchd verifies it can authenticate, then prints paste-ready `config.yaml` and
+       `secrets.yaml` snippets matching the *observed* state, with the gateway's home
+       radio used for `via` if the node is on the same freq, or the observed radio
+       otherwise.
+    5. Notably, `prv_key` cannot be obtained over the mesh (`get prv.key` is serial-only),
+       so the secrets entry will have `password` only, no `prv_key`. That node will not
+       be eligible for `commission replace` until the operator either gets serial access
+       to read the key, or accepts a future re-key (which loses the current identity).
+  - Distinct from `commission new` (factory hardware → managed) and `commission replace`
+    (factory hardware → restore known identity). Adopt is "already-managed-by-someone-else
+    hardware → under-mch-control without touching anything destructive".
 
 - Investigate post-replace "Heltec Repeater" name regression.
   - Observed 2026-05-23: after a successful `commission replace` of `81d6bf19`, the node
@@ -267,6 +297,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: `mch validate` warns when a `secrets.yaml` `prv_key` derives a public key
+  that doesn't match the `pubkey_prefix` it is filed under — catches typos and stale
+  secrets entries early.
 - 2026-05-23: Live-tested `commission replace` end-to-end against the bench node.
   Erased via USB → discovered as factory → `_login_for_replace` path → restored the
   `81d6bf19` identity → reboot → live pubkey/radio matched the original on USB check.
