@@ -1027,3 +1027,277 @@ async def test_commission_replace_rehops_to_factory_before_commands():
     }, wq, db, cfg)
 
     gw.hop_radio.assert_called_once_with(*Gateway.FACTORY_FREQ)
+
+
+# ---------------------------------------------------------------------------
+# handle_commission — login progress messages (pin)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_commission_new_emits_login_progress_messages():
+    """'new' mode emits 'logging in...' then 'login OK' progress messages on success."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+    messages: list[str] = []
+
+    async def _capture(msg: str) -> None:
+        messages.append(msg)
+
+    await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg, progress=_capture)
+
+    assert "logging in..." in messages
+    # login OK message immediately follows the logging-in message
+    idx = messages.index("logging in...")
+    assert messages[idx + 1].startswith("login OK")
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_emits_login_progress_messages():
+    """'replace' mode emits 'logging in...' then 'login OK' progress messages on success."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
+    )
+    messages: list[str] = []
+
+    async def _capture(msg: str) -> None:
+        messages.append(msg)
+
+    await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg, progress=_capture)
+
+    assert "logging in..." in messages
+    idx = messages.index("logging in...")
+    assert messages[idx + 1].startswith("login OK")
+
+
+# ---------------------------------------------------------------------------
+# handle_commission — replace-mode managed-password fallback
+# ---------------------------------------------------------------------------
+
+def _make_login_mock(*, factory_ok: bool, managed_ok: bool, managed_password: str):
+    """Build a gateway.login side_effect that distinguishes factory and managed passwords."""
+    async def _login(contact, password):
+        if password == "password":
+            return factory_ok
+        if password == managed_password:
+            return managed_ok
+        return False
+    return AsyncMock(side_effect=_login)
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_falls_back_to_managed_password_when_factory_fails():
+    """When factory login fails in replace mode, the managed password from secrets is tried."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = _make_login_mock(factory_ok=False, managed_ok=True, managed_password="nodepass")
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
+    )
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    assert resp["ok"] is True
+    # Both attempts were made, factory first then managed
+    passwords_tried = [call.args[1] for call in gw.login.call_args_list]
+    assert passwords_tried == ["password", "nodepass"]
+    # The command sequence still ran
+    sent = [call.args[1] for call in gw.send_command.call_args_list]
+    assert any("password nodepass" in c for c in sent)
+    assert any("set prv.key deadbeef" in c for c in sent)
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_does_not_try_managed_when_factory_succeeds():
+    """Regression guard: factory login success means managed password is never tried."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    # Default gw.login from make_gateway() returns True — verify only one call is made.
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
+    )
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    assert resp["ok"] is True
+    gw.login.assert_called_once()
+    _, pwd = gw.login.call_args[0]
+    assert pwd == "password"
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_no_login_succeeds_factory_fails_no_managed_password():
+    """Factory login fails and secrets has no managed password → error, no commands sent."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = AsyncMock(return_value=False)
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        # No password in secrets — only prv_key
+        secrets={"aabbccdd": NodeSecrets(prv_key="deadbeef" * 8)},
+    )
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    assert "authenticate" in resp["error"]
+    # Only one login attempt — no managed password to try
+    gw.login.assert_called_once()
+    _, pwd = gw.login.call_args[0]
+    assert pwd == "password"
+    gw.send_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_no_login_succeeds_both_passwords_fail():
+    """Factory and managed both reject → error mentions both attempts."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = _make_login_mock(factory_ok=False, managed_ok=False, managed_password="nodepass")
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
+    )
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    assert "factory" in resp["error"].lower()
+    assert "managed" in resp["error"].lower()
+    passwords_tried = [call.args[1] for call in gw.login.call_args_list]
+    assert passwords_tried == ["password", "nodepass"]
+    gw.send_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_emits_fallback_progress_message():
+    """When the managed-password fallback fires, progress announces it to the operator."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = _make_login_mock(factory_ok=False, managed_ok=True, managed_password="nodepass")
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
+    )
+    messages: list[str] = []
+
+    async def _capture(msg: str) -> None:
+        messages.append(msg)
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg, progress=_capture)
+
+    assert resp["ok"] is True
+    # The operator must see that the fallback fired — both that factory failed and
+    # that we're now using the managed credentials.
+    assert any("factory login failed" in m.lower() for m in messages)
+    assert any("managed credentials" in m.lower() for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_command_sequence_unchanged_when_fallback_fires():
+    """Regression guard: the command sequence sent via the fallback path matches the
+    sequence sent on a normal factory-login pass. Re-sending these idempotent commands
+    is what makes stateless retry safe."""
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+
+    # Reference: factory login succeeds
+    gw_a = make_gateway(discovered=[discover_payload(pubkey)])
+    wq_a = make_wq(gateway=gw_a)
+    db_a = make_db()
+    cfg_a = make_config(
+        nodes=[NodeConfig(
+            pubkey_prefix="aabbccdd",
+            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+        )],
+        secrets={
+            "aabbccdd": NodeSecrets(
+                password="nodepass", guest_password="guestpass", prv_key="deadbeef" * 8,
+            ),
+        },
+    )
+    await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq_a, db_a, cfg_a)
+    sequence_a = [call.args[1] for call in gw_a.send_command.call_args_list]
+
+    # Fallback path: factory rejects, managed succeeds
+    gw_b = make_gateway(discovered=[discover_payload(pubkey)])
+    gw_b.login = _make_login_mock(factory_ok=False, managed_ok=True, managed_password="nodepass")
+    wq_b = make_wq(gateway=gw_b)
+    db_b = make_db()
+    cfg_b = make_config(
+        nodes=[NodeConfig(
+            pubkey_prefix="aabbccdd",
+            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+        )],
+        secrets={
+            "aabbccdd": NodeSecrets(
+                password="nodepass", guest_password="guestpass", prv_key="deadbeef" * 8,
+            ),
+        },
+    )
+    await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq_b, db_b, cfg_b)
+    sequence_b = [call.args[1] for call in gw_b.send_command.call_args_list]
+
+    assert sequence_a == sequence_b

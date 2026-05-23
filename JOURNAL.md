@@ -4,6 +4,22 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-23 - Replacement Commission Retry After Partial Failure
+
+- On 2026-05-22 a replacement commission on Heltec V3 / MeshCore v1.15 changed the admin
+  password and private key, then timed out waiting for `set radio`. The next attempt could
+  not log in because the factory password was already gone.
+- The fix is stateless: on factory-login failure in replace mode, try the managed password
+  from `secrets.yaml`. The mutation commands (`set guest.password`, `password`,
+  `set prv.key`, `set radio`) are idempotent for the same target values, so re-sending the
+  whole sequence is safe.
+- Login is now per-mode, not shared in `handle_commission`. `_commission_new` keeps the
+  factory-only path; `_commission_replace` uses `_login_for_replace` which announces the
+  fallback via the progress callback so the operator sees what happened.
+- The fresh-mode equivalent (operator loses the daemon-generated private key on partial
+  failure) is intentionally a separate problem — it needs a different mechanism (persist
+  before sending, or emit the snippet earlier). Tracked in `BACKLOG.md` under **Next**.
+
 ## 2026-05-21 - Commissioning Identity Model
 
 - `mch commission new` should not keep a factory-generated node identity.
