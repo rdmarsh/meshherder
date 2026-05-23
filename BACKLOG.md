@@ -23,8 +23,6 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Inbox
 
-- Confirm whether `mch remove <node>` or `mch forget <node>` is the preferred command name for
-  deleting one retired node from local DB state.
 - Decide whether `mch commission new` and `mch commission replace` should become explicit
   subcommands, with bare `mch commission` kept as an interactive wizard.
 - Decide where field metadata should live for validating MeshCore `set` values: local command
@@ -159,6 +157,7 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-23: Added a static `mch(1)` man page and README install instructions.
 - 2026-05-23: Added `mch remove <node>` for deleting one node's local DB state, with `--force` for
   nodes still present in config.
 - 2026-05-23: Added `mch validate` to check config/secrets locally without contacting `mchd`.
