@@ -1089,6 +1089,121 @@ async def test_commission_replace_emits_login_progress_messages():
 
 
 # ---------------------------------------------------------------------------
+# handle_commission — new-mode admin-password fallback
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_commission_new_falls_back_to_new_admin_password_when_factory_fails():
+    """When factory login fails in new mode, the user-supplied admin password is tried."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+
+    async def _login(contact, password):
+        return password == "newadminpw"
+    gw.login = AsyncMock(side_effect=_login)
+
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "newadminpw",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    assert resp["ok"] is True
+    passwords_tried = [call.args[1] for call in gw.login.call_args_list]
+    assert passwords_tried == ["password", "newadminpw"]
+    sent = [call.args[1] for call in gw.send_command.call_args_list]
+    assert any("password newadminpw" in c for c in sent)
+
+
+@pytest.mark.asyncio
+async def test_commission_new_does_not_try_fallback_when_factory_succeeds():
+    """Regression guard: factory login success means the new admin password is never tried."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "newadminpw",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    assert resp["ok"] is True
+    gw.login.assert_called_once()
+    _, pwd = gw.login.call_args[0]
+    assert pwd == "password"
+
+
+@pytest.mark.asyncio
+async def test_commission_new_no_fallback_when_admin_password_is_factory_default():
+    """When the operator-chosen admin password is also 'password', no second attempt is made."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    gw.login = AsyncMock(return_value=False)
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        # No admin_password → defaults to 'password' (factory) → no fallback opportunity
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg)
+
+    assert resp["ok"] is False
+    gw.login.assert_called_once()
+    _, pwd = gw.login.call_args[0]
+    assert pwd == "password"
+
+
+@pytest.mark.asyncio
+async def test_commission_new_emits_fallback_progress_message():
+    """When the new-mode fallback fires, progress announces it to the operator."""
+    from mch.commission import handle_commission
+
+    pubkey = "a1" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+
+    async def _login(contact, password):
+        return password == "newadminpw"
+    gw.login = AsyncMock(side_effect=_login)
+
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config()
+    messages: list[str] = []
+
+    async def _capture(msg: str) -> None:
+        messages.append(msg)
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "admin_password": "newadminpw",
+        "name": "TestNode", "target_freq": "915.800,250,10,5",
+        "prv_key": GENERATED_PRV_KEY,
+    }, wq, db, cfg, progress=_capture)
+
+    assert resp["ok"] is True
+    assert any("factory login failed" in m.lower() for m in messages)
+    assert any("new admin password" in m.lower() for m in messages)
+
+
+# ---------------------------------------------------------------------------
 # handle_commission — replace-mode managed-password fallback
 # ---------------------------------------------------------------------------
 

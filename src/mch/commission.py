@@ -84,6 +84,37 @@ async def _login_factory(
     return ok
 
 
+async def _login_for_new(
+    gateway: Gateway,
+    contact: dict[str, Any],
+    new_admin_password: str,
+    progress: Callable[[str], Awaitable[None]] | None,
+) -> tuple[bool, str | None]:
+    """
+    Try factory password first; fall back to the user-supplied admin password.
+
+    If a previous attempt got past `password <new>` and then failed later
+    (e.g. a session-invalidating timeout on the next command), the node is now
+    holding the new admin password. The CLI wizard preserves the same form
+    values (and prv_key) across retries, so re-authenticating with the
+    just-supplied password lets the idempotent command sequence resume without
+    a manual reset.
+    """
+    if await _login_factory(gateway, contact, progress):
+        return True, None
+    if new_admin_password and new_admin_password != "password":
+        if progress is not None:
+            await progress("factory login failed; trying the new admin password")
+        if await gateway.login(contact, new_admin_password):
+            if progress is not None:
+                await progress("login OK (new admin password)")
+            return True, None
+    return False, (
+        "could not authenticate to factory node — "
+        "ensure it is factory-fresh (default password 'password') and retry"
+    )
+
+
 async def _login_for_replace(
     gateway: Gateway,
     contact: dict[str, Any],
@@ -331,17 +362,16 @@ async def _commission_new(
     then applies password, name, and radio. The factory-generated identity is
     discarded so mch can print the private key needed for future replacement.
     """
-    if not await _login_factory(gateway, contact, progress):
-        return {
-            "ok": False,
-            "error": (
-                "could not authenticate to factory node — "
-                "ensure it is factory-fresh (default password 'password') and retry"
-            ),
-        }
-
     # Always set an admin password; fall back to 'password' if not provided.
     admin_password = req.get("admin_password") or "password"
+
+    # Login with factory password first; if that fails, try the admin password
+    # the operator supplied. A previous attempt may have got past the password
+    # command before failing later (e.g. set prv.key/set radio timing out due
+    # to session invalidation), leaving the node already on the new password.
+    login_ok, login_error = await _login_for_new(gateway, contact, admin_password, progress)
+    if not login_ok:
+        return {"ok": False, "error": login_error}
     guest_password = req.get("guest_password")
     name = req.get("name") or req.get("label") or ""
     label = req.get("label") or ""

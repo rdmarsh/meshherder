@@ -128,6 +128,52 @@ Live testing on a Heltec V3 running `v1.15.0-dee3e26` confirmed the intended new
 fresh flash, factory discovery, generated private key, reboot onto the test mesh frequency, and
 direct serial verification that `public.key`, `prv.key`, name, and radio all matched the snippets.
 
+### Partial-state recovery
+
+The mesh is fragile by design — nodes lose power, drop out of range, miss packets, and reboot
+mid-conversation. Commissioning must assume *any* command can time out without applying or, worse,
+apply but lose its response. The architecture treats partial-state recovery as a first-class
+concern rather than an edge case.
+
+Two firmware behaviours drive the strategy:
+
+- **Reboot gates identity and radio.** `set prv.key` and `set radio` are stored on send but only
+  take effect after `reboot`. So if commissioning fails before the reboot is sent, the node still
+  advertises with the old pubkey on the old radio. Re-discovery on the factory frequency will find
+  it; the command sequence can be safely re-sent.
+- **`password <new>` invalidates the current admin session.** On v1.15-era firmware, the next CLI
+  command after a password change often times out with no response — observed on both `set radio`
+  (2026-05-22) and `set prv.key` (2026-05-23). The node has the new password, but the in-flight
+  command never gets a reply.
+
+Together these mean partial commission leaves a predictable state: factory-looking pubkey and
+radio, but a *non-factory* admin password. Recovery cannot rely on the factory password alone.
+
+The commissioning code therefore tries two passwords, in order:
+
+- **`commission new`**: factory `password` first, then the user-supplied admin password from the
+  wizard form. The CLI generates the private key once before the retry loop, so successive
+  attempts use the same key. All mutation commands (`set name`, `set guest.password`, `password`,
+  `set prv.key`, `set radio`) are idempotent under re-send with identical params, so the whole
+  sequence is replayed each retry without stage tracking.
+- **`commission replace`**: factory `password` first, then the managed password from
+  `secrets.yaml`. The managed identity is operator-owned and pre-existing for this mode, so the
+  fallback target is always available when the prefix is in secrets.
+
+When the fallback fires, the wizard surfaces a short progress message
+(`factory login failed; trying the new admin password` or `...resuming with managed credentials`)
+so the operator can tell from the live output that the recovery path was used. Both paths emit a
+clear error mentioning both attempts when authentication fails entirely.
+
+This approach is deliberately stateless: no commissioning_stage table, no resume tokens, no
+opt-in flags. Idempotency plus the two-password fallback covers every observed in-session
+recovery case. The remaining hole is loss of the wizard's in-memory `prv_key` if the CLI process
+itself dies mid-commission; mitigation options are tracked in `BACKLOG.md`.
+
+When both fallbacks are exhausted (the node holds a password that's neither factory nor the one
+the wizard knows about), bench recovery is a direct serial command: `password password` over USB
+restores the factory admin password without auth, after which normal commissioning resumes.
+
 ## Known design gaps
 
 For the current prioritized todo list, wishlist, and explicit non-goals, see `BACKLOG.md`. This
@@ -139,6 +185,14 @@ section only records stable design gaps that affect the architecture.
   to resolve them — either add to config (paste block) or remove from DB.
 - **Commission idempotency**: running `mch commission` on a node already in config/DB has
   undefined behaviour. Should detect and reject.
+- **Commission new ignores group defaults**: the wizard pre-fills radio settings from the gateway
+  node's home radio, but does not yet inherit from the matching `config.yaml` group (or a
+  `default` group) the way replacement implicitly does via the existing secrets entry. Same
+  applies to a future `default:` entry in `secrets.yaml`.
+- **Wizard-held `prv_key` is process-local**: the CLI generates the new node's private key once
+  per wizard session and keeps it in memory across retries. If the wizard process dies mid-run,
+  the key is lost while the node may still be holding it, leaving the node bricked until manual
+  factory reset.
 - **Limited hot-reload scope**: node/group/secrets/messenger changes reload live. Gateway device,
   socket path, and DB path changes still require a daemon restart.
 - **Factory reset notes**: for bench testing and replacement drills, documentation with the exact

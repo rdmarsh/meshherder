@@ -4,6 +4,37 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-23 - New-Mode Commission Fallback to User Password
+
+- After shipping the replace-mode fallback (entry below), a live `commission new` run on the
+  same bricked node hit the same class of bug at `set prv.key`: the password change just
+  before it appears to invalidate the admin session on v1.15-era firmware, and the next
+  command times out waiting for a response.
+- Verified by raw serial (`meshcore-cli -r -s /dev/cu.usbserial-0001 get freq` etc.) that
+  the node was still on factory frequency and factory pubkey after the timeout — i.e. the
+  state-changing radio/key writes had not been applied (because they only take effect on
+  reboot, which never happened). Only the admin password had actually changed.
+- Extended the fallback to new mode the same way as replace: factory password first, then
+  the user-supplied admin password from the wizard form. The CLI generates `prv_key` once
+  before the retry loop (`cli.py:1129`) and resends the same value, so the originally
+  feared "operator loses the daemon-generated prv_key" failure mode is mitigated for the
+  common in-session retry case. It can still bite if the wizard itself is killed mid-run.
+- The operator's framing is the right one: the mesh is fragile by nature, so partial-state
+  recovery is the *purpose* of the tool, not an edge case. Future work should keep this
+  bias: prefer idempotent commands and fallback strategies over assuming a clean baseline.
+
+### Bench observation (v1.15.0-dee3e26 on Heltec V3)
+
+- Symptom: `password <new>` returns OK, the very next CLI command sent over the mesh times
+  out with no response.
+- Reproduced on both `set radio` (replace mode, 2026-05-22) and `set prv.key` (new mode,
+  2026-05-23). Same firmware build.
+- Hypothesis: the password change closes the current admin session in some firmware paths;
+  the next command runs without admin auth and is dropped silently.
+- Mitigation in current code: keep password/identity changes late in the command list and
+  rely on idempotent retry-with-fallback rather than ordering tricks. Direct serial reset
+  is the bench escape hatch when both fallbacks are exhausted.
+
 ## 2026-05-23 - Replacement Commission Retry After Partial Failure
 
 - On 2026-05-22 a replacement commission on Heltec V3 / MeshCore v1.15 changed the admin
@@ -16,9 +47,6 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 - Login is now per-mode, not shared in `handle_commission`. `_commission_new` keeps the
   factory-only path; `_commission_replace` uses `_login_for_replace` which announces the
   fallback via the progress callback so the operator sees what happened.
-- The fresh-mode equivalent (operator loses the daemon-generated private key on partial
-  failure) is intentionally a separate problem — it needs a different mechanism (persist
-  before sending, or emit the snippet earlier). Tracked in `BACKLOG.md` under **Next**.
 
 ## 2026-05-21 - Commissioning Identity Model
 
