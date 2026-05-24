@@ -89,7 +89,8 @@ _SPECS: tuple[CommandSpec, ...] = (
         notes=(
             "Firmware may echo float-rounded frequency and bandwidth values. On v1.15.0 repeater "
             "firmware, `tempradio {value},<minutes>` is temporary/runtime-only, bare `radio` is "
-            "unknown, and `set radio {value}` replies `OK - reboot to apply`."
+            "unknown, and `set radio {value}` replies `OK - reboot to apply`. Official docs say "
+            "`set radio` requires reboot and `tempradio` is not saved to preferences."
         ),
     ),
     CommandSpec(
