@@ -16,6 +16,7 @@ from typing import Any
 
 import click
 
+from mch.command_registry import parse_radio_tuple, validate_radio_tuple
 from mch.command_safety import blocked_exec_command, confirm_exec_command
 from mch.config import load as load_config
 from mch.config import secrets_identity_warnings
@@ -392,7 +393,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         if any_drift:
             legend_parts.append("~~~ = drifted from desired")
         if any_approximate:
-            legend_parts.append("* = within expected tolerance")
+            legend_parts.append("* = nominal (within expected tolerance)")
         legend = f"  ({', '.join(legend_parts)})" if legend_parts else ""
         click.echo(f"settings:{legend}")
         # column widths based on content display width, not char count
@@ -1143,22 +1144,12 @@ def _prompt_radio_cr(default: str = "") -> str:
 
 
 def _validate_radio_tuple(raw: str) -> tuple[str, str, str, str] | None:
-    parts = [p.strip() for p in raw.split(",")]
-    if len(parts) != 4:
+    parsed = parse_radio_tuple(raw)
+    if parsed is None:
         return None
-    freq, bw, sf, cr = parts
-    try:
-        if not 400.0 <= float(freq) <= 928.0:
-            return None
-        if float(bw) not in (7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0):
-            return None
-        if not 7 <= int(sf) <= 12:
-            return None
-        if not 5 <= int(cr) <= 8:
-            return None
-    except ValueError:
+    if validate_radio_tuple(raw) is not None:
         return None
-    return freq, bw, sf, cr
+    return parsed
 
 
 def _profile_radio_options() -> list[tuple[str, str]]:

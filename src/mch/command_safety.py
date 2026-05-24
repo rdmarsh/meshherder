@@ -1,36 +1,15 @@
 """Safety classification for raw MeshCore CLI commands."""
 
+from mch.command_registry import (
+    blocked_command_prefixes,
+    confirm_command_prefixes,
+    fire_and_forget_prefixes,
+    normalize_command,
+)
 
-BLOCKED_EXEC_COMMANDS = frozenset({
-    # MeshCore docs mark `erase` as destructive factory reset.
-    "erase",
-    # Firmware update / identity / credential / ACL changes should go through
-    # config or commissioning flows, not ad-hoc exec.
-    "start ota",
-    "set prv.key",
-    "password",
-    "set guest.password",
-    "setperm",
-    # Removing a blank neighbor prefix removes all neighbors.
-    "neighbor.remove",
-})
-
-CONFIRM_EXEC_COMMANDS = frozenset({
-    "reboot",
-    "clkreboot",
-    "clear stats",
-    "log erase",
-})
-
-FIRE_AND_FORGET_COMMANDS = frozenset({
-    "reboot",
-    "clkreboot",
-})
-
-
-def normalize_command(command: str) -> str:
-    """Return a lowercase command with collapsed whitespace for safety matching."""
-    return " ".join(command.strip().lower().split())
+BLOCKED_EXEC_COMMANDS = blocked_command_prefixes()
+CONFIRM_EXEC_COMMANDS = confirm_command_prefixes()
+FIRE_AND_FORGET_COMMANDS = fire_and_forget_prefixes()
 
 
 def matched_command_prefix(command: str, candidates: frozenset[str]) -> str | None:

@@ -23,6 +23,43 @@ keeps the existing daemon process and gateway connection alive, updates the in-m
 state, refreshes gateway contacts, and reseeds DB labels/groups from config. Invalid YAML is logged
 and ignored; the last valid in-memory config remains active.
 
+Future direction: keep this YAML-first model until there is a clear reason to migrate desired
+state into SQLite. If that changes, add explicit import/export/backup commands rather than
+silently making the DB the only copy. Secrets and private keys need a separate security decision
+before they are included in any ordinary backup/export workflow.
+
+## API-ready internal model
+
+`mch` should move toward a single daemon-side report/action model that can be rendered by the CLI,
+a future HTTP/OpenAPI interface, and compact mesh DM/channel summaries. `mch status` and `mch plan`
+should not separately reconstruct desired-vs-observed meaning from raw DB records.
+
+Intended split:
+- `mch status [NODE]`: current state and evidence.
+- `mch plan [NODE]`: what mchd would do next.
+- `mch logs [NODE]`: history.
+- `mch suggest [NODE]`: recommendations.
+- `mch sync [NODE]`: do work now.
+
+The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`, `ignored`, or
+`blocked`, and classify next action as `none`, `read`, `write`, `report`, `ignore`, or `blocked`.
+`nominal` means the observed value differs textually but is equivalent within expected firmware or
+computer representation tolerance.
+
+## Command metadata
+
+MeshCore command knowledge should live in a small curated registry for commands mch actually uses,
+not as scattered conditionals and not as a full copy of the MeshCore CLI reference. Unknown keys
+must keep working with default `get <key>` / `set <key> <value>` behavior.
+
+The registry should define read/write command shape, value validation, comparison strategy, safety
+flags, reboot requirements, firmware/version notes, and per-command timeouts. This is the foundation
+for safer config validation, clearer `status`/`plan` output, and future API metadata.
+
+The long-term registry data should live in a versioned `command_registry.json`, with Python code
+limited to loading, validating, and applying fallback behavior. That keeps command knowledge easy
+to update as firmware behavior is discovered without requiring code changes for every new command.
+
 ## Node identity
 
 **The public key is the stable node identity.** Names can change. Labels are local-only (in
