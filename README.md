@@ -72,9 +72,10 @@ pip install -e ".[dev]"
 
 `mchd` and `mch` are then available inside the venv.
 
-### Production (server / Raspberry Pi)
+### Production
 
-Clone to a permanent location, create a venv, and install into it:
+Use this for a personal server, Raspberry Pi, or other always-on host with a MeshCore gateway node
+permanently attached over USB. Clone to a permanent location, create a venv, and install into it:
 
 ```bash
 sudo git clone https://github.com/rdmarsh/meshherder /opt/meshherder
@@ -572,13 +573,15 @@ If a node shows as `partial`, `mch logs <prefix>` will show what failed:
 In this case `reboot` timed out because the node rebooted before it could reply — mark it
 `fire_and_forget: true` in your config and it will be treated as success.
 
-## Upgrading
+## Upgrade
+
+Use the same checkout and venv that were created during production install:
 
 ```bash
 cd /opt/meshherder
-sudo git pull
-source .venv/bin/activate
-pip install .
-deactivate
+sudo git pull --ff-only
+sudo /opt/meshherder/.venv/bin/pip install .
 sudo systemctl restart mchd
+mch --version
+systemctl status mchd --no-pager
 ```
