@@ -385,11 +385,14 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     if settings:
         any_unobserved = any(s.get("observed") is None for s in settings)
         any_drift = any(s["drift"] for s in settings)
+        any_approximate = any(s.get("approximate") for s in settings)
         legend_parts = []
         if any_unobserved:
             legend_parts.append("??? = not yet observed")
         if any_drift:
             legend_parts.append("~~~ = drifted from desired")
+        if any_approximate:
+            legend_parts.append("* = within expected tolerance")
         legend = f"  ({', '.join(legend_parts)})" if legend_parts else ""
         click.echo(f"settings:{legend}")
         # column widths based on content display width, not char count
@@ -406,6 +409,8 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 drift_flag = "???"
             elif s["drift"]:
                 drift_flag = "~~~"
+            elif s.get("approximate"):
+                drift_flag = "*"
             else:
                 drift_flag = ""
             click.echo(_srow(
@@ -898,11 +903,10 @@ def plan(ctx: click.Context, query: str | None) -> None:
         click.echo(f"no planned changes matching '{query}'" if query else "no planned writes")
         return
 
-    def _value(value: Any, width: int = 18) -> str:
+    def _value(value: Any) -> str:
         if value is None or value == "":
             return "-"
-        text = str(value)
-        return text if _wlen(text) <= width else text[: max(0, width - 1)] + "…"
+        return str(value)
 
     def _label(item: dict[str, Any]) -> str:
         return item.get("label") or item.get("mesh_name") or "-"
@@ -910,21 +914,29 @@ def plan(ctx: click.Context, query: str | None) -> None:
     def _label_width(items: list[dict[str, Any]]) -> int:
         return max(_wlen("LABEL"), max((_wlen(_label(item)) for item in items), default=0))
 
+    def _col_width(items: list[dict[str, Any]], header: str, field: str) -> int:
+        return max(_wlen(header), max((_wlen(_value(item.get(field))) for item in items), default=0))
+
     if writes:
         click.echo("planned writes (next sync would enforce):")
         node_w = _label_width(writes)
-        fmt = "  {:<12}  {}  {:<22}  {:<18}  {:<18}  {}"
-        click.echo(fmt.format(
-            "PUBKEY", _wpad("LABEL", node_w), "KEY", "KNOWN", "DESIRED", "COMMAND"
-        ))
-        click.echo(fmt.format(
-            "------", _wpad("-----", node_w), "---", "-----", "-------", "-------"
-        ))
+        key_w = _col_width(writes, "KEY", "key")
+        known_w = _col_width(writes, "KNOWN", "known")
+        desired_w = _col_width(writes, "DESIRED", "desired")
+
+        def _wrow(pubkey: str, label: str, key: str, known: str, desired: str, command: str) -> str:
+            return (
+                f"  {pubkey:<12}  {_wpad(label, node_w)}  {_wpad(key, key_w)}  "
+                f"{_wpad(known, known_w)}  {_wpad(desired, desired_w)}  {command}"
+            )
+
+        click.echo(_wrow("PUBKEY", "LABEL", "KEY", "KNOWN", "DESIRED", "COMMAND"))
+        click.echo(_wrow("------", "-----", "---", "-----", "-------", "-------"))
         for item in writes:
-            click.echo(fmt.format(
+            click.echo(_wrow(
                 _pk(item.get("pubkey")),
-                _wpad(_label(item), node_w),
-                item["key"][:22],
+                _label(item),
+                item["key"],
                 _value(item.get("known")),
                 _value(item.get("desired")),
                 item.get("command") or "-",
@@ -934,14 +946,23 @@ def plan(ctx: click.Context, query: str | None) -> None:
     if audits:
         click.echo("audit drift (no write):")
         node_w = _label_width(audits)
-        fmt = "  {:<12}  {}  {:<22}  {:<18}  {:<18}"
-        click.echo(fmt.format("PUBKEY", _wpad("LABEL", node_w), "KEY", "KNOWN", "DESIRED"))
-        click.echo(fmt.format("------", _wpad("-----", node_w), "---", "-----", "-------"))
+        key_w = _col_width(audits, "KEY", "key")
+        known_w = _col_width(audits, "KNOWN", "known")
+        desired_w = _col_width(audits, "DESIRED", "desired")
+
+        def _arow(pubkey: str, label: str, key: str, known: str, desired: str) -> str:
+            return (
+                f"  {pubkey:<12}  {_wpad(label, node_w)}  {_wpad(key, key_w)}  "
+                f"{_wpad(known, known_w)}  {_wpad(desired, desired_w)}"
+            )
+
+        click.echo(_arow("PUBKEY", "LABEL", "KEY", "KNOWN", "DESIRED"))
+        click.echo(_arow("------", "-----", "---", "-----", "-------"))
         for item in audits:
-            click.echo(fmt.format(
+            click.echo(_arow(
                 _pk(item.get("pubkey")),
-                _wpad(_label(item), node_w),
-                item["key"][:22],
+                _label(item),
+                item["key"],
                 _value(item.get("known")),
                 _value(item.get("desired")),
             ))
@@ -950,14 +971,22 @@ def plan(ctx: click.Context, query: str | None) -> None:
     if unknown:
         click.echo("needs observation (no known value yet):")
         node_w = _label_width(unknown)
-        fmt = "  {:<12}  {}  {:<22}  {:<18}  {}"
-        click.echo(fmt.format("PUBKEY", _wpad("LABEL", node_w), "KEY", "DESIRED", "REASON"))
-        click.echo(fmt.format("------", _wpad("-----", node_w), "---", "-------", "------"))
+        key_w = _col_width(unknown, "KEY", "key")
+        desired_w = _col_width(unknown, "DESIRED", "desired")
+
+        def _urow(pubkey: str, label: str, key: str, desired: str, reason: str) -> str:
+            return (
+                f"  {pubkey:<12}  {_wpad(label, node_w)}  {_wpad(key, key_w)}  "
+                f"{_wpad(desired, desired_w)}  {reason}"
+            )
+
+        click.echo(_urow("PUBKEY", "LABEL", "KEY", "DESIRED", "REASON"))
+        click.echo(_urow("------", "-----", "---", "-------", "------"))
         for item in unknown:
-            click.echo(fmt.format(
+            click.echo(_urow(
                 _pk(item.get("pubkey")),
-                _wpad(_label(item), node_w),
-                (item.get("key") or "-")[:22],
+                _label(item),
+                item.get("key") or "-",
                 _value(item.get("desired")),
                 item.get("reason") or "-",
             ))

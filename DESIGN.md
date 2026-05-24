@@ -98,6 +98,11 @@ resolve from `global:` to group to node, with the most specific value winning.
 `enforce`, `skip`). The comparison gives convergence: if a node drifts or gets reflashed, the
 next sync detects it and corrects it (under `enforce`).
 
+Comparison is field-aware for known numeric settings where firmware returns rounded float values.
+`radio` is parsed as `freq,bw,sf,cr`: frequency and bandwidth tolerate small float roundoff, while
+SF and CR are exact integers. `lat` and `lon` compare within roughly three decimal places. Status
+still displays the actual observed value and marks rows within expected tolerance with `*`.
+
 **Operations** are scheduled commands with no read-back or desired-value comparison. mchd sends
 the command string, records success or failure, and re-runs it after `every_hours` have elapsed
 since the last successful run.

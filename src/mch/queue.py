@@ -29,6 +29,7 @@ from mch.command_safety import fire_and_forget_command
 from mch.config import Config, GroupConfig, NodeConfig, OperationConfig
 from mch.db import Database
 from mch.gateway import CommandResult, Gateway
+from mch.settings_compare import compare_setting
 
 if TYPE_CHECKING:
     from mch.messenger import Messenger
@@ -840,7 +841,8 @@ class WorkQueue:
             observed = (res.text or "").strip()
             if key == "name" and observed:
                 node.name = observed
-            is_drift = desired is not None and observed != desired
+            comparison = compare_setting(key, desired, observed)
+            is_drift = desired is not None and not comparison.equal
 
             setting = SettingRecord(
                 node_pubkey=pubkey,

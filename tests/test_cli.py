@@ -549,6 +549,20 @@ def test_status_single_match_shows_settings_drift_flag():
     assert "owner.info" in result.output
 
 
+def test_status_single_match_shows_approximate_settings_marker():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(settings=[{
+        "key": "radio", "desired": "915.075,125,9,5",
+        "observed": "915.0750122,125,9,5", "policy": "enforce",
+        "drift": False, "approximate": True,
+        "last_checked": None, "last_set": None,
+    }])
+    result = _run_multi(["status", "aabb"], status, detail)
+    assert "* = within expected tolerance" in result.output
+    assert "radio" in result.output
+    assert re.search(r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+\*", result.output)
+
+
 def test_status_no_match():
     result = _run(["status", "zzzz"], _status_resp())
     assert result.exit_code == 0
@@ -740,6 +754,24 @@ def test_plan_filters_by_query():
 
     assert "site-b" in result.output
     assert "site-a" not in result.output
+
+
+def test_plan_uses_display_width_for_emoji_values():
+    result = _run(["plan"], _plan_resp(writes=[{
+        "pubkey": "aabbccdd" * 8,
+        "label": "qh-corb",
+        "mesh_name": "Tower",
+        "key": "owner.info",
+        "known": "🦷 dave",
+        "desired": "🦷 rdm",
+        "policy": "enforce",
+        "command": "set owner.info 🦷 rdm",
+    }]))
+
+    assert result.exit_code == 0
+    assert "🦷 dave" in result.output
+    assert "🦷 rdm" in result.output
+    assert "set owner.info 🦷 rdm" in result.output
 
 
 # ------ logs ------
