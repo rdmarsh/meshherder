@@ -518,6 +518,8 @@ def test_status_single_match_shows_detail():
     assert result.exit_code == 0
     assert "Tower" in result.output
     assert "site-a" in result.output
+    assert "pubkey:" in result.output
+    assert "pubkey full:" in result.output
     assert "v1.14.1" in result.output
     assert "authed:" in result.output
     assert "passwd:" in result.output
