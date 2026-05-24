@@ -395,11 +395,11 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         # column widths based on content display width, not char count
         col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
-        col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
         col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
-        def _srow(policy: str, key: str, desired: str, observed: str, drift: str) -> str:
-            return f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}  {_wpad(observed, col_obs)}  {drift}"
-        click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "DRIFT"))
+        col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
+        def _srow(policy: str, key: str, observed: str, desired: str, drift: str) -> str:
+            return f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(observed, col_obs)}  {_wpad(desired, col_des)}  {drift}"
+        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "DRIFT"))
         click.echo(_srow("------", "---", "-------", "--------", "-----"))
         for s in settings:
             if s.get("observed") is None:
@@ -411,8 +411,8 @@ def _render_node_detail(data: dict[str, Any]) -> None:
             click.echo(_srow(
                 s["policy"],
                 s["key"],
-                _sv(s.get("desired")),
                 _sv(s.get("observed")),
+                _sv(s.get("desired")),
                 drift_flag,
             ))
         click.echo("")
