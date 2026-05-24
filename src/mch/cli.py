@@ -311,9 +311,9 @@ def status(ctx: click.Context, query: str | None) -> None:
 @click.argument("node", required=False)
 @click.pass_context
 def sync(ctx: click.Context, node: str | None) -> None:
-    """Trigger an immediate sync cycle, or sync a single node by pubkey prefix.
+    """Trigger an immediate sync cycle, or sync a single node.
 
-    NODE: even-length pubkey prefix (2, 4, 6, 8 … chars). Omit to sync all nodes.
+    NODE: pubkey prefix, label substring, or name substring. Omit to sync all nodes.
     """
     payload: dict[str, Any] = {"cmd": "sync"}
     if node:
@@ -375,26 +375,37 @@ def _render_node_detail(data: dict[str, Any]) -> None:
 
     settings = data.get("settings", [])
     if settings:
+        any_unobserved = any(s.get("observed") is None for s in settings)
         any_drift = any(s["drift"] for s in settings)
-        legend = "  (~ = drifted from desired)" if any_drift else ""
+        legend_parts = []
+        if any_unobserved:
+            legend_parts.append("??? = not yet observed")
+        if any_drift:
+            legend_parts.append("~~~ = drifted from desired")
+        legend = f"  ({', '.join(legend_parts)})" if legend_parts else ""
         click.echo(f"settings:{legend}")
         # column widths based on content display width, not char count
+        col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
         col_des = max(7, max(_wlen(s.get("desired") or "-") for s in settings))
         col_obs = max(8, max(_wlen(s.get("observed") or "-") for s in settings))
-        def _srow(flag: str, key: str, desired: str, observed: str, policy: str) -> str:
-            return f"  {_wpad(flag, 2)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}  {_wpad(observed, col_obs)}  {policy}"
-        drift_hdr = "~" if any_drift else " "
-        click.echo(_srow(drift_hdr, "KEY", "DESIRED", "OBSERVED", "POLICY"))
-        click.echo(_srow("-", "---", "-------", "--------", "------"))
+        def _srow(policy: str, key: str, desired: str, observed: str, drift: str) -> str:
+            return f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}  {_wpad(observed, col_obs)}  {drift}"
+        click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "DRIFT"))
+        click.echo(_srow("------", "---", "-------", "--------", "-----"))
         for s in settings:
-            drift_flag = "~" if s["drift"] else " "
+            if s.get("observed") is None:
+                drift_flag = "???"
+            elif s["drift"]:
+                drift_flag = "~~~"
+            else:
+                drift_flag = ""
             click.echo(_srow(
-                drift_flag,
+                s["policy"],
                 s["key"],
                 s.get("desired") or "-",
                 s.get("observed") or "-",
-                s["policy"],
+                drift_flag,
             ))
         click.echo("")
 
