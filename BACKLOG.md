@@ -103,6 +103,10 @@ keep `DESIGN.md` for stable architecture notes.
       `clock sync` followed by `clkreboot` still returned the clock to the wrong 2024 baseline.
       Still test whether mesh-side `clkreboot` behaves differently before preferring it over
       `clock sync` plus `reboot`, but do not assume it is better on raw serial repeaters.
+      Community reports suggest behavior may be hardware-specific: nRF nodes often reset clock on
+      reboot, ESP32 nodes often do not, and `clkreboot` on V4/ESP32 may be a recovery step that
+      lets `clock sync` work afterwards rather than setting/preserving time itself. Test a V3/V4
+      separately before making `clkreboot` preferred behavior.
       Luna mesh-side note: `mch exec 81d6bf1950a0 clock` timed out with no response in this
       session, so mesh-side `clkreboot` was not tested.
     - Test `region allowf` on old/new firmware if available; older firmware reportedly needed it
