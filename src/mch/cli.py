@@ -387,8 +387,11 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         # column widths based on content display width, not char count
         col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
-        col_des = max(7, max(_wlen(s.get("desired") or "-") for s in settings))
-        col_obs = max(8, max(_wlen(s.get("observed") or "-") for s in settings))
+        def _sv(v: object) -> str:
+            # config values can be int/bool/float — stringify before display
+            return str(v) if v is not None else "-"
+        col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
+        col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
         def _srow(policy: str, key: str, desired: str, observed: str, drift: str) -> str:
             return f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}  {_wpad(observed, col_obs)}  {drift}"
         click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "DRIFT"))
@@ -403,8 +406,8 @@ def _render_node_detail(data: dict[str, Any]) -> None:
             click.echo(_srow(
                 s["policy"],
                 s["key"],
-                s.get("desired") or "-",
-                s.get("observed") or "-",
+                _sv(s.get("desired")),
+                _sv(s.get("observed")),
                 drift_flag,
             ))
         click.echo("")
