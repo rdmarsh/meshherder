@@ -357,7 +357,7 @@ class WorkQueue:
         # block here if commission (or any other operation) has paused the queue
         await self._paused.wait()
 
-        async with self.operation(f"scheduled sync {node.pubkey[:8]}", wait=True):
+        async with self.operation(f"scheduled sync {node.label or node.pubkey[:8]}", wait=True):
             if contact and node_cfg:
                 await self._process_node(node_cfg, group_cfg, contact)
             else:

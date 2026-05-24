@@ -269,6 +269,43 @@ async def test_cycle_node_not_in_contacts(db):
 
 
 # ------------------------------------------------------------------
+# scheduled sync operation name includes label
+# ------------------------------------------------------------------
+
+async def test_scheduled_sync_operation_name_uses_label(db):
+    """_run_next_due uses the node label in its operation name, not just pubkey prefix.
+
+    This ensures 'busy: scheduled sync qh-tower' appears in error messages
+    when the background scheduler is processing that node.
+    """
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="qh-tower",
+                state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    node_cfg = _node(pubkey="aabbccdd", label="qh-tower")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    contact = _contact("aabbccdd" * 8)  # full pubkey must match node.pubkey exactly
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    captured: list[str] = []
+    original_process = wq._process_node
+
+    async def record_op_name(*args, **kwargs):
+        captured.append(wq._operation_name or "")
+        return await original_process(*args, **kwargs)
+
+    wq._process_node = record_op_name  # type: ignore[method-assign]
+    await wq._run_next_due([contact])
+
+    assert captured, "expected _process_node to be called"
+    assert any("qh-tower" in op for op in captured), (
+        f"label not in operation name; got: {captured}"
+    )
+
+
+# ------------------------------------------------------------------
 # happy path: reachable node, facts collected
 # ------------------------------------------------------------------
 
