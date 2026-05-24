@@ -369,13 +369,15 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     click.echo(f"pubkey:      {data['pubkey']}")
     click.echo(f"authed:      {'yes' if data.get('auth_cached') else 'no'}")
     click.echo(f"passwd:      {'yes' if data.get('passwd_known') else 'no'}")
+    click.echo("")
 
     facts = data.get("facts", {})
     if facts:
-        key_w = max(len(k) for k in facts) + 1  # +1 for the colon
+        # Match settings table behavior: pad to visual width, not char count.
+        key_w = max(_wlen(k) for k in facts)
         click.echo("facts:")
         for k, v in sorted(facts.items()):
-            click.echo(f"  {(k + ':'):<{key_w}}  {v}")
+            click.echo(f"  {_wpad(k + ':', key_w + 1)}  {v}")
         click.echo("")
 
     settings = data.get("settings", [])
