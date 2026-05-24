@@ -60,6 +60,7 @@ async def _seed_node_with_facts(db: Database) -> Node:
     await db.upsert_node(node)
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="board", value="TestBoard"))
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="role", value="repeater"))
     return node
 
 
@@ -76,7 +77,7 @@ async def test_node_dispatch_prefix_returns_facts(db, wq, config):
 
     assert resp["ok"] is True
     data = resp["data"]
-    assert data["facts"] == {"ver": "v1.14.1", "board": "TestBoard"}
+    assert data["facts"] == {"ver": "v1.14.1", "board": "TestBoard", "role": "repeater"}
 
 
 async def test_node_dispatch_passwd_known_when_in_secrets(db, wq, config):
@@ -197,7 +198,7 @@ async def test_node_dispatch_full_pubkey_returns_facts(db, wq, config):
     resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["facts"] == {"ver": "v1.14.1", "board": "TestBoard"}
+    assert resp["data"]["facts"] == {"ver": "v1.14.1", "board": "TestBoard", "role": "repeater"}
 
 
 async def test_node_dispatch_unknown_pubkey_returns_error(db, wq, config):
@@ -489,21 +490,22 @@ async def test_sync_dispatch_no_prefix_busy_returns_error(db, wq, config):
 
 
 async def test_sync_dispatch_with_prefix_runs_node(db, wq, config):
-    """sync with a prefix runs a single node inline and returns the result."""
-    from unittest.mock import AsyncMock
-
+    """sync with a pubkey prefix resolves via DB and calls run_node with the full pubkey."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
     wq.run_node = AsyncMock(return_value=node)
 
     resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config)
 
     assert resp["ok"] is True
     assert "Tower" in resp["data"]
-    wq.run_node.assert_awaited_once_with("aabbcc")
+    wq.run_node.assert_awaited_once_with("aabbccdd" * 8)
 
 
 async def test_sync_dispatch_with_prefix_busy_returns_error(db, wq, config):
     """forced node sync returns busy when another gateway operation is active."""
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
     wq.run_node = AsyncMock(side_effect=OperationBusyError("busy: commission"))
 
     resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config)
@@ -512,15 +514,52 @@ async def test_sync_dispatch_with_prefix_busy_returns_error(db, wq, config):
     assert "busy" in resp["error"]
 
 
-async def test_sync_dispatch_bad_prefix_returns_error(db, wq, config):
-    """sync with a prefix that the queue rejects returns an error."""
-    from unittest.mock import AsyncMock
-    wq.run_node = AsyncMock(side_effect=ValueError("no node matching prefix 'zzzzzz'"))
-
+async def test_sync_dispatch_unknown_query_returns_error(db, wq, config):
+    """sync with a query that matches no node returns an error without calling run_node."""
     resp = await _dispatch({"cmd": "sync", "prefix": "zzzzzz"}, wq, db, config)
 
     assert resp["ok"] is False
     assert "zzzzzz" in resp["error"]
+    wq.run_node.assert_not_called()
+
+
+async def test_sync_dispatch_label_substring_resolves_to_full_pubkey(db, wq, config):
+    """sync accepts a label substring (e.g. 'corb') and resolves it to the full pubkey."""
+    node = Node(pubkey="e2601d59" * 8, name="Quakers Hill Corb", label="qh-corb",
+                state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    wq.run_node = AsyncMock(return_value=node)
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "corb"}, wq, db, config)
+
+    assert resp["ok"] is True
+    wq.run_node.assert_awaited_once_with("e2601d59" * 8)
+
+
+async def test_sync_dispatch_exact_label_resolves_to_full_pubkey(db, wq, config):
+    """sync accepts an exact label (e.g. 'qh-corb') and resolves it to the full pubkey."""
+    node = Node(pubkey="e2601d59" * 8, name="Quakers Hill Corb", label="qh-corb",
+                state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    wq.run_node = AsyncMock(return_value=node)
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "qh-corb"}, wq, db, config)
+
+    assert resp["ok"] is True
+    wq.run_node.assert_awaited_once_with("e2601d59" * 8)
+
+
+async def test_sync_dispatch_name_substring_resolves_to_full_pubkey(db, wq, config):
+    """sync accepts a mesh name substring and resolves it to the full pubkey."""
+    node = Node(pubkey="e2601d59" * 8, name="Quakers Hill Corb", label="qh-corb",
+                state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    wq.run_node = AsyncMock(return_value=node)
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "quakers"}, wq, db, config)
+
+    assert resp["ok"] is True
+    wq.run_node.assert_awaited_once_with("e2601d59" * 8)
 
 
 # ------------------------------------------------------------------

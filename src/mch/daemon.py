@@ -221,7 +221,9 @@ async def _dispatch(
             return {"ok": False, "error": str(exc)}
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
-        facts = await db.get_facts(node.pubkey)
+        raw_facts = await db.get_facts(node.pubkey)
+        # show ??? for any fact in config that hasn't been collected yet
+        facts = {key: "???" for key in config.facts} | raw_facts
         db_settings = {s.key: s for s in await db.get_settings(node.pubkey)}
         logs = await db.get_logs(node.pubkey, limit=20)
 
@@ -290,9 +292,16 @@ async def _dispatch(
     if cmd == "sync":
         prefix = req.get("prefix")
         if prefix:
-            # single-node forced sync — run inline so caller gets an error if prefix is bad
+            # resolve label/name/pubkey-prefix to a full pubkey so run_node gets an
+            # unambiguous key regardless of whether the user typed a label or hex prefix
             try:
-                result = await wq.run_node(prefix)
+                node = await _resolve_node(prefix, db)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            if node is None:
+                return {"ok": False, "error": f"no node found matching {prefix!r}"}
+            try:
+                result = await wq.run_node(node.pubkey)
                 return {"ok": True, "data": f"synced {result.name!r} ({result.pubkey[:8]})"}
             except OperationBusyError as exc:
                 return {"ok": False, "error": str(exc)}
