@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
-from mch.daemon import Daemon, _dispatch, _handle_advert
+from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
 from mch.queue import OperationBusyError
@@ -48,6 +48,17 @@ def wq():
 @pytest.fixture
 def config():
     return Config()
+
+
+def test_main_config_load_error_exits_with_config_status(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("nodes:\n  - pubkey_prefix: e2601d59\n    group: default\n")
+
+    with patch("sys.argv", ["mchd", "--config", str(config_path)]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == CONFIG_ERROR_EXIT
 
 
 async def _seed_node_with_facts(db: Database) -> Node:

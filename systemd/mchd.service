@@ -21,6 +21,8 @@ SupplementaryGroups=dialout
 WorkingDirectory=/etc/meshherder
 ExecStart=/usr/local/bin/mchd --config /etc/meshherder/config.yaml
 Restart=on-failure
+# Permanent operator/config errors should not restart-loop and spam the journal.
+RestartPreventExitStatus=78
 RestartSec=10
 
 # Hardening - keep the daemon's blast radius small
