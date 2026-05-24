@@ -99,10 +99,13 @@ keep `DESIGN.md` for stable architecture notes.
 
 - Tolerate float roundoff when comparing observed-vs-desired numeric settings.
   - Observed 2026-05-23: the bench node returned `915.7999877` from `get radio` after
-    being set to `915.800`. Same single-precision drift will apply to `set lat` / `set lon`
-    (e.g. desired `32.5` comes back as `32.499999`). Audit/enforce that does a literal
-    string or exact-float compare will treat this as permanent drift and try to re-sync
-    every cycle — exactly the chatter we don't want.
+    being set to `915.800`.
+  - Observed 2026-05-24 on a live Seeed SenseCap Solar: desired `915.075` came back as
+    `915.0750122` from `get radio` — same single-precision rounding, different frequency.
+  - Same drift will apply to `set lat` / `set lon` (e.g. desired `32.5` comes back as
+    `32.499999`). Audit/enforce that does a literal string or exact-float compare will
+    treat this as permanent drift and try to re-sync every cycle — exactly the chatter
+    we don't want.
   - Two reasonable mechanisms (pick one or both):
     1. **Significant-digits comparison**: for each known-numeric setting key, compare to
        a defined precision (e.g. 4 decimals for `lat`/`lon`, 3 for `radio.freq`). Round
@@ -270,13 +273,6 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Wishlist
 
-- **Settings table: `?` indicator for unobserved rows**: rows with `observed = -` (never
-  synced) have no left-column indicator, making them look the same as clean rows. Add a
-  `?` flag for "not yet observed", keeping `~` for "observed but drifted". Three states:
-  blank = in sync, `?` = not yet checked, `~` = checked and wrong. Update the legend line
-  accordingly. Fix is in `cli.py` `_render_node_detail` — check `s.get("observed") is None`
-  before checking `s["drift"]`.
-
 - **`_ago` leading-space cosmetic**: `_ago` right-justifies to 3 chars (`{n:>3}`), so
   single-digit values get 2 leading spaces and 2-digit get 1 — visible in `_ago_with_ts`
   as `(  5m ago)` vs `( 44m ago)`. Options: drop padding or use fixed 2-digit format.
@@ -359,6 +355,11 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-24: Settings table reworked: POLICY first column, DRIFT last column showing
+  `???` (not yet observed) / `~~~` (drifted) replacing the old left-side `~` indicator.
+  Facts section shows `???` for any `config.facts` key not yet collected. Drifted settings
+  table in `mch status` now uses content-based column widths (no more truncation on long
+  values like `radio`).
 - 2026-05-23: Fixed bare `mch validate` to check `/etc/meshherder/config.yaml`, matching the
   shipped daemon config path, instead of preferring a `config.yaml` in the current working
   directory. The command now prints the selected config path before validation; use
