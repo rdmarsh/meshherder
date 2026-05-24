@@ -95,6 +95,8 @@ keep `DESIGN.md` for stable architecture notes.
       Mac v1.15.0 finding: `reboot` caused the serial CLI to fail with `Device not configured`;
       the device reappeared and answered `ver` after roughly 5 seconds. It did not correct a wrong
       2024 clock. After `clock sync`, plain `reboot` returned the clock to the wrong 2024 baseline.
+      Heltec V3 v1.15.0 finding: `clock sync` followed by plain `reboot` preserved the synced
+      2026 clock across reboot.
     - Test `clkreboot` to document whether it replies before rebooting, should be treated as
       fire-and-forget, and how long mch should wait before reconnect/rediscovery.
       Mac v1.15.0 finding: `clkreboot` caused the serial CLI to fail with `Device not configured`;
@@ -107,6 +109,9 @@ keep `DESIGN.md` for stable architecture notes.
       reboot, ESP32 nodes often do not, and `clkreboot` on V4/ESP32 may be a recovery step that
       lets `clock sync` work afterwards rather than setting/preserving time itself. Test a V3/V4
       separately before making `clkreboot` preferred behavior.
+      Heltec V3 v1.15.0 finding: `clock sync` followed by `clkreboot` reset the clock back to the
+      wrong 2024 baseline, while `clock sync` plus plain `reboot` preserved it. Do not prefer
+      `clkreboot` for V3 based on current evidence.
       Luna mesh-side note: `mch exec 81d6bf1950a0 clock` timed out with no response in this
       session, so mesh-side `clkreboot` was not tested.
     - Test `region allowf` on old/new firmware if available; older firmware reportedly needed it
