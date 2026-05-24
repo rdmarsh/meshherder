@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from mch.command_registry import validate_value
 from mch.meshkey import derive_public_key
 from mch.models import SettingPolicy
 
@@ -353,6 +354,15 @@ def _parse_setting(raw: dict[str, Any], context: str = "setting") -> SettingConf
     )
 
 
+def _validate_settings(settings: dict[str, SettingConfig], context: str) -> None:
+    for key, setting in settings.items():
+        if setting.desired is None:
+            continue
+        error = validate_value(key, setting.desired)
+        if error:
+            raise ValueError(f"{context}.{key}.desired {error}: {setting.desired!r}")
+
+
 def _parse_radio(raw: Any) -> RadioConfig | None:
     """Parse a via/radio value: either a mapping or a "freq,bw,sf,cr" string.
 
@@ -389,6 +399,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
         k: _parse_setting(v if isinstance(v, dict) else {"desired": v}, f"{context}.settings.{k}")
         for k, v in settings_raw.items()
     }
+    _validate_settings(settings, f"{context}.settings")
     operations_raw = _list(raw.get("operations", []), f"{context}.operations")
     operations = [
         _parse_operation(op, f"{context}.operations[{i}]")
@@ -433,6 +444,7 @@ def _parse_group(raw: Any, context: str = "group") -> GroupConfig:
         k: _parse_setting(v if isinstance(v, dict) else {"desired": v}, f"{context}.settings.{k}")
         for k, v in settings_raw.items()
     }
+    _validate_settings(settings, f"{context}.settings")
     overrides_raw = _mapping(raw.get("setting_overrides", {}), f"{context}.setting_overrides")
     overrides = {
         k: _parse_setting(
@@ -441,6 +453,7 @@ def _parse_group(raw: Any, context: str = "group") -> GroupConfig:
         )
         for k, v in overrides_raw.items()
     }
+    _validate_settings(overrides, f"{context}.setting_overrides")
     return GroupConfig(
         name=raw["name"],
         default_policy=SettingPolicy(policy) if policy else None,
@@ -456,6 +469,7 @@ def _parse_global(raw: dict[str, Any]) -> GroupConfig:
         k: _parse_setting(v if isinstance(v, dict) else {"desired": v}, f"global.settings.{k}")
         for k, v in settings_raw.items()
     }
+    _validate_settings(settings, "global.settings")
     overrides_raw = _mapping(raw.get("setting_overrides", {}), "global.setting_overrides")
     overrides = {
         k: _parse_setting(
@@ -464,6 +478,7 @@ def _parse_global(raw: dict[str, Any]) -> GroupConfig:
         )
         for k, v in overrides_raw.items()
     }
+    _validate_settings(overrides, "global.setting_overrides")
     return GroupConfig(
         name="global",
         default_policy=SettingPolicy(policy) if policy else None,

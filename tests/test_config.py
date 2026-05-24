@@ -92,6 +92,43 @@ def test_global_settings_block_parses_like_group(tmp_path):
     assert cfg.global_settings.setting_overrides["powersaving"].policy == SettingPolicy.SKIP
 
 
+def test_known_setting_desired_values_are_validated(tmp_path):
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              powersaving: maybe
+    """)
+
+    with pytest.raises(ValueError, match="powersaving.*on.*off"):
+        load(p)
+
+
+def test_invalid_radio_desired_value_raises(tmp_path):
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              radio: "915.075,999,9,5"
+    """)
+
+    with pytest.raises(ValueError, match="radio.*bandwidth"):
+        load(p)
+
+
+def test_unknown_setting_desired_values_are_not_registry_validated(tmp_path):
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              future.setting: maybe
+    """)
+
+    cfg = load(p)
+
+    assert cfg.nodes[0].settings["future.setting"].desired == "maybe"
+
+
 def test_node_radio_key_raises(tmp_path):
     """Old radio: key on a node raises ValueError with a hint to use via:."""
     p = _write_config(tmp_path, """\

@@ -558,7 +558,7 @@ def test_status_single_match_shows_approximate_settings_marker():
         "last_checked": None, "last_set": None,
     }])
     result = _run_multi(["status", "aabb"], status, detail)
-    assert "* = within expected tolerance" in result.output
+    assert "* = nominal (within expected tolerance)" in result.output
     assert "radio" in result.output
     assert re.search(r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+\*", result.output)
 

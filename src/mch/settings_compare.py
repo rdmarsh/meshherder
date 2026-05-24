@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mch.command_registry import get_spec
+
 
 @dataclass(frozen=True)
 class SettingComparison:
@@ -19,9 +21,12 @@ def compare_setting(key: str, desired: str | None, observed: str | None) -> Sett
     if desired == observed:
         return SettingComparison(True)
 
-    if key == "radio":
+    spec = get_spec(key)
+    comparator = spec.comparator if spec else "exact"
+
+    if comparator == "radio_tuple":
         return _compare_radio(desired, observed)
-    if key in ("lat", "lon"):
+    if comparator == "float_0005":
         return _compare_float(desired, observed, tolerance=0.0005)
 
     return SettingComparison(False)

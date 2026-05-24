@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from mch.command_registry import read_command_for_key, write_command_for_key
 from mch.command_safety import fire_and_forget_command
 from mch.config import Config, GroupConfig, NodeConfig, OperationConfig
 from mch.db import Database
@@ -45,11 +46,6 @@ from mch.models import (
 )
 
 log = logging.getLogger(__name__)
-
-# Keys whose firmware CLI does not follow the standard `get <key>` / `set <key> <value>` pattern.
-# These use a bare read command (e.g. `powersaving` returns "on" or "off") and a bare write
-# command (e.g. `powersaving on`) — no `get`/`set` prefix.
-_BARE_COMMAND_KEYS: frozenset[str] = frozenset({"powersaving"})
 
 
 # ---------------------------------------------------------------------------
@@ -791,7 +787,7 @@ class WorkQueue:
         collected = 0
         for key in self._config.facts:
             # neighbors, ver/board, and clock are bare commands; everything else is `get <key>`
-            cmd = f"get {key}" if key not in ("ver", "board", "neighbors", "clock") else key
+            cmd = read_command_for_key(key)
             res = await self._send_authed(contact, cmd, node, node_cfg)
             if res.success and res.text:
                 if key == "neighbors":
@@ -830,8 +826,7 @@ class WorkQueue:
             if policy == SettingPolicy.SKIP:
                 continue
 
-            # get current value — bare command for keys that don't use `get <key>`
-            read_cmd = key if key in _BARE_COMMAND_KEYS else f"get {key}"
+            read_cmd = read_command_for_key(key)
             res = await self._send_authed(contact, read_cmd, node, node_cfg)
             if not res.success:
                 log.warning("get %s failed for %s: %s", key, pubkey[:12], res.error)
@@ -858,7 +853,7 @@ class WorkQueue:
                 drifted += 1
                 if policy == SettingPolicy.ENFORCE:
                     log.info("  enforcing %s: observed=%r desired=%r", key, observed, desired)
-                    write_cmd = f"{key} {desired}" if key in _BARE_COMMAND_KEYS else f"set {key} {desired}"
+                    write_cmd = write_command_for_key(key, desired)
                     set_res = await self._send_authed(
                         contact, write_cmd, node, node_cfg
                     )

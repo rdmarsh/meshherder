@@ -32,6 +32,56 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
+- Unify `status` / `plan` around an API-ready node report model.
+  - Goal: mchd should classify node state, desired-vs-observed settings, issues, and next actions
+    once, then let `mch status`, `mch plan`, future HTTP/OpenAPI endpoints, and mesh DM/channel
+    summaries render different views of the same model.
+  - Keep command verbs short and stable:
+    - `mch status [NODE]` = current state and evidence.
+    - `mch plan [NODE]` = what mchd would do next.
+    - `mch logs [NODE]` = history.
+    - `mch suggest [NODE]` = recommendations.
+    - `mch sync [NODE]` = do work now.
+  - The normalized model should include identity, `last_seen`, `last_connected`, `next_sync_at`,
+    facts, settings, issues, actions, and recent activity.
+  - Setting classification should distinguish: `ok`, `nominal`, `drift`, `unknown`, `ignored`,
+    and `blocked`. `nominal` means the value differs textually but is equivalent within expected
+    firmware/computer representation tolerance.
+  - Action classification should distinguish: `none`, `read`, `write`, `report`, `ignore`,
+    and `blocked`.
+  - `mch plan` should render only actionable/non-OK rows, grouped as planned writes,
+    audit-only differences, needs observation, and blocked work.
+  - Keep YAML as the source of truth for now, but make this model JSON-ready so a future web UI,
+    OpenAPI schema, and mesh summaries do not scrape CLI text.
+
+- Add a curated MeshCore command registry for commands mch actually uses.
+  - Goal: one small hand-maintained table defining command shape and metadata for known fields,
+    replacing scattered conditionals such as `_BARE_COMMAND_KEYS`, fact bare-command tuples,
+    raw exec safety lists, comparison rules, CLI radio validation, and commissioning timeouts.
+  - Future direction: move the command data out of `src/mch/command_registry.py` into a versioned
+    `command_registry.json`; keep Python as the loader, validator, and fallback behavior layer.
+    That lets new firmware commands be added or corrected by editing data instead of changing
+    application code.
+  - Do not model the entire MeshCore CLI. Unknown settings must keep working with the default
+    `get <key>` / `set <key> <value>` behavior, exact comparison, and no validation.
+  - Suggested `CommandSpec` fields: `key`, `kind`, `read`, `write`, `writable`, `value_type`,
+    `validator`, `comparator`, `write_timeout_seconds`, `reboot_required`, `min_firmware`,
+    `serial_only`, `dangerous`, `confirm`, `fire_and_forget`, and `notes`.
+  - Use `write_timeout_seconds` rather than a vague `slow_write` flag. Current known extended
+    timeout examples: `set prv.key` and `set radio` need 180s in commissioning.
+  - Initial known settings/facts should cover current examples and profile output: `name`,
+    `owner.info`, `radio`, `powersaving`, `lat`, `lon`, `txdelay`, `direct.txdelay`,
+    `flood.advert.interval`, `advert.interval`, `path.hash.mode`, `loop.detect`, `multi.acks`,
+    `agc.reset.interval`, `ver`, `board`, `role`, `clock`, `neighbors`, and `public.key`.
+  - Initial validators should cover `on_off`, integer/float, radio tuple, latitude/longitude,
+    SF 7-12, CR 5-8, and later string byte limits like node-name length.
+  - Radio tuple validation should require `freq,bw,sf,cr`; SF and CR are bounded integer choices,
+    bandwidth starts with known common values but remains easy to expand, and frequency keeps the
+    current broad firmware-supported MHz range until regional profile limits exist.
+  - Known invalid desired values should appear as blocked in `mch plan` and fail `mch validate`
+    with clear messages. Unknown keys should be logged as metadata candidates when firmware
+    returns obvious command errors, without spamming logs.
+
 - Add explicit profile update command.
   - One-day scope: add `mch profiles update` (or `mch update-profiles`) to fetch
     `profiles_url` or the default `https://meshherder.com/profiles.yaml`, validate
