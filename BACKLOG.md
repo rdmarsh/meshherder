@@ -96,6 +96,10 @@ keep `DESIGN.md` for stable architecture notes.
       `OK - reboot to apply`; `get radio` still returned `915.7999877,250,10,5`.
       This confirms command replies and doc consistency, but not whether an over-mesh target radio
       change could avoid downtime when temp radio already matches the desired tuple.
+      Community/Discord reports conflict with the docs/reply: operators report that
+      `tempradio <target>,<minutes>` followed by `set radio <same target>` persists the radio and
+      does not require reboot in practice. Treat this as unresolved until an over-mesh active-radio
+      test confirms or disproves it.
     - Test `reboot` after `set radio` versus `tempradio`/`radio` so the registry can distinguish
       `reboot_required` from `apply_command`.
       Mac v1.15.0 finding: `reboot` caused the serial CLI to fail with `Device not configured`;

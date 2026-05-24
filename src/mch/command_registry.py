@@ -90,7 +90,9 @@ _SPECS: tuple[CommandSpec, ...] = (
             "Firmware may echo float-rounded frequency and bandwidth values. On v1.15.0 repeater "
             "firmware, `tempradio {value},<minutes>` is temporary/runtime-only, bare `radio` is "
             "unknown, and `set radio {value}` replies `OK - reboot to apply`. Official docs say "
-            "`set radio` requires reboot and `tempradio` is not saved to preferences."
+            "`set radio` requires reboot and `tempradio` is not saved to preferences. Community "
+            "reports say `tempradio` followed by `set radio {value}` may persist the radio without "
+            "reboot despite that reply; this needs an over-mesh active-radio test."
         ),
     ),
     CommandSpec(
