@@ -94,14 +94,15 @@ keep `DESIGN.md` for stable architecture notes.
       `reboot_required` from `apply_command`.
       Mac v1.15.0 finding: `reboot` caused the serial CLI to fail with `Device not configured`;
       the device reappeared and answered `ver` after roughly 5 seconds. It did not correct a wrong
-      2024 clock.
+      2024 clock. After `clock sync`, plain `reboot` returned the clock to the wrong 2024 baseline.
     - Test `clkreboot` to document whether it replies before rebooting, should be treated as
       fire-and-forget, and how long mch should wait before reconnect/rediscovery.
       Mac v1.15.0 finding: `clkreboot` caused the serial CLI to fail with `Device not configured`;
       the device reappeared and answered `ver` after roughly 5 seconds. On the raw serial path it
-      did not correct a wrong 2024 clock; `clock sync` did correct it and replied `OK - clock set`.
+      did not correct a wrong 2024 clock; `clock sync` did correct it and replied `OK - clock set`;
+      `clock sync` followed by `clkreboot` still returned the clock to the wrong 2024 baseline.
       Still test whether mesh-side `clkreboot` behaves differently before preferring it over
-      `clock sync` plus `reboot`.
+      `clock sync` plus `reboot`, but do not assume it is better on raw serial repeaters.
       Luna mesh-side note: `mch exec 81d6bf1950a0 clock` timed out with no response in this
       session, so mesh-side `clkreboot` was not tested.
     - Test `region allowf` on old/new firmware if available; older firmware reportedly needed it

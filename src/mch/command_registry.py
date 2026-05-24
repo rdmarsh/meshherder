@@ -206,8 +206,8 @@ _SPECS: tuple[CommandSpec, ...] = (
         needs_hardware_test=True,
         notes=(
             "On Mac-attached v1.15.0 repeater, command drops serial with `Device not configured`; "
-            "node returns after about 5 seconds and responds to `ver`; it did not correct a wrong "
-            "clock."
+            "node returns after about 5 seconds and responds to `ver`; after `clock sync`, plain "
+            "`reboot` returned the clock to the wrong 2024 baseline."
         ),
     ),
     CommandSpec(
@@ -219,7 +219,8 @@ _SPECS: tuple[CommandSpec, ...] = (
         notes=(
             "On Mac-attached v1.15.0 repeater, command drops serial with `Device not configured`; "
             "node returns after about 5 seconds and responds to `ver`; raw serial test did not "
-            "correct a wrong clock."
+            "correct a wrong clock, and `clock sync` followed by `clkreboot` still returned the "
+            "clock to the wrong 2024 baseline."
         ),
     ),
     CommandSpec("clear stats", "operation", confirm=True),
