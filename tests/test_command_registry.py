@@ -53,6 +53,7 @@ def test_radio_records_unverified_staged_write_path():
     assert "temporary/runtime-only" in spec.notes
     assert "reboot to apply" in spec.notes
     assert "not saved to preferences" in spec.notes
+    assert "Community reports" in spec.notes
 
 
 def test_reboot_like_commands_and_region_allowf_are_marked_for_hardware_discovery():
