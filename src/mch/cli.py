@@ -41,6 +41,11 @@ def _pk(pubkey: str | None, length: int = 12) -> str:
     return (pubkey or "-")[:length]
 
 
+def _sv(v: object) -> str:
+    """Stringify a setting value for display — config values can be int/bool/float."""
+    return str(v) if v is not None else "-"
+
+
 def _ago(iso: str | None) -> str:
     """Format an ISO datetime string as a compact relative time ('  5m ago', '  2h ago')."""
     if not iso:
@@ -265,7 +270,7 @@ def status(ctx: click.Context, query: str | None) -> None:
         nbrs_w = max(len("NBRS"), max((len(n.get("neighbors") or "-") for n in nodes), default=0))
         ver_w = max(len("VER"), max((len(_short_ver(n.get("ver"))) for n in nodes), default=0))
 
-        row = "  {:<12}  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {:<16}"
+        row = "  {:<12}  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {}"
         click.echo(row.format(
             "PUBKEY", "STATE", _wpad("LABEL", label_w), "GROUP", _wpad("MESH NAME", name_w),
             "NBRS", "VER", "LAST SEEN",
@@ -387,9 +392,6 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         # column widths based on content display width, not char count
         col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
-        def _sv(v: object) -> str:
-            # config values can be int/bool/float — stringify before display
-            return str(v) if v is not None else "-"
         col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
         col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
         def _srow(policy: str, key: str, desired: str, observed: str, drift: str) -> str:
@@ -439,15 +441,18 @@ def _render_issue_sections(
             len("NODE"),
             max((len(s.get("label") or s["node_pubkey"][:16]) for s in drifted), default=0),
         )
-        fmt = "  {:<12}  {:<{nw}}  {:<22}  {:<14}  {:<14}  {}"
-        click.echo(fmt.format("PUBKEY", "NODE", "KEY", "DESIRED", "OBSERVED", "POLICY", nw=node_w))
-        click.echo(fmt.format("------", "----", "---", "-------", "--------", "------", nw=node_w))
+        key_w = max(len("KEY"), max(len(s["key"]) for s in drifted))
+        des_w = max(len("DESIRED"), max(_wlen(_sv(s.get("desired"))) for s in drifted))
+        obs_w = max(len("OBSERVED"), max(_wlen(_sv(s.get("observed"))) for s in drifted))
+        def _drow(pubkey: str, node: str, key: str, desired: str, observed: str, policy: str) -> str:
+            return f"  {pubkey:<12}  {node:<{node_w}}  {key:<{key_w}}  {_wpad(desired, des_w)}  {_wpad(observed, obs_w)}  {policy}"
+        click.echo(_drow("PUBKEY", "NODE", "KEY", "DESIRED", "OBSERVED", "POLICY"))
+        click.echo(_drow("------", "----", "---", "-------", "--------", "------"))
         for s in drifted:
             node = s.get("label") or s["node_pubkey"][:16]
-            click.echo(fmt.format(_pk(s["node_pubkey"]), node, s["key"][:22],
-                                  (s.get("desired") or "-")[:14],
-                                  (s.get("observed") or "-")[:14],
-                                  s["policy"], nw=node_w))
+            click.echo(_drow(_pk(s["node_pubkey"]), node, s["key"],
+                             _sv(s.get("desired")), _sv(s.get("observed")),
+                             s["policy"]))
         click.echo("")
 
     if bad_state:
