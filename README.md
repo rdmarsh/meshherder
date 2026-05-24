@@ -18,6 +18,7 @@ Think Ansible for your nodes, running continuously in the background.
 | [`DESIGN.md`](DESIGN.md) | Stable architecture notes and design rationale. |
 | [`DEVELOP.md`](DEVELOP.md) | Repeatable bench and development procedures. |
 | [`JOURNAL.md`](JOURNAL.md) | Dated implementation decisions and lessons learned. |
+| [`SKILLS_USED.md`](SKILLS_USED.md) | Running log of skills and techniques used for later resume use. |
 | [`SUGGEST.md`](SUGGEST.md) | Historical codebase review notes; move active items to `BACKLOG.md`. |
 
 ## Features
