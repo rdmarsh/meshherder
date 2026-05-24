@@ -29,6 +29,14 @@ def test_fact_command_shapes_are_registered():
     assert read_command_for_key("role") == "get role"
 
 
+def test_clock_sync_behavior_is_recorded():
+    spec = get_spec("clock sync")
+
+    assert spec is not None
+    assert spec.kind == "operation"
+    assert "OK - clock set" in spec.notes
+
+
 def test_slow_write_timeouts_are_registered():
     assert command_timeout("set radio 915.075,125,9,5") == 180.0
     assert command_timeout("set prv.key deadbeef") == 180.0
@@ -55,10 +63,12 @@ def test_reboot_like_commands_and_region_allowf_are_marked_for_hardware_discover
     assert reboot.fire_and_forget is True
     assert reboot.needs_hardware_test is True
     assert "Device not configured" in reboot.notes
+    assert "did not correct" in reboot.notes
     assert clkreboot is not None
     assert clkreboot.fire_and_forget is True
     assert clkreboot.needs_hardware_test is True
     assert "Device not configured" in clkreboot.notes
+    assert "did not correct" in clkreboot.notes
     assert region_allowf is not None
     assert region_allowf.needs_hardware_test is True
     assert "Err - ??" in region_allowf.notes

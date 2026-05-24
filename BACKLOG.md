@@ -86,14 +86,24 @@ keep `DESIGN.md` for stable architecture notes.
       `OK - temp params for N mins`; `get radio` still reports the persistent value; bare `radio`
       returns `Unknown command`; `set radio <same freq,bw,sf,cr>` replies `OK - reboot to apply`.
       Still test on Luna-managed firmware before removing `needs_hardware_test`.
+      Not yet confirmed: whether `tempradio <target>,<minutes>` followed by
+      `set radio <same target>` avoids an immediate reboot because runtime radio is already on the
+      target tuple. That needs an over-mesh test or another way to observe the active radio after
+      the temporary interval expires; serial-only `get radio` only showed the persistent value.
     - Test `reboot` after `set radio` versus `tempradio`/`radio` so the registry can distinguish
       `reboot_required` from `apply_command`.
       Mac v1.15.0 finding: `reboot` caused the serial CLI to fail with `Device not configured`;
-      the device reappeared and answered `ver` after roughly 5 seconds.
+      the device reappeared and answered `ver` after roughly 5 seconds. It did not correct a wrong
+      2024 clock.
     - Test `clkreboot` to document whether it replies before rebooting, should be treated as
       fire-and-forget, and how long mch should wait before reconnect/rediscovery.
       Mac v1.15.0 finding: `clkreboot` caused the serial CLI to fail with `Device not configured`;
-      the device reappeared and answered `ver` after roughly 5 seconds.
+      the device reappeared and answered `ver` after roughly 5 seconds. On the raw serial path it
+      did not correct a wrong 2024 clock; `clock sync` did correct it and replied `OK - clock set`.
+      Still test whether mesh-side `clkreboot` behaves differently before preferring it over
+      `clock sync` plus `reboot`.
+      Luna mesh-side note: `mch exec 81d6bf1950a0 clock` timed out with no response in this
+      session, so mesh-side `clkreboot` was not tested.
     - Test `region allowf` on old/new firmware if available; older firmware reportedly needed it
       because added regions started disabled, while newer firmware adds regions enabled.
       Mac v1.15.0 finding: `region` returned `*^ F`; `region list` and `region help` returned
