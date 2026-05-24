@@ -190,7 +190,17 @@ _SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("clock", "fact", read="clock"),
     CommandSpec("neighbors", "fact", read="neighbors"),
     CommandSpec("public.key", "fact", read="get public.key"),
-    CommandSpec("reboot", "operation", confirm=True, fire_and_forget=True),
+    CommandSpec(
+        "reboot",
+        "operation",
+        confirm=True,
+        fire_and_forget=True,
+        needs_hardware_test=True,
+        notes=(
+            "On Mac-attached v1.15.0 repeater, command drops serial with `Device not configured`; "
+            "node returns after about 5 seconds and responds to `ver`."
+        ),
+    ),
     CommandSpec(
         "clkreboot",
         "operation",

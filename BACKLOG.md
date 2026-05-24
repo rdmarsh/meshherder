@@ -88,6 +88,8 @@ keep `DESIGN.md` for stable architecture notes.
       Still test on Luna-managed firmware before removing `needs_hardware_test`.
     - Test `reboot` after `set radio` versus `tempradio`/`radio` so the registry can distinguish
       `reboot_required` from `apply_command`.
+      Mac v1.15.0 finding: `reboot` caused the serial CLI to fail with `Device not configured`;
+      the device reappeared and answered `ver` after roughly 5 seconds.
     - Test `clkreboot` to document whether it replies before rebooting, should be treated as
       fire-and-forget, and how long mch should wait before reconnect/rediscovery.
       Mac v1.15.0 finding: `clkreboot` caused the serial CLI to fail with `Device not configured`;
