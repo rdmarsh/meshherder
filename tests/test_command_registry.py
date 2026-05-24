@@ -46,10 +46,15 @@ def test_radio_records_unverified_staged_write_path():
     assert "reboot to apply" in spec.notes
 
 
-def test_clkreboot_and_region_allowf_are_marked_for_hardware_discovery():
+def test_reboot_like_commands_and_region_allowf_are_marked_for_hardware_discovery():
+    reboot = get_spec("reboot")
     clkreboot = get_spec("clkreboot")
     region_allowf = get_spec("region allowf")
 
+    assert reboot is not None
+    assert reboot.fire_and_forget is True
+    assert reboot.needs_hardware_test is True
+    assert "Device not configured" in reboot.notes
     assert clkreboot is not None
     assert clkreboot.fire_and_forget is True
     assert clkreboot.needs_hardware_test is True
