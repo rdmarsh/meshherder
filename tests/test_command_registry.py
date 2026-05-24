@@ -70,6 +70,7 @@ def test_reboot_like_commands_and_region_allowf_are_marked_for_hardware_discover
     assert "Device not configured" in clkreboot.notes
     assert "clock sync" in clkreboot.notes
     assert "wrong 2024 baseline" in clkreboot.notes
+    assert "ESP32/V4" in clkreboot.notes
     assert region_allowf is not None
     assert region_allowf.needs_hardware_test is True
     assert "Err - ??" in region_allowf.notes
