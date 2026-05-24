@@ -244,7 +244,7 @@ scheduler:
 
 global:
   settings:
-    owner.info: "Managed by mch"
+    owner.info: "Managed with Mesh Herder"
 
 nodes:
   - pubkey_prefix: aabbccdd
@@ -350,7 +350,7 @@ nodes:
     settings:
       name:
         desired: "📡 Millbrook"          # pushed to hardware; visible across the mesh
-      owner.info: "Managed by mch"
+      owner.info: "Managed with Mesh Herder"
 ```
 
 ## Typical workflow
@@ -554,7 +554,7 @@ mch status aabbccdd
   state:       configured
   ...
   recent activity:
-    [INFO ] 2026-05-18 09:27  set owner.info='Managed by mch' (was '')
+    [INFO ] 2026-05-18 09:27  set owner.info='Managed with Mesh Herder' (was '')
     [INFO ] 2026-05-18 09:27  operation ok: 'clock sync'
 ```
 

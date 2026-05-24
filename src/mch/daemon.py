@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mch.command_registry import write_command_display_for_key
+from mch.command_registry import write_command_for_key
 from mch.command_safety import blocked_exec_command
 from mch.config import Config
 from mch.config import load as load_config
@@ -386,7 +386,7 @@ async def _dispatch(
                 elif comparison.equal:
                     continue
                 elif policy == SettingPolicy.ENFORCE:
-                    writes.append({**item, "command": write_command_display_for_key(key, desired)})
+                    writes.append({**item, "command": write_command_for_key(key, desired)})
                 elif policy == SettingPolicy.AUDIT:
                     audits.append(item)
 

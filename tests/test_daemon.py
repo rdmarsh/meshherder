@@ -703,7 +703,7 @@ async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, conf
     assert resp["data"]["unknown"] == []
 
 
-async def test_plan_dispatch_shell_quotes_command_display_values(db, wq, config):
+async def test_plan_dispatch_uses_raw_meshcore_command_display(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
     await db.upsert_setting(SettingRecord(
@@ -727,7 +727,7 @@ async def test_plan_dispatch_shell_quotes_command_display_values(db, wq, config)
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["writes"][0]["command"] == "set owner.info '🦷 rdm'"
+    assert resp["data"]["writes"][0]["command"] == "set owner.info 🦷 rdm"
 
 
 async def test_plan_dispatch_skips_close_enough_radio_roundoff(db, wq, config):

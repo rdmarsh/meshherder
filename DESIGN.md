@@ -57,6 +57,12 @@ flags, reboot requirements, optional staged-write/apply commands, firmware/versi
 per-command timeouts. This is the foundation for safer config validation, clearer `status`/`plan`
 output, and future API metadata.
 
+`mch plan` command strings are display/copy-paste helpers that intentionally mirror raw MeshCore
+CLI syntax, for example `set owner.info 🦷 rdm`. Do not shell-quote values in this display unless
+the underlying MeshCore tools start requiring it. Live testing with `meshcore-cli` and the phone app
+showed that `owner.info` values with spaces do not need quotes; firmware settings such as
+`name`/`owner.info` treat the rest of the line as the value.
+
 The long-term registry data should live in a versioned `command_registry.json`, with Python code
 limited to loading, validating, and applying fallback behavior. That keeps command knowledge easy
 to update as firmware behavior is discovered without requiring code changes for every new command.
@@ -73,6 +79,12 @@ persistent write and still requires reboot. Other examples needing hardware conf
 **The public key is the stable node identity.** Names can change. Labels are local-only (in
 config.yaml, never pushed to the node). The mesh-visible name (`settings.name.desired`) is
 pushed to the node hardware and visible to other mesh participants.
+
+`owner.info` is also mesh-visible to operators who can read node info. Example config should use a
+neutral default such as `Managed with Mesh Herder`, not a forced project URL. A clickable URL
+(`Managed with https://meshherder.com`) is useful for discoverability, and URLs are clickable when
+someone logs in as guest, but it can feel like advertising when written to someone else's mesh;
+leave that as an explicit operator choice.
 
 config.yaml stores a `pubkey_prefix` (8 hex chars) per node. The full 32-byte pubkey is
 resolved at startup by cross-referencing the prefix against the gateway's stored contacts.
