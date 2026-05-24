@@ -221,7 +221,8 @@ _SPECS: tuple[CommandSpec, ...] = (
             "On Mac-attached v1.15.0 repeater, command drops serial with `Device not configured`; "
             "node returns after about 5 seconds and responds to `ver`; raw serial test did not "
             "correct a wrong clock, and `clock sync` followed by `clkreboot` still returned the "
-            "clock to the wrong 2024 baseline. Community reports suggest `clkreboot` may help "
+            "clock to the wrong 2024 baseline. Official docs describe this as reset-clock-and-"
+            "reboot, not sync-clock-and-reboot. Community reports suggest `clkreboot` may help "
             "ESP32/V4 nodes recover so `clock sync` works afterwards. On Heltec V3 v1.15.0, "
             "`clock sync` followed by `clkreboot` reset the clock back to the wrong 2024 baseline."
         ),

@@ -389,17 +389,16 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Research / Live-Test
 
-- Test `clkreboot` as the final commissioning step instead of bare `reboot`.
-  - Both commissioning flows (`commission new`, `commission replace`) end with a fire-and-forget
-    `reboot`. `clkreboot` syncs the node's clock from the message timestamp before rebooting.
-  - Unknown: does MeshCore firmware persist the synced time to flash before the reboot, so the
-    node comes up with correct time? If yes, `clkreboot` is better. If the clock resets to
-    epoch 0 on every boot, `clkreboot` makes no difference and the next `clock sync` operation
-    handles it anyway.
-  - Test with the bench Seeed nRF: send `clkreboot`, watch what time the node reports on
-    next contact via `clock` command. Compare against bare `reboot` to see if there is a
-    difference.
-  - If time persists: replace `reboot` with `clkreboot` in both commissioning sequences.
+- Keep `reboot` as the commissioning final step unless future firmware evidence says otherwise.
+  - Official MeshCore CLI docs describe `clkreboot` as "reset the clock and reboot", not as
+    "sync clock and reboot".
+  - Bench Seeed/nRF-style repeater: `clock sync` corrected time, but both `reboot` and `clkreboot`
+    returned the clock to the wrong 2024 baseline.
+  - Heltec V3 v1.15.0: `clock sync` plus plain `reboot` preserved the synced clock, while
+    `clock sync` plus `clkreboot` reset the clock to the wrong 2024 baseline.
+  - Current conclusion: do not replace commissioning `reboot` with `clkreboot`. If a future
+    ESP32/V4 recovery case needs `clkreboot`, model that as hardware-specific remediation before a
+    later `clock sync`, not as the normal reboot path.
 
 - Investigate what boolean vocabulary MeshCore firmware actually accepts for boolean-style settings.
   - Currently mchd coerces YAML booleans (`on`/`off`/`yes`/`no`/`true`/`false` and case variants)
