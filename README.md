@@ -581,7 +581,12 @@ Use the same checkout and venv that were created during production install:
 cd /opt/meshherder
 sudo git pull --ff-only
 sudo /opt/meshherder/.venv/bin/pip install .
+sudo cp systemd/mchd.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl restart mchd
 mch --version
 systemctl status mchd --no-pager
 ```
+
+If `mchd` exits because `config.yaml` is invalid, the service stops instead of restart-looping.
+Fix the config with `mch validate`, then restart `mchd`.
