@@ -61,6 +61,29 @@ def test_resolve_policy_group_setting_override():
     assert resolve_policy("tx", node, group) == SettingPolicy.SKIP
 
 
+def test_resolve_policy_group_setting_policy_wins_over_group_default():
+    node = _node()
+    group = _group(
+        default_policy=SettingPolicy.AUDIT,
+        settings={"owner.info": SettingConfig(
+            desired="rdm",
+            policy=SettingPolicy.ENFORCE,
+        )},
+    )
+    assert resolve_policy("owner.info", node, group) == SettingPolicy.ENFORCE
+
+
+def test_resolve_policy_node_default_wins_over_group_setting_policy():
+    node = _node(default_policy=SettingPolicy.AUDIT)
+    group = _group(
+        settings={"owner.info": SettingConfig(
+            desired="rdm",
+            policy=SettingPolicy.ENFORCE,
+        )},
+    )
+    assert resolve_policy("owner.info", node, group) == SettingPolicy.AUDIT
+
+
 def test_resolve_policy_node_default():
     node = _node(default_policy=SettingPolicy.AUDIT)
     assert resolve_policy("tx", node, None) == SettingPolicy.AUDIT
@@ -76,8 +99,20 @@ def test_resolve_policy_global_default():
     assert resolve_policy("tx", _node(), None) == SettingPolicy.AUDIT
 
 
+def test_resolve_policy_global_config_default():
+    global_cfg = _group(default_policy=SettingPolicy.ENFORCE)
+    assert resolve_policy("tx", _node(), None, global_cfg) == SettingPolicy.ENFORCE
+
+
+def test_resolve_policy_group_wins_over_global():
+    node = _node()
+    group = _group(default_policy=SettingPolicy.AUDIT)
+    global_cfg = _group(default_policy=SettingPolicy.ENFORCE)
+    assert resolve_policy("tx", node, group, global_cfg) == SettingPolicy.AUDIT
+
+
 def test_resolve_policy_specificity_order():
-    # node setting > group override > node default > group default > global
+    # node setting > node default > group setting > group default > global
     node = _node(
         default_policy=SettingPolicy.SKIP,
         settings={"tx": SettingConfig(policy=SettingPolicy.AUDIT)},
@@ -101,6 +136,19 @@ def test_resolve_desired_falls_back_to_group():
     assert resolve_desired("tx", node, group) == "medium"
 
 
+def test_resolve_desired_falls_back_to_global():
+    node = _node()
+    global_cfg = _group(settings={"tx": SettingConfig(desired="low")})
+    assert resolve_desired("tx", node, None, global_cfg) == "low"
+
+
+def test_resolve_desired_group_wins_over_global():
+    node = _node()
+    group = _group(settings={"tx": SettingConfig(desired="medium")})
+    global_cfg = _group(settings={"tx": SettingConfig(desired="low")})
+    assert resolve_desired("tx", node, group, global_cfg) == "medium"
+
+
 def test_resolve_desired_none_when_no_config():
     assert resolve_desired("tx", _node(), None) is None
 
@@ -117,6 +165,12 @@ def test_all_setting_keys_union():
 def test_all_setting_keys_no_group():
     node = _node(settings={"x": SettingConfig()})
     assert all_setting_keys(node, None) == {"x"}
+
+
+def test_all_setting_keys_includes_global():
+    node = _node(settings={"a": SettingConfig()})
+    global_cfg = _group(settings={"b": SettingConfig()}, setting_overrides={"c": SettingConfig()})
+    assert all_setting_keys(node, None, global_cfg) == {"a", "b", "c"}
 
 
 # ---------------------------------------------------------------------------

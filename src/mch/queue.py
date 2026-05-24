@@ -59,6 +59,7 @@ def resolve_policy(
     key: str,
     node_cfg: NodeConfig,
     group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
     global_default: SettingPolicy = SettingPolicy.AUDIT,
 ) -> SettingPolicy:
     """
@@ -66,29 +67,53 @@ def resolve_policy(
 
     Resolution order (most specific wins):
       1. Per-node setting policy override
-      2. Group setting_overrides for this key
-      3. Node default_policy
-      4. Group default_policy
-      5. global_default (AUDIT)
+      2. Node default_policy
+      3. Group setting policy override
+      4. Group setting_overrides for this key
+      5. Group default_policy
+      6. Global setting policy override
+      7. Global setting_overrides for this key
+      8. Global default_policy
+      9. global_default (AUDIT)
     """
     # 1. per-node setting override
     node_setting = node_cfg.settings.get(key)
     if node_setting and node_setting.policy is not None:
         return node_setting.policy
 
-    # 2. group setting_override
+    # 2. node default
+    if node_cfg.default_policy is not None:
+        return node_cfg.default_policy
+
     if group_cfg:
+        # 3. policy attached to a group desired setting
+        group_setting = group_cfg.settings.get(key)
+        if group_setting and group_setting.policy is not None:
+            return group_setting.policy
+
+        # 4. policy-only group setting_override
         group_override = group_cfg.setting_overrides.get(key)
         if group_override and group_override.policy is not None:
             return group_override.policy
 
-    # 3. node default
-    if node_cfg.default_policy is not None:
-        return node_cfg.default_policy
-
-    # 4. group default
+    # 5. group default
     if group_cfg and group_cfg.default_policy is not None:
         return group_cfg.default_policy
+
+    if global_cfg:
+        # 6. policy attached to a global desired setting
+        global_setting = global_cfg.settings.get(key)
+        if global_setting and global_setting.policy is not None:
+            return global_setting.policy
+
+        # 7. policy-only global setting_override
+        global_override = global_cfg.setting_overrides.get(key)
+        if global_override and global_override.policy is not None:
+            return global_override.policy
+
+        # 8. global default
+        if global_cfg.default_policy is not None:
+            return global_cfg.default_policy
 
     return global_default
 
@@ -97,8 +122,9 @@ def resolve_desired(
     key: str,
     node_cfg: NodeConfig,
     group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
 ) -> str | None:
-    """Return the desired value for a setting, node overrides group."""
+    """Return the desired value for a setting, node overrides group overrides global."""
     node_setting = node_cfg.settings.get(key)
     if node_setting and node_setting.desired is not None:
         return node_setting.desired
@@ -106,18 +132,26 @@ def resolve_desired(
         group_setting = group_cfg.settings.get(key)
         if group_setting and group_setting.desired is not None:
             return group_setting.desired
+    if global_cfg:
+        global_setting = global_cfg.settings.get(key)
+        if global_setting and global_setting.desired is not None:
+            return global_setting.desired
     return None
 
 
 def all_setting_keys(
     node_cfg: NodeConfig,
     group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
 ) -> set[str]:
-    """All setting keys relevant to this node (from both node and group config)."""
+    """All setting keys relevant to this node."""
     keys: set[str] = set(node_cfg.settings.keys())
     if group_cfg:
         keys |= set(group_cfg.settings.keys())
         keys |= set(group_cfg.setting_overrides.keys())
+    if global_cfg:
+        keys |= set(global_cfg.settings.keys())
+        keys |= set(global_cfg.setting_overrides.keys())
     return keys
 
 
@@ -359,7 +393,9 @@ class WorkQueue:
 
         async with self.operation(f"scheduled sync {node.label or node.pubkey[:8]}", wait=True):
             if contact and node_cfg:
-                await self._process_node(node_cfg, group_cfg, contact)
+                await self._process_node(
+                    node_cfg, group_cfg, self._config.global_settings, contact
+                )
             else:
                 log.warning(
                     "node %r not in current contacts or config — skipping",
@@ -499,12 +535,14 @@ class WorkQueue:
                 if node_cfg and node_cfg.group else None
             )
 
+            global_cfg = self._config.global_settings
             if node_cfg is None:
                 # not in config — create a minimal NodeConfig so we can at least process it
                 from mch.config import NodeConfig as _NC
                 node_cfg = _NC(pubkey_prefix=pubkey[:8])
+                global_cfg = None
 
-            result = await self._process_node(node_cfg, group_cfg, contact)
+            result = await self._process_node(node_cfg, group_cfg, global_cfg, contact)
 
             interval_s = self._config.scheduler.sync_interval_days * 86400
             jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
@@ -566,7 +604,9 @@ class WorkQueue:
                 continue
 
             group_cfg = group_configs.get(node_cfg.group) if node_cfg.group else None
-            result = await self._process_node(node_cfg, group_cfg, contact)
+            result = await self._process_node(
+                node_cfg, group_cfg, self._config.global_settings, contact
+            )
             results.append(result)
 
             if len(self._config.nodes) > 1:
@@ -598,6 +638,7 @@ class WorkQueue:
         self,
         node_cfg: NodeConfig,
         group_cfg: GroupConfig | None,
+        global_cfg: GroupConfig | None,
         contact: dict[str, Any],
     ) -> NodeResult:
         pubkey = contact["public_key"]
@@ -642,7 +683,7 @@ class WorkQueue:
 
             # enforce / audit settings
             s_checked, s_enforced, s_drifted = await self._process_settings(
-                pubkey, contact, node_cfg, group_cfg, node
+                pubkey, contact, node_cfg, group_cfg, global_cfg, node
             )
             result.settings_checked = s_checked
             result.settings_enforced = s_enforced
@@ -774,15 +815,16 @@ class WorkQueue:
         contact: dict[str, Any],
         node_cfg: NodeConfig,
         group_cfg: GroupConfig | None,
+        global_cfg: GroupConfig | None,
         node: Node,
     ) -> tuple[int, int, int]:
         """Check and optionally enforce all settings. Returns (checked, enforced, drifted)."""
         checked = enforced = drifted = 0
-        keys = all_setting_keys(node_cfg, group_cfg)
+        keys = all_setting_keys(node_cfg, group_cfg, global_cfg)
 
         for key in sorted(keys):
-            policy = resolve_policy(key, node_cfg, group_cfg)
-            desired = resolve_desired(key, node_cfg, group_cfg)
+            policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
+            desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
 
             if policy == SettingPolicy.SKIP:
                 continue

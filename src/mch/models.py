@@ -60,8 +60,8 @@ class NodeFact:
 class SettingRecord:
     """
     Tracks one get/set-able setting on a node, with its resolved policy.
-    Policy is resolved from: per-node override → group setting_override
-                             → node default_policy → group default_policy → global default.
+    Policy is resolved from configured setting overrides/defaults across node,
+    group, global, then the hardcoded global default.
     """
     node_pubkey: str
     key: str                      # e.g. "owner.info", "name", "tx"
