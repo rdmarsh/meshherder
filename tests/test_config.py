@@ -623,3 +623,76 @@ def test_example_config_includes_region_hierarchy_examples():
     assert "region put au-nsw" in commands
     assert "region put au-nsw-syd" in commands
     assert "region put au-vic" in commands
+
+
+# ------------------------------------------------------------------
+# YAML boolean coercion in settings values
+# ------------------------------------------------------------------
+
+# All YAML 1.1 boolean synonyms for True and False — PyYAML parses every one
+# of these as a Python bool, losing the original spelling. We coerce to "on"/"off"
+# to match MeshCore CLI conventions (powersaving on/off, loop.detect off, etc).
+@pytest.mark.parametrize("yaml_value", [
+    "on", "On", "ON",
+    "yes", "Yes", "YES",
+    "true", "True", "TRUE",
+    # "y"/"Y" are NOT booleans in PyYAML's SafeLoader — they stay as strings
+])
+def test_setting_yaml_truthy_coerced_to_on(tmp_path, yaml_value):
+    """All YAML truthy synonyms must produce desired='on', not 'True'."""
+    p = _write_config(tmp_path, f"""\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              powersaving: {yaml_value}
+        """)
+    cfg = load(p)
+    assert cfg.nodes[0].settings["powersaving"].desired == "on", (
+        f"YAML '{yaml_value}' should coerce to 'on', got "
+        f"{cfg.nodes[0].settings['powersaving'].desired!r}"
+    )
+
+
+@pytest.mark.parametrize("yaml_value", [
+    "off", "Off", "OFF",
+    "no", "No", "NO",
+    "false", "False", "FALSE",
+    # "n"/"N" are NOT booleans in PyYAML's SafeLoader — they stay as strings
+])
+def test_setting_yaml_falsy_coerced_to_off(tmp_path, yaml_value):
+    """All YAML falsy synonyms must produce desired='off', not 'False'."""
+    p = _write_config(tmp_path, f"""\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              powersaving: {yaml_value}
+        """)
+    cfg = load(p)
+    assert cfg.nodes[0].settings["powersaving"].desired == "off", (
+        f"YAML '{yaml_value}' should coerce to 'off', got "
+        f"{cfg.nodes[0].settings['powersaving'].desired!r}"
+    )
+
+
+def test_setting_yaml_integer_coerced_to_string(tmp_path):
+    """Integer setting values (e.g. multi.acks: 1) are stored as strings."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              multi.acks: 1
+        """)
+    cfg = load(p)
+    assert cfg.nodes[0].settings["multi.acks"].desired == "1"
+
+
+def test_setting_yaml_float_coerced_to_string(tmp_path):
+    """Float setting values (e.g. txdelay: 1.0) are stored as strings."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              txdelay: 1.0
+        """)
+    cfg = load(p)
+    assert cfg.nodes[0].settings["txdelay"].desired == "1.0"

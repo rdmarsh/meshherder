@@ -328,6 +328,21 @@ keep `DESIGN.md` for stable architecture notes.
     difference.
   - If time persists: replace `reboot` with `clkreboot` in both commissioning sequences.
 
+- Investigate what boolean vocabulary MeshCore firmware actually accepts for boolean-style settings.
+  - Currently mchd coerces YAML booleans (`on`/`off`/`yes`/`no`/`true`/`false` and case variants)
+    to `"on"`/`"off"` at config load time, because PyYAML parses all of them as Python `True`/`False`
+    and we've lost the original spelling.
+  - Unknown: does `set powersaving true` work the same as `set powersaving on`? Does `1`/`0`?
+    If the firmware is flexible, `"on"`/`"off"` is still the safest canonical form, but knowing
+    what it accepts would confirm the coercion is correct and whether `true`/`false` or `1`/`0`
+    are silently equivalent.
+  - Test with bench node: send `set powersaving true`, `set powersaving 1`, `set powersaving yes`
+    and check `get powersaving` response to see what the firmware stores and echoes back.
+  - Also worth checking: are there any boolean-style settings beyond `powersaving` where `on`/`off`
+    is wrong and the firmware expects a different vocabulary?
+  - If firmware accepts multiple forms: no code change needed, current coercion stays correct.
+    If firmware only accepts `on`/`off`: document this explicitly in CLAUDE.md.
+
 - Test `tempradio` followed by `set radio` as a possible no-reboot commissioning radio switch.
   - Current confirmed behavior on Heltec V3 / MeshCore v1.15-era firmware: `set radio` returns
     `OK - reboot to apply`; commissioning should wait for that response and then send one reboot.

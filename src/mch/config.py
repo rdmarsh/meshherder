@@ -321,12 +321,27 @@ def _normalize_pubkey_prefix(raw: Any, context: str) -> str:
     return prefix
 
 
+def _coerce_setting_value(v: Any) -> str | None:
+    """Stringify a setting value from YAML.
+
+    YAML 1.1 parses on/off/yes/no/true/false (all case variants) as Python bools,
+    losing the original spelling. MeshCore CLI uses 'on'/'off' for boolean settings
+    (e.g. 'powersaving on'), so coerce True→'on' and False→'off'. Ints and floats
+    are stringified directly; strings pass through unchanged.
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return "on" if v else "off"
+    return str(v)
+
+
 def _parse_setting(raw: dict[str, Any], context: str = "setting") -> SettingConfig:
     raw = _mapping(raw, context)
     _reject_unknown_keys(context, raw, _SETTING_KEYS)
     policy = raw.get("policy")
     return SettingConfig(
-        desired=raw.get("desired"),
+        desired=_coerce_setting_value(raw.get("desired")),
         policy=SettingPolicy(policy) if policy else None,
         poll_hours=raw.get("poll_hours", 24),
     )
