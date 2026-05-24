@@ -239,9 +239,9 @@ async def _dispatch(
         settings_out: list[dict[str, Any]] = []
         config_keys: set[str] = set()
         if node_cfg:
-            for key in sorted(all_setting_keys(node_cfg, group_cfg)):
-                policy = resolve_policy(key, node_cfg, group_cfg)
-                desired = resolve_desired(key, node_cfg, group_cfg)
+            for key in sorted(all_setting_keys(node_cfg, group_cfg, config.global_settings)):
+                policy = resolve_policy(key, node_cfg, group_cfg, config.global_settings)
+                desired = resolve_desired(key, node_cfg, group_cfg, config.global_settings)
                 if policy == SettingPolicy.SKIP or desired is None:
                     continue
                 config_keys.add(key)
@@ -358,9 +358,9 @@ async def _dispatch(
             group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
             known_settings = {s.key: s for s in await db.get_settings(node.pubkey)}
 
-            for key in sorted(all_setting_keys(node_cfg, group_cfg)):
-                policy = resolve_policy(key, node_cfg, group_cfg)
-                desired = resolve_desired(key, node_cfg, group_cfg)
+            for key in sorted(all_setting_keys(node_cfg, group_cfg, config.global_settings)):
+                policy = resolve_policy(key, node_cfg, group_cfg, config.global_settings)
+                desired = resolve_desired(key, node_cfg, group_cfg, config.global_settings)
                 if policy == SettingPolicy.SKIP or desired is None:
                     continue
 

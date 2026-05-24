@@ -927,10 +927,14 @@ async def test_commission_scan_returns_config_radio_options():
     db = make_db()
     cfg = Config(
         gateway=GatewayConfig(radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5)),
+        global_settings=GroupConfig(
+            name="global",
+            settings={"radio": SettingConfig(desired="915.075,125,9,5")},
+        ),
         groups=[
             GroupConfig(
                 name="repeaters",
-                settings={"radio": SettingConfig(desired="915.075,125,9,5")},
+                settings={"radio": SettingConfig(desired="915.500,125,9,5")},
             )
         ],
         nodes=[
@@ -948,7 +952,8 @@ async def test_commission_scan_returns_config_radio_options():
     assert resp["ok"] is True
     assert resp["data"]["radio_options"] == [
         {"label": "gateway/home radio", "value": "915.800,250,10,5"},
-        {"label": "group repeaters", "value": "915.075,125,9,5"},
+        {"label": "global", "value": "915.075,125,9,5"},
+        {"label": "group repeaters", "value": "915.500,125,9,5"},
         {"label": "node site-a", "value": "916.575,62.5,7,8"},
         {"label": "node site-a", "value": "917.000,125,8,5"},
     ]

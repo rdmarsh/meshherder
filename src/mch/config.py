@@ -31,6 +31,7 @@ _TOP_LEVEL_KEYS = {
     "profiles_url",
     "profiles_file",
     "messenger",
+    "global",
     "groups",
     "nodes",
 }
@@ -39,6 +40,7 @@ _SCHEDULER_KEYS = {"inter_node_delay_seconds", "sync_interval_days"}
 _MESSENGER_KEYS = {"allowed_prefixes", "announce_channel"}
 _NODE_KEYS = {"pubkey_prefix", "group", "label", "default_policy", "settings", "operations", "via"}
 _GROUP_KEYS = {"name", "default_policy", "settings", "setting_overrides"}
+_GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides"}
 _SETTING_KEYS = {"desired", "policy", "poll_hours"}
 _OPERATION_KEYS = {"command", "every_hours", "fire_and_forget"}
 _RADIO_KEYS = {"freq", "bw", "sf", "cr"}
@@ -153,6 +155,7 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     nodes: list[NodeConfig] = field(default_factory=list)
+    global_settings: GroupConfig = field(default_factory=lambda: GroupConfig(name="global"))
     groups: list[GroupConfig] = field(default_factory=list)
     messenger: MessengerConfig = field(default_factory=MessengerConfig)
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
@@ -193,6 +196,8 @@ def load(
     msg_raw = _mapping(raw.get("messenger", {}), "messenger")
     _reject_unknown_keys("messenger", msg_raw, _MESSENGER_KEYS)
     nodes_raw = _list(raw.get("nodes", []), "nodes")
+    global_raw = _mapping(raw.get("global", {}), "global")
+    _reject_unknown_keys("global", global_raw, _GLOBAL_KEYS)
     groups_raw = _list(raw.get("groups", []), "groups")
     facts_raw = _list(raw.get("facts", ["ver", "board", "role"]), "facts")
 
@@ -203,6 +208,7 @@ def load(
         socket_path=raw.get("socket_path", "/run/meshherder/mchd.sock"),
         facts=[str(f) for f in facts_raw],
         nodes=[_parse_node(n, f"nodes[{i}]") for i, n in enumerate(nodes_raw)],
+        global_settings=_parse_global(global_raw),
         groups=[_parse_group(g, f"groups[{i}]") for i, g in enumerate(groups_raw)],
         messenger=MessengerConfig(
             allowed_prefixes=[
@@ -437,6 +443,29 @@ def _parse_group(raw: Any, context: str = "group") -> GroupConfig:
     }
     return GroupConfig(
         name=raw["name"],
+        default_policy=SettingPolicy(policy) if policy else None,
+        settings=settings,
+        setting_overrides=overrides,
+    )
+
+
+def _parse_global(raw: dict[str, Any]) -> GroupConfig:
+    policy = raw.get("default_policy")
+    settings_raw = _mapping(raw.get("settings", {}), "global.settings")
+    settings = {
+        k: _parse_setting(v if isinstance(v, dict) else {"desired": v}, f"global.settings.{k}")
+        for k, v in settings_raw.items()
+    }
+    overrides_raw = _mapping(raw.get("setting_overrides", {}), "global.setting_overrides")
+    overrides = {
+        k: _parse_setting(
+            v if isinstance(v, dict) else {"policy": v},
+            f"global.setting_overrides.{k}",
+        )
+        for k, v in overrides_raw.items()
+    }
+    return GroupConfig(
+        name="global",
         default_policy=SettingPolicy(policy) if policy else None,
         settings=settings,
         setting_overrides=overrides,

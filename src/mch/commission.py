@@ -88,6 +88,10 @@ def _config_radio_options(config: Config) -> list[dict[str, str]]:
     if config.gateway.radio:
         add("gateway/home radio", _format_radio(config.gateway.radio))
 
+    setting = config.global_settings.settings.get("radio")
+    if setting and setting.desired:
+        add("global", setting.desired)
+
     for group in config.groups:
         setting = group.settings.get("radio")
         if setting and setting.desired:

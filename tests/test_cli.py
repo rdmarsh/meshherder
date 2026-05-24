@@ -1152,6 +1152,38 @@ def test_commission_new_can_choose_config_group():
     assert req["group"] == "test"
 
 
+def test_commission_new_group_defaults_to_default_when_no_config_groups():
+    """When config has no groups, Enter keeps the free-form group as default."""
+    runner = CliRunner()
+    scan_resp = {"ok": True, "data": {
+        "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
+        "gateway_radio": "915.800,250,10,5",
+        "radio_options": [{"label": "gateway/home radio", "value": "915.800,250,10,5"}],
+        "group_options": [],
+    }}
+    success_resp = {"ok": True, "data": {
+        "pubkey_prefix": "a695e2be",
+        "label": "Test Site",
+        "name": "Test Site",
+        "group": "default",
+        "target_freq": "915.800,250,10,5",
+    }}
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "commission"],
+            input=_commission_input(
+                "n", "Test Site", "", "", "", "", "", "y",
+                # mode, label, name, group default, admin_pw, guest_pw, radio, confirm
+            ),
+        )
+
+    assert result.exit_code == 0, result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["group"] == "default"
+
+
 def test_commission_new_group_defaults_to_first_config_group():
     """When no default group exists, Enter selects the first configured group."""
     runner = CliRunner()

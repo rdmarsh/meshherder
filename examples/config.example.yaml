@@ -115,25 +115,30 @@ messenger:
 #   skip    - do not read or write this key at all. Use for settings you want
 #             to leave completely alone.
 #
-# The global default is audit. mchd only writes when a setting, node, or group
-# explicitly says policy: enforce or default_policy: enforce.
+# The hardcoded fallback is audit. mchd only writes when a setting, node, group,
+# or global block explicitly says policy: enforce or default_policy: enforce.
 #
-# The 'default_policy' on a group or node applies to every key that does not
-# have its own explicit policy. Individual keys can override the default.
-# Prefer per-setting policy while introducing a node or mixed group. Use
-# default_policy: enforce only for nodes/groups where most declared settings
-# should be written.
+# The 'default_policy' on global, group, or node config applies to every key
+# that does not have its own explicit policy. Individual keys can override the
+# default. Prefer per-setting policy while introducing a node or mixed group.
+# Use default_policy: enforce only where most declared settings should be written.
+
+# Global: shared defaults for every configured node. Groups override global
+# settings; nodes override groups. This is optional.
+global:
+  default_policy: audit
+  settings:
+    owner.info: "Managed by mch"
+    radio: "915.075,125,9,5"
 
 # Groups: shared settings and policies applied to all nodes in the group.
-# A node inherits its group default_policy and settings, then applies its own
-# per-node overrides on top. Groups are optional - nodes can also be configured
-# fully standalone.
+# A node inherits global settings, then its group settings, then applies its
+# own per-node overrides on top. Groups are optional - nodes can also be
+# configured fully standalone.
 groups:
   - name: default
     default_policy: audit
     settings:
-      owner.info: "Managed by mch"
-      radio: "915.075,125,9,5"
       flood.advert.interval: "47"  # hours
       advert.interval: "238"       # minutes
       multi.acks: "1"

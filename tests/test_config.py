@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from mch.config import RadioConfig, load
+from mch.models import SettingPolicy
 
 
 def _write_config(tmp_path: Path, text: str) -> Path:
@@ -68,6 +69,27 @@ def test_load_records_config_and_secrets_paths(tmp_path):
 
     assert cfg.config_path == str(p.resolve())
     assert cfg.secrets_path == str(secrets.resolve())
+
+
+def test_global_settings_block_parses_like_group(tmp_path):
+    p = _write_config(tmp_path, """\
+        global:
+          default_policy: audit
+          settings:
+            owner.info:
+              desired: "rdm"
+              policy: enforce
+          setting_overrides:
+            powersaving: skip
+        nodes:
+          - pubkey_prefix: aabbccdd
+    """)
+    cfg = load(p)
+
+    assert cfg.global_settings.default_policy == SettingPolicy.AUDIT
+    assert cfg.global_settings.settings["owner.info"].desired == "rdm"
+    assert cfg.global_settings.settings["owner.info"].policy == SettingPolicy.ENFORCE
+    assert cfg.global_settings.setting_overrides["powersaving"].policy == SettingPolicy.SKIP
 
 
 def test_node_radio_key_raises(tmp_path):

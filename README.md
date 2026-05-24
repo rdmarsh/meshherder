@@ -241,12 +241,16 @@ scheduler:
   sync_interval_days: 1
   inter_node_delay_seconds: 120
 
+global:
+  settings:
+    owner.info: "Managed by mch"
+
 nodes:
   - pubkey_prefix: aabbccdd
     label: MyRepeater
     settings:
-      owner.info:
-        desired: "Managed by mch"
+      name:
+        desired: "My Repeater"
         policy: enforce
 ```
 
@@ -254,9 +258,10 @@ Run `mch contacts` to list repeater nodes visible to the gateway that are not ye
 with pubkey prefixes ready to paste in.
 
 Settings default to `audit`: mchd reads and reports drift, but does not write to a node unless the
-setting, node, or group explicitly says `policy: enforce` or `default_policy: enforce`. Prefer
-per-setting `policy: enforce` while bringing a node under management; use `default_policy: enforce`
-only for a group or node where most declared settings should be written.
+setting, node, group, or top-level `global:` block explicitly says `policy: enforce` or
+`default_policy: enforce`. Desired values resolve from `global:` to group to node, with the most
+specific value winning. Prefer per-setting `policy: enforce` while bringing a node under management;
+use `default_policy: enforce` only where most declared settings should be written.
 
 **Passwords:** nodes that require a login go in `secrets.yaml` (owned by `mch:mch`, mode 0600):
 
