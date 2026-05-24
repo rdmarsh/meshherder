@@ -128,7 +128,11 @@ messenger:
 global:
   default_policy: audit
   settings:
-    owner.info: "Managed by mch"
+    # Visible to guest logins and remote operators. Keep it operator-friendly.
+    # URLs are clickable when someone logs in as guest. If you want a clickable
+    # project attribution, use:
+    #   owner.info: "Managed with https://meshherder.com"
+    owner.info: "Managed with Mesh Herder"
     radio: "915.075,125,9,5"
 
 # Groups: shared settings and policies applied to all nodes in the group.
@@ -150,23 +154,23 @@ groups:
       # Two ways to configure a setting key:
       #
       # Short form - just the desired value; policy comes from the group/node default:
-      #   owner.info: "Managed by mch"
+      #   owner.info: "Managed with Mesh Herder"
       #
       # Long form - desired value plus an explicit policy and/or check frequency:
       #   owner.info:
-      #     desired: "Managed by mch"
+      #     desired: "Managed with Mesh Herder"
       #     policy: enforce
       #     poll_hours: 12
       #
       # Use the short form when you are happy with the group's default policy.
-      owner.info: "Managed by mch"
+      owner.info: "Managed with Mesh Herder"
       powersaving: "on"
 
   - name: solar-nodes
     default_policy: audit   # read and compare, never write
     settings:
       owner.info:
-        desired: "Solar - Managed by mch"
+        desired: "Solar - managed with Mesh Herder"
         policy: enforce     # enforce this key even though the group default is audit
     setting_overrides:
       # setting_overrides let you apply a policy to a key for the whole group
@@ -193,7 +197,7 @@ nodes:
     label: SiteB-Tower
     group: repeaters
     settings:
-      owner.info: "SiteB - managed by mch"
+      owner.info: "SiteB - managed with Mesh Herder"
       tx:
         desired: "high"
         policy: enforce

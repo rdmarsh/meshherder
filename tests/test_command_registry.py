@@ -3,7 +3,6 @@ from mch.command_registry import (
     get_spec,
     read_command_for_key,
     validate_value,
-    write_command_display_for_key,
     write_command_for_key,
 )
 from mch.command_safety import (
@@ -22,17 +21,6 @@ def test_unknown_settings_fall_back_to_standard_get_set_commands():
 def test_nonstandard_powersaving_command_shape_is_registered():
     assert read_command_for_key("powersaving") == "powersaving"
     assert write_command_for_key("powersaving", "on") == "powersaving on"
-
-
-def test_write_command_display_shell_quotes_values():
-    assert write_command_display_for_key("owner.info", "🦷 rdm") == "set owner.info '🦷 rdm'"
-    assert write_command_display_for_key("name", "Dave Test") == "set name 'Dave Test'"
-    assert write_command_display_for_key("flood.advert.interval", "47") == (
-        "set flood.advert.interval 47"
-    )
-    assert write_command_display_for_key("future.setting", "two words") == (
-        "set future.setting 'two words'"
-    )
 
 
 def test_fact_command_shapes_are_registered():

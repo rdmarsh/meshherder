@@ -765,13 +765,13 @@ def test_plan_uses_display_width_for_emoji_values():
         "known": "🦷 dave",
         "desired": "🦷 rdm",
         "policy": "enforce",
-        "command": "set owner.info '🦷 rdm'",
+        "command": "set owner.info 🦷 rdm",
     }]))
 
     assert result.exit_code == 0
     assert "🦷 dave" in result.output
     assert "🦷 rdm" in result.output
-    assert "set owner.info '🦷 rdm'" in result.output
+    assert "set owner.info 🦷 rdm" in result.output
 
 
 # ------ logs ------
