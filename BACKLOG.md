@@ -140,14 +140,6 @@ keep `DESIGN.md` for stable architecture notes.
     `mch commission`.
   - Output should summarize what changed, especially profile count and radio preset count.
 
-- Wizard hardcodes `group: default` even when no `default` group is defined.
-  - `mch commission new` always offers `default` as the group prompt's default. If the
-    operator's `config.yaml` defines only e.g. `QH`, the pasted snippet then fails reload
-    validation with `references unknown group 'default'`.
-  - Wizard should read available groups from the live config and offer those as choices
-    (or accept `-` / blank for no group); reject typed groups not in the loaded config
-    rather than emitting them into the snippet.
-
 - Auto-preempt a scheduled sync when an operator requests `commission`/`exec`.
   - Today an interactive `mch commission` against a node whose scheduled sync just kicked
     off fails with `busy: scheduled sync <prefix>`, and the operator has to mash Enter to
@@ -158,14 +150,6 @@ keep `DESIGN.md` for stable architecture notes.
     between commands; on set, the loop yields after the current command completes and
     releases the operation lock so commission can take over. Never interrupt mid-command —
     leaving a node mid-write is the failure mode we're avoiding.
-
-- Duplicate-label warning in `mch validate` and `mch status`.
-  - Live `mch status` showed two configured nodes both labelled `qh-wold1` (different
-    pubkey prefixes), which only became obvious because one was a ghost. Labels are
-    operator-chosen and not enforced unique by the loader.
-  - Add a validation pass that flags any label used by more than one `pubkey_prefix` in
-    `config.yaml`. Surface both as a `validate` warning and in the `mch status` issues
-    section.
 
 - Consider mapping-style YAML for `nodes:` in `config.yaml`.
   - Today nodes are a YAML list of mappings; secrets is already a mapping keyed by prefix.
@@ -452,6 +436,13 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-24: `mch commission new` now receives configured group names from the daemon scan,
+  lists them in the wizard, defaults to `default` only when appropriate, and falls back to the first
+  configured group when no `default` group exists. Covered by CLI tests for no groups, explicit
+  group choice, and first-configured-group default.
+- 2026-05-24: Duplicate node labels in `config.yaml` are rejected during config load, so
+  `mch validate` fails before ambiguous local labels can reach status/commissioning flows.
+  Covered by `test_duplicate_labels_raise`.
 - 2026-05-24: Added field-aware close-enough comparison for numeric settings. `radio` now parses
   `freq,bw,sf,cr` and tolerates firmware float roundoff on frequency/bandwidth while keeping SF/CR
   exact; `lat`/`lon` compare within roughly three decimal places. Status still shows the observed
