@@ -39,10 +39,11 @@ def test_radio_records_unverified_staged_write_path():
     spec = get_spec("radio")
 
     assert spec is not None
-    assert spec.staged_write == "tempradio {value}"
-    assert spec.apply == "radio"
+    assert spec.staged_write == "tempradio {value},5"
+    assert spec.apply is None
     assert spec.needs_hardware_test is True
-    assert "hypothesis" in spec.notes
+    assert "temporary/runtime-only" in spec.notes
+    assert "reboot to apply" in spec.notes
 
 
 def test_clkreboot_and_region_allowf_are_marked_for_hardware_discovery():
@@ -52,8 +53,10 @@ def test_clkreboot_and_region_allowf_are_marked_for_hardware_discovery():
     assert clkreboot is not None
     assert clkreboot.fire_and_forget is True
     assert clkreboot.needs_hardware_test is True
+    assert "Device not configured" in clkreboot.notes
     assert region_allowf is not None
     assert region_allowf.needs_hardware_test is True
+    assert "Err - ??" in region_allowf.notes
 
 
 def test_value_validation_for_known_keys():
