@@ -188,6 +188,14 @@ _SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("board", "fact", read="board"),
     CommandSpec("role", "fact", read="get role"),
     CommandSpec("clock", "fact", read="clock"),
+    CommandSpec(
+        "clock sync",
+        "operation",
+        notes=(
+            "On Mac-attached v1.15.0 repeater raw serial path, corrected a wrong 2024 clock to "
+            "current UTC and replied `OK - clock set`."
+        ),
+    ),
     CommandSpec("neighbors", "fact", read="neighbors"),
     CommandSpec("public.key", "fact", read="get public.key"),
     CommandSpec(
@@ -198,7 +206,8 @@ _SPECS: tuple[CommandSpec, ...] = (
         needs_hardware_test=True,
         notes=(
             "On Mac-attached v1.15.0 repeater, command drops serial with `Device not configured`; "
-            "node returns after about 5 seconds and responds to `ver`."
+            "node returns after about 5 seconds and responds to `ver`; it did not correct a wrong "
+            "clock."
         ),
     ),
     CommandSpec(
@@ -209,7 +218,8 @@ _SPECS: tuple[CommandSpec, ...] = (
         needs_hardware_test=True,
         notes=(
             "On Mac-attached v1.15.0 repeater, command drops serial with `Device not configured`; "
-            "node returns after about 5 seconds and responds to `ver`."
+            "node returns after about 5 seconds and responds to `ver`; raw serial test did not "
+            "correct a wrong clock."
         ),
     ),
     CommandSpec("clear stats", "operation", confirm=True),
