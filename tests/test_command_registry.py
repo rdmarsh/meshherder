@@ -1,5 +1,6 @@
 from mch.command_registry import (
     command_timeout,
+    get_spec,
     read_command_for_key,
     validate_value,
     write_command_for_key,
@@ -32,6 +33,27 @@ def test_slow_write_timeouts_are_registered():
     assert command_timeout("set radio 915.075,125,9,5") == 180.0
     assert command_timeout("set prv.key deadbeef") == 180.0
     assert command_timeout("set owner.info rdm") == 30.0
+
+
+def test_radio_records_unverified_staged_write_path():
+    spec = get_spec("radio")
+
+    assert spec is not None
+    assert spec.staged_write == "tempradio {value}"
+    assert spec.apply == "radio"
+    assert spec.needs_hardware_test is True
+    assert "hypothesis" in spec.notes
+
+
+def test_clkreboot_and_region_allowf_are_marked_for_hardware_discovery():
+    clkreboot = get_spec("clkreboot")
+    region_allowf = get_spec("region allowf")
+
+    assert clkreboot is not None
+    assert clkreboot.fire_and_forget is True
+    assert clkreboot.needs_hardware_test is True
+    assert region_allowf is not None
+    assert region_allowf.needs_hardware_test is True
 
 
 def test_value_validation_for_known_keys():

@@ -31,6 +31,8 @@ class CommandSpec:
     kind: CommandKind
     read: str | None = None
     write: str | None = None
+    staged_write: str | None = None
+    apply: str | None = None
     writable: bool = False
     value_type: str = "string"
     validator: ValidatorName | None = None
@@ -42,6 +44,7 @@ class CommandSpec:
     dangerous: bool = False
     confirm: bool = False
     fire_and_forget: bool = False
+    needs_hardware_test: bool = False
     notes: str = ""
 
     def read_command(self) -> str | None:
@@ -81,7 +84,14 @@ _SPECS: tuple[CommandSpec, ...] = (
         comparator="radio_tuple",
         write_timeout_seconds=180.0,
         reboot_required=True,
-        notes="Firmware may echo float-rounded frequency and bandwidth values.",
+        staged_write="tempradio {value}",
+        apply="radio",
+        needs_hardware_test=True,
+        notes=(
+            "Firmware may echo float-rounded frequency and bandwidth values. Staged "
+            "`tempradio` plus `radio` is a hypothesis; `set radio {value}` may be the "
+            "persistent command that requires reboot."
+        ),
     ),
     CommandSpec(
         "powersaving",
@@ -182,9 +192,25 @@ _SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("neighbors", "fact", read="neighbors"),
     CommandSpec("public.key", "fact", read="get public.key"),
     CommandSpec("reboot", "operation", confirm=True, fire_and_forget=True),
-    CommandSpec("clkreboot", "operation", confirm=True, fire_and_forget=True),
+    CommandSpec(
+        "clkreboot",
+        "operation",
+        confirm=True,
+        fire_and_forget=True,
+        needs_hardware_test=True,
+        notes="Needs bench test to confirm reply/timeout/reconnect behavior.",
+    ),
     CommandSpec("clear stats", "operation", confirm=True),
     CommandSpec("log erase", "operation", confirm=True),
+    CommandSpec(
+        "region allowf",
+        "operation",
+        needs_hardware_test=True,
+        notes=(
+            "Older firmware reportedly needed this after adding regions; newer firmware may add "
+            "regions enabled by default."
+        ),
+    ),
     CommandSpec("erase", "dangerous", dangerous=True, serial_only=True),
     CommandSpec(
         "set prv.key",

@@ -81,6 +81,18 @@ keep `DESIGN.md` for stable architecture notes.
   - Known invalid desired values should appear as blocked in `mch plan` and fail `mch validate`
     with clear messages. Unknown keys should be logged as metadata candidates when firmware
     returns obvious command errors, without spamming logs.
+  - Hardware discovery tests to add near the start of registry work:
+    - On the attached Mac repeater and a Luna-managed node, test `tempradio <freq,bw,sf,cr>` then
+      either `radio` or `set radio <same freq,bw,sf,cr>` to verify which command persists the radio
+      setting, what replies are emitted, and whether the connection survives the temporary
+      frequency hop. Current expectation is that `set radio` on its own needs `reboot` to stick;
+      `radio` as the apply command is only a hypothesis.
+    - Test `reboot` after `set radio` versus `tempradio`/`radio` so the registry can distinguish
+      `reboot_required` from `apply_command`.
+    - Test `clkreboot` to document whether it replies before rebooting, should be treated as
+      fire-and-forget, and how long mch should wait before reconnect/rediscovery.
+    - Test `region allowf` on old/new firmware if available; older firmware reportedly needed it
+      because added regions started disabled, while newer firmware adds regions enabled.
 
 - Add explicit profile update command.
   - One-day scope: add `mch profiles update` (or `mch update-profiles`) to fetch

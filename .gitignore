@@ -12,3 +12,4 @@ mch.db
 secrets.yaml
 SKILLS_USED.md
 *.sock
+.claude/

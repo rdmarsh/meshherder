@@ -53,12 +53,20 @@ not as scattered conditionals and not as a full copy of the MeshCore CLI referen
 must keep working with default `get <key>` / `set <key> <value>` behavior.
 
 The registry should define read/write command shape, value validation, comparison strategy, safety
-flags, reboot requirements, firmware/version notes, and per-command timeouts. This is the foundation
-for safer config validation, clearer `status`/`plan` output, and future API metadata.
+flags, reboot requirements, optional staged-write/apply commands, firmware/version notes, and
+per-command timeouts. This is the foundation for safer config validation, clearer `status`/`plan`
+output, and future API metadata.
 
 The long-term registry data should live in a versioned `command_registry.json`, with Python code
 limited to loading, validating, and applying fallback behavior. That keeps command knowledge easy
 to update as firmware behavior is discovered without requiring code changes for every new command.
+
+Some firmware flows may have two steps: write a temporary or staged value, then issue a second
+command to make it persistent or active. The registry should model those explicitly rather than
+hiding them inside sync code, but unverified flows must stay marked as hypotheses. Known examples
+needing hardware confirmation are `tempradio <freq,bw,sf,cr>` followed by either `radio` or
+`set radio <same freq,bw,sf,cr>`, `set radio` plus `reboot`, `clkreboot`, and version-specific
+region enablement such as `region allowf`.
 
 ## Node identity
 
