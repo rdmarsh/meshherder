@@ -7,6 +7,7 @@ features before mch has first-class metadata for them.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from typing import Literal
 
@@ -52,6 +53,11 @@ class CommandSpec:
 
     def write_command(self, value: str) -> str | None:
         return self.write.format(key=self.key, value=value) if self.write else None
+
+    def write_command_display(self, value: str) -> str | None:
+        if self.write is None:
+            return None
+        return self.write.format(key=self.key, value=shlex.quote(value))
 
 
 DEFAULT_COMMAND_TIMEOUT = 30.0
@@ -276,6 +282,13 @@ def write_command_for_key(key: str, value: str) -> str:
     if spec and spec.write_command(value):
         return spec.write_command(value) or f"set {key} {value}"
     return f"set {key} {value}"
+
+
+def write_command_display_for_key(key: str, value: str) -> str:
+    spec = get_spec(key)
+    if spec and spec.write_command_display(value):
+        return spec.write_command_display(value) or f"set {key} {shlex.quote(value)}"
+    return f"set {key} {shlex.quote(value)}"
 
 
 def command_timeout(command: str, default: float = DEFAULT_COMMAND_TIMEOUT) -> float:

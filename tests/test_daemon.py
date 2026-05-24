@@ -703,6 +703,33 @@ async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, conf
     assert resp["data"]["unknown"] == []
 
 
+async def test_plan_dispatch_shell_quotes_command_display_values(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key="owner.info",
+        desired="Old",
+        observed="Old",
+        policy=SettingPolicy.AUDIT,
+    ))
+    config.nodes = [
+        NodeConfig(
+            pubkey_prefix="aabbccdd",
+            label="site-a",
+            settings={"owner.info": SettingConfig(
+                desired="🦷 rdm",
+                policy=SettingPolicy.ENFORCE,
+            )},
+        )
+    ]
+
+    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["writes"][0]["command"] == "set owner.info '🦷 rdm'"
+
+
 async def test_plan_dispatch_skips_close_enough_radio_roundoff(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
