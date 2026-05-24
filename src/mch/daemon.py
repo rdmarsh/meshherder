@@ -46,6 +46,7 @@ log = logging.getLogger(__name__)
 
 FileSignature = tuple[int, int] | None
 CONFIG_WATCH_INTERVAL_SECONDS = 10.0
+CONFIG_ERROR_EXIT = getattr(os, "EX_CONFIG", 78)
 
 UTC = timezone.utc
 
@@ -785,13 +786,13 @@ def main() -> None:
     config_path = Path(args.config)
     if not config_path.exists():
         print(f"error: config file not found: {config_path}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(CONFIG_ERROR_EXIT)
 
     try:
         config = load_config(config_path)
     except Exception as exc:
         print(f"error loading config: {exc}", file=sys.stderr)
-        raise SystemExit(1) from None
+        raise SystemExit(CONFIG_ERROR_EXIT) from None
 
     daemon = Daemon(config)
     asyncio.run(daemon.run())
