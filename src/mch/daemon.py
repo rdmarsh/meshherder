@@ -39,6 +39,7 @@ from mch.queue import (
     resolve_desired,
     resolve_policy,
 )
+from mch.settings_compare import compare_setting
 
 log = logging.getLogger(__name__)
 
@@ -247,13 +248,15 @@ async def _dispatch(
                 config_keys.add(key)
                 known = db_settings.get(key)
                 observed = known.observed if known else None
-                drift = observed is not None and observed != desired
+                comparison = compare_setting(key, desired, observed)
+                drift = observed is not None and not comparison.equal
                 settings_out.append({
                     "key": key,
                     "desired": desired,
                     "observed": observed,
                     "policy": policy.value,
                     "drift": drift,
+                    "approximate": observed is not None and comparison.approximate,
                 })
 
         # DB settings no longer in config (stale/removed keys)
@@ -375,9 +378,11 @@ async def _dispatch(
                     "policy": policy.value,
                 }
 
+                comparison = compare_setting(key, desired, known.observed if known else None)
+
                 if known is None or known.observed is None:
                     unknown.append({**item, "reason": "no known value; sync must read first"})
-                elif known.observed == desired:
+                elif comparison.equal:
                     continue
                 elif policy == SettingPolicy.ENFORCE:
                     writes.append({**item, "command": f"set {key} {desired}"})

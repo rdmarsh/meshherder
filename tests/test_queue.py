@@ -401,6 +401,33 @@ async def test_cycle_enforces_drifted_setting(db):
     assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
 
 
+async def test_cycle_does_not_enforce_close_enough_radio_roundoff(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"radio": SettingConfig(
+            desired="915.075,125,9,5",
+            policy=SettingPolicy.ENFORCE,
+        )},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(
+        success=True,
+        text="915.0750122,125,9,5",
+    ))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_enforced == 0
+    assert results[0].settings_drifted == 0
+    sent = [c.args[1] for c in gw.send_command.await_args_list]
+    assert sent == ["get radio"]
+
+
 async def test_bare_command_key_uses_bare_read_and_write(db):
     """Keys like 'powersaving' use bare commands — no 'get'/'set' prefix.
     Read: 'powersaving' not 'get powersaving'.
