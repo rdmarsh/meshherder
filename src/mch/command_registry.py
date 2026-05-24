@@ -84,13 +84,12 @@ _SPECS: tuple[CommandSpec, ...] = (
         comparator="radio_tuple",
         write_timeout_seconds=180.0,
         reboot_required=True,
-        staged_write="tempradio {value}",
-        apply="radio",
+        staged_write="tempradio {value},5",
         needs_hardware_test=True,
         notes=(
-            "Firmware may echo float-rounded frequency and bandwidth values. Staged "
-            "`tempradio` plus `radio` is a hypothesis; `set radio {value}` may be the "
-            "persistent command that requires reboot."
+            "Firmware may echo float-rounded frequency and bandwidth values. On v1.15.0 repeater "
+            "firmware, `tempradio {value},<minutes>` is temporary/runtime-only, bare `radio` is "
+            "unknown, and `set radio {value}` replies `OK - reboot to apply`."
         ),
     ),
     CommandSpec(
@@ -198,7 +197,10 @@ _SPECS: tuple[CommandSpec, ...] = (
         confirm=True,
         fire_and_forget=True,
         needs_hardware_test=True,
-        notes="Needs bench test to confirm reply/timeout/reconnect behavior.",
+        notes=(
+            "On Mac-attached v1.15.0 repeater, command drops serial with `Device not configured`; "
+            "node returns after about 5 seconds and responds to `ver`."
+        ),
     ),
     CommandSpec("clear stats", "operation", confirm=True),
     CommandSpec("log erase", "operation", confirm=True),
@@ -208,7 +210,8 @@ _SPECS: tuple[CommandSpec, ...] = (
         needs_hardware_test=True,
         notes=(
             "Older firmware reportedly needed this after adding regions; newer firmware may add "
-            "regions enabled by default."
+            "regions enabled by default. On Mac-attached v1.15.0 repeater, `region` returned "
+            "`*^ F`; `region list` and `region help` returned `Err - ??`."
         ),
     ),
     CommandSpec("erase", "dangerous", dangerous=True, serial_only=True),

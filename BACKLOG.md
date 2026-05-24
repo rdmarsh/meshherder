@@ -82,17 +82,23 @@ keep `DESIGN.md` for stable architecture notes.
     with clear messages. Unknown keys should be logged as metadata candidates when firmware
     returns obvious command errors, without spamming logs.
   - Hardware discovery tests to add near the start of registry work:
-    - On the attached Mac repeater and a Luna-managed node, test `tempradio <freq,bw,sf,cr>` then
-      either `radio` or `set radio <same freq,bw,sf,cr>` to verify which command persists the radio
-      setting, what replies are emitted, and whether the connection survives the temporary
-      frequency hop. Current expectation is that `set radio` on its own needs `reboot` to stick;
-      `radio` as the apply command is only a hypothesis.
+    - Mac v1.15.0 repeater finding: `tempradio <freq,bw,sf,cr>,<minutes>` replies
+      `OK - temp params for N mins`; `get radio` still reports the persistent value; bare `radio`
+      returns `Unknown command`; `set radio <same freq,bw,sf,cr>` replies `OK - reboot to apply`.
+      Still test on Luna-managed firmware before removing `needs_hardware_test`.
     - Test `reboot` after `set radio` versus `tempradio`/`radio` so the registry can distinguish
       `reboot_required` from `apply_command`.
     - Test `clkreboot` to document whether it replies before rebooting, should be treated as
       fire-and-forget, and how long mch should wait before reconnect/rediscovery.
+      Mac v1.15.0 finding: `clkreboot` caused the serial CLI to fail with `Device not configured`;
+      the device reappeared and answered `ver` after roughly 5 seconds.
     - Test `region allowf` on old/new firmware if available; older firmware reportedly needed it
       because added regions started disabled, while newer firmware adds regions enabled.
+      Mac v1.15.0 finding: `region` returned `*^ F`; `region list` and `region help` returned
+      `Err - ??`.
+    - Luna note: after stopping `mchd`, `/usr/local/bin/meshcli -s /dev/ttyACM0 -r help` returned
+      normal help text, but simple reads such as `get radio` produced garbled/empty output in this
+      session. Do not run write tests there until the serial reply path is reliable.
 
 - Add explicit profile update command.
   - One-day scope: add `mch profiles update` (or `mch update-profiles`) to fetch

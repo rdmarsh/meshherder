@@ -61,12 +61,12 @@ The long-term registry data should live in a versioned `command_registry.json`, 
 limited to loading, validating, and applying fallback behavior. That keeps command knowledge easy
 to update as firmware behavior is discovered without requiring code changes for every new command.
 
-Some firmware flows may have two steps: write a temporary or staged value, then issue a second
-command to make it persistent or active. The registry should model those explicitly rather than
-hiding them inside sync code, but unverified flows must stay marked as hypotheses. Known examples
-needing hardware confirmation are `tempradio <freq,bw,sf,cr>` followed by either `radio` or
-`set radio <same freq,bw,sf,cr>`, `set radio` plus `reboot`, `clkreboot`, and version-specific
-region enablement such as `region allowf`.
+Some firmware flows may have temporary/runtime commands separate from persistent config writes.
+The registry should model those explicitly rather than hiding them inside sync code, but unverified
+flows must stay marked as hypotheses. On v1.15.0 repeater firmware,
+`tempradio <freq,bw,sf,cr>,<minutes>` applies a temporary radio tuple, while `set radio` is the
+persistent write and still requires reboot. Other examples needing hardware confirmation are
+`clkreboot` and version-specific region enablement such as `region allowf`.
 
 ## Node identity
 
