@@ -931,7 +931,7 @@ async def test_plan_dispatch_unknown_when_no_known_setting(db, wq, config):
 
     assert resp["data"]["writes"] == []
     assert resp["data"]["unknown"][0]["key"] == "name"
-    assert "sync must read first" in resp["data"]["unknown"][0]["reason"]
+    assert resp["data"]["unknown"][0]["reason"] == "not observed yet"
 
 
 async def test_status_dispatch_includes_label(db, wq, config):

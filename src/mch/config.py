@@ -47,6 +47,22 @@ _OPERATION_KEYS = {"command", "every_hours", "fire_and_forget"}
 _RADIO_KEYS = {"freq", "bw", "sf", "cr"}
 
 
+def sanitize_node_label(label: str) -> str:
+    """Convert operator input into a valid local node label."""
+    return re.sub(r"[^a-zA-Z0-9_\-.]", "-", label).strip("-") or "my-node"
+
+
+def validate_node_label(label: str) -> None:
+    """Reject local node labels that cannot be used in config and CLI lookup."""
+    if label and not _LABEL_RE.match(label):
+        suggested = sanitize_node_label(label)
+        raise ValueError(
+            f"node label {label!r} contains invalid characters - "
+            f"use letters, digits, dashes, underscores, or dots only "
+            f"(e.g. {suggested!r})"
+        )
+
+
 class _NoDuplicateKeysLoader(yaml.SafeLoader):
     """YAML loader that raises ValueError on duplicate mapping keys.
 
@@ -408,13 +424,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
     via = _parse_radio(raw.get("via"))
 
     label = raw.get("label", "")
-    if label and not _LABEL_RE.match(label):
-        suggested = re.sub(r"[^a-zA-Z0-9_\-.]", "-", label).strip("-") or "my-node"
-        raise ValueError(
-            f"node label {label!r} contains invalid characters - "
-            f"use letters, digits, dashes, underscores, or dots only "
-            f"(e.g. {suggested!r})"
-        )
+    validate_node_label(label)
 
     return NodeConfig(
         pubkey_prefix=pubkey_prefix,

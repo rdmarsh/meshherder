@@ -15,6 +15,7 @@ from mch.config import (
     NodeSecrets,
     RadioConfig,
     SettingConfig,
+    load,
 )
 from mch.gateway import CommandResult
 from mch.meshkey import derive_public_key
@@ -551,7 +552,7 @@ async def test_commission_new_retries_identity_verification(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_commission_new_returns_config_snippet():
+async def test_commission_new_returns_config_snippet(tmp_path):
     """'new' mode returns a config.yaml snippet with derived pubkey_prefix, label, group, via."""
     from mch.commission import handle_commission
 
@@ -559,11 +560,11 @@ async def test_commission_new_returns_config_snippet():
     gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
     wq = make_wq(gateway=gw)
     db = make_db()
-    cfg = make_config()
+    cfg = make_config(groups=[GroupConfig(name="testgroup")])
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
-        "label": "Test Node",
+        "label": "Test-Node",
         "group": "testgroup",
         "name": "Test Node",
         "target_freq": "915.800,250,10,5",
@@ -573,9 +574,54 @@ async def test_commission_new_returns_config_snippet():
     assert resp["ok"]
     snippet = resp["data"]["config_snippet"]
     assert f"pubkey_prefix: {GENERATED_PUBKEY[:8]}" in snippet
-    assert "label: Test Node" in snippet
+    assert "label: Test-Node" in snippet
     assert "group: testgroup" in snippet
     assert "via: 915.800,250,10,5" in snippet
+    assert 'desired: "Test Node"' in snippet
+    assert "policy: enforce" in snippet
+
+    path = tmp_path / "config.yaml"
+    path.write_text("groups:\n  - name: testgroup\nnodes:\n" + snippet + "\n")
+    loaded = load(path, load_secrets=False)
+    assert loaded.nodes[0].label == "Test-Node"
+    assert loaded.nodes[0].settings["name"].desired == "Test Node"
+
+
+@pytest.mark.asyncio
+async def test_commission_new_rejects_invalid_label_before_commands():
+    from mch.commission import handle_commission
+
+    factory_pubkey = "a695e2be" + "0" * 56
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
+    wq = make_wq(gateway=gw)
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "label": "Test Node",
+        "name": "Test Node",
+    }, wq, make_db(), make_config())
+
+    assert resp["ok"] is False
+    assert "invalid characters" in resp["error"]
+    gw.send_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_commission_new_rejects_unknown_group_before_commands():
+    from mch.commission import handle_commission
+
+    factory_pubkey = "a695e2be" + "0" * 56
+    gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
+    wq = make_wq(gateway=gw)
+
+    resp = await handle_commission({
+        "cmd": "commission", "mode": "new",
+        "label": "Test-Node",
+        "group": "undefined",
+    }, wq, make_db(), make_config())
+
+    assert resp == {"ok": False, "error": "group 'undefined' is not configured"}
+    gw.send_command.assert_not_awaited()
 
 
 @pytest.mark.asyncio
