@@ -12,6 +12,10 @@ gateway node, reads desired fleet state from
 .IR config.yaml ,
 stores observed state in SQLite, and processes managed nodes one at a time.
 .PP
+When enabled in configuration, mchd also serves a read-only HTTP JSON API on a
+loopback address for local integrations and future user interfaces. It does
+not expose sync, command execution, commissioning, or other mutating actions.
+.PP
 The daemon owns all gateway traffic. The
 .BR mch (1)
 command talks to
@@ -50,6 +54,10 @@ nodes, facts to collect, messenger settings, and paths such as
 .I db_path
 and
 .IR socket_path .
+An optional
+.I api
+mapping enables the loopback-only read-only HTTP API and selects its host and
+port.
 .TP
 .I /etc/meshherder/secrets.yaml
 Node passwords and private keys. This file is usually mode 600 and owned by the
@@ -65,6 +73,34 @@ Default Unix socket used by
 .TP
 .I /dev/meshcore0
 Recommended stable symlink for the USB-attached gateway node.
+.SH READ-ONLY API
+The HTTP API is disabled by default. Enable it in
+.I config.yaml
+with:
+.PP
+.nf
+api:
+  enabled: true
+  host: 127.0.0.1
+  port: 8743
+.fi
+.PP
+Only loopback hosts are accepted until API authentication is implemented.
+Available read-only endpoints are:
+.PP
+.nf
+GET /healthz
+GET /api/v1/fleet
+GET /api/v1/nodes/<label-or-pubkey-prefix>
+GET /api/v1/issues
+GET /api/v1/plan
+GET /api/v1/logs?node=<label-or-prefix>&limit=50
+.fi
+.PP
+The fleet response includes
+.B schema_version: 1
+and normalized node health, facts, setting classifications, planned actions,
+and issues suitable for presentation by a dashboard.
 .SH SYSTEMD
 The packaged service unit is named
 .BR mchd.service .
@@ -104,7 +140,7 @@ and reloads them shortly after changes. You can also force a reload with:
 sudo systemctl kill -s HUP mchd
 .fi
 .PP
-Gateway device, database path, and socket path changes require a daemon restart.
+Gateway device, database path, socket path, and API listener changes require a daemon restart.
 .SH OPERATION
 The daemon processes nodes sequentially to avoid hammering the mesh. Between
 nodes it waits the configured

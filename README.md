@@ -51,6 +51,8 @@ Think Ansible for your nodes, running continuously in the background.
   reboot, then prints ready-to-paste snippets for `config.yaml` and `secrets.yaml`. No need to
   stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
+- **Read-only fleet API** — optional loopback HTTP JSON API with normalized node health, settings
+  actions, facts, issues, plan data, and logs, ready for a later dashboard/map UI.
 
 ## Requirements
 
@@ -457,6 +459,38 @@ logs 10
 ```
 
 Configure authorised sender prefixes under `messenger.allowed_prefixes` in `config.yaml`.
+
+### Read-only fleet API
+
+The optional HTTP API exposes the same normalized report model used by CLI status and plan views.
+It is disabled by default and is intentionally restricted to loopback addresses until an
+authentication design is added.
+
+```yaml
+api:
+  enabled: true
+  host: 127.0.0.1
+  port: 8743
+```
+
+Changing the API listener configuration requires restarting `mchd`.
+
+Endpoints:
+
+```text
+GET /healthz
+GET /api/v1/fleet
+GET /api/v1/nodes/<label-or-pubkey-prefix>
+GET /api/v1/issues
+GET /api/v1/plan
+GET /api/v1/logs?node=<label-or-prefix>&limit=50
+```
+
+`/api/v1/fleet` returns `schema_version: 1`, a health summary, nodes, unresolved configured
+nodes, issues, and planned work. Each node includes `health`, configured `fact_keys`, collected `facts` such as
+`lat`/`lon`, and settings classified with `status` (`ok`, `nominal`, `drift`, `unknown`,
+`ignored`) and `action` (`none`, `read`, `write`, `report`, `ignore`). This is the contract a
+future green/red map dashboard should consume; the API never contacts nodes or makes changes.
 
 ### Changing a setting fleet-wide
 

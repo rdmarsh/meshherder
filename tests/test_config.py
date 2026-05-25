@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from mch.config import RadioConfig, load
+from mch.config import ApiConfig, RadioConfig, load
 from mch.models import SettingPolicy
 
 
@@ -69,6 +69,32 @@ def test_load_records_config_and_secrets_paths(tmp_path):
 
     assert cfg.config_path == str(p.resolve())
     assert cfg.secrets_path == str(secrets.resolve())
+
+
+def test_api_config_is_disabled_and_loopback_by_default():
+    cfg = ApiConfig()
+
+    assert cfg.enabled is False
+    assert cfg.host == "127.0.0.1"
+    assert cfg.port == 8743
+
+
+def test_api_config_rejects_non_loopback_bind():
+    with pytest.raises(ValueError, match="loopback"):
+        ApiConfig(enabled=True, host="0.0.0.0")
+
+
+def test_api_block_is_loaded(tmp_path):
+    p = _write_config(tmp_path, """\
+        api:
+          enabled: true
+          host: localhost
+          port: 9000
+    """)
+
+    cfg = load(p)
+
+    assert cfg.api == ApiConfig(enabled=True, host="localhost", port=9000)
 
 
 def test_tab_indentation_in_config_has_actionable_error(tmp_path):

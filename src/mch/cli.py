@@ -229,13 +229,76 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
 # status
 # ---------------------------------------------------------------------------
 
+def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
+    """Project the fleet API model into the existing terminal status renderer."""
+    if "schema_version" not in fleet:
+        return fleet
+    return {
+        "nodes": [
+            {
+                "pubkey": node["pubkey"],
+                "name": node["name"],
+                "label": node["label"],
+                "group": node["group"],
+                "state": node["state"],
+                "last_seen": node["last_seen"],
+                "last_connected": node["last_connected"],
+                "neighbors": node["facts"].get("neighbors"),
+                "ver": node["facts"].get("ver"),
+            }
+            for node in fleet["nodes"]
+        ],
+        **fleet["issues"],
+    }
+
+
+def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
+    """Project a canonical node API response into the existing terminal detail renderer."""
+    if "auth" not in node:
+        return node
+    facts = {key: "???" for key in node.get("fact_keys", [])}
+    facts.update(node["facts"])
+    return {
+        "pubkey": node["pubkey"],
+        "name": node["name"],
+        "label": node["label"],
+        "group": node["group"],
+        "state": node["state"],
+        "last_seen": node["last_seen"],
+        "last_connected": node["last_connected"],
+        "auth_cached": node["auth"]["cached"],
+        "passwd_known": node["auth"]["password_known"],
+        "facts": facts,
+        "settings": [
+            {
+                "key": setting["key"],
+                "desired": setting["desired"],
+                "observed": setting["observed"],
+                "policy": setting["policy"],
+                "update_attempts": setting["update_attempts"],
+                "drift": setting["status"] == "drift",
+                "approximate": setting["status"] == "nominal",
+            }
+            for setting in node["settings"]
+            if setting["status"] != "ignored"
+        ],
+        "logs": node.get("logs", []),
+    }
+
+
+def _plan_view(fleet: dict[str, Any]) -> dict[str, Any]:
+    """Read plan data from the fleet API while accepting legacy test/daemon payloads."""
+    return fleet["plan"] if "plan" in fleet else fleet
+
+
 @cli.command()
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def status(ctx: click.Context, query: str | None) -> None:
     """Show daemon and fleet status, or detail for a single matched node."""
-    resp = _rpc(ctx.obj["socket"], {"cmd": "status"})
-    data = _check(resp)
+    resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
+    fleet = _check(resp)
+    data = _status_view(fleet)
 
     all_nodes = data.get("nodes", [])
     nodes = _filter_nodes(all_nodes, query)
@@ -249,8 +312,8 @@ def status(ctx: click.Context, query: str | None) -> None:
     # Single match → detail view
     if query and len(nodes) == 1:
         pubkey = nodes[0]["pubkey"]
-        detail_resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": pubkey})
-        detail = _check(detail_resp)
+        detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": pubkey})
+        detail = _node_detail_view(_check(detail_resp))
         _render_node_detail(detail)
         return
 
@@ -932,8 +995,8 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
 @click.pass_context
 def plan(ctx: click.Context, query: str | None) -> None:
     """Show desired-vs-known changes without sending mesh commands."""
-    resp = _rpc(ctx.obj["socket"], {"cmd": "plan"})
-    data = _check(resp)
+    resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
+    data = _plan_view(_check(resp))
     writes = _filter_plan_items(data.get("writes", []), query)
     audits = _filter_plan_items(data.get("audits", []), query)
     unknown = _filter_plan_items(data.get("unknown", []), query)

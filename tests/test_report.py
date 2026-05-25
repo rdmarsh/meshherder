@@ -1,0 +1,92 @@
+"""Tests for the canonical read-only fleet report contract."""
+
+from __future__ import annotations
+
+import pytest
+
+from mch.config import Config, NodeConfig, SettingConfig
+from mch.db import Database
+from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
+from mch.report import build_fleet_report
+
+
+@pytest.fixture
+async def db(tmp_path):
+    database = Database(tmp_path / "report.db")
+    await database.open()
+    yield database
+    await database.close()
+
+
+async def test_fleet_report_classifies_node_health_settings_and_actions(db):
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        label="ridge",
+        name="Ridge",
+        state=NodeState.CONFIGURED,
+        auth_cached=True,
+    )
+    await db.upsert_node(node)
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="lat", value="-33.731"))
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="lon", value="150.902"))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key="name",
+        desired="Old",
+        observed="Old",
+        policy=SettingPolicy.AUDIT,
+    ))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key="radio",
+        desired="915.075,125,9,5",
+        observed="915.0750122,125,9,5",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        label="ridge",
+        settings={
+            "name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE),
+            "radio": SettingConfig(
+                desired="915.075,125,9,5",
+                policy=SettingPolicy.ENFORCE,
+            ),
+            "owner.info": SettingConfig(desired="Managed", policy=SettingPolicy.AUDIT),
+            "powersaving": SettingConfig(desired="on", policy=SettingPolicy.SKIP),
+        },
+    )])
+
+    report = await build_fleet_report(db, config)
+
+    assert report["schema_version"] == 1
+    assert report["summary"]["critical_nodes"] == 1
+    assert report["summary"]["drifted_settings"] == 1
+    api_node = report["nodes"][0]
+    assert api_node["fact_keys"] == ["ver", "board", "role"]
+    assert api_node["facts"]["lat"] == "-33.731"
+    settings = {setting["key"]: setting for setting in api_node["settings"]}
+    assert settings["name"]["status"] == "drift"
+    assert settings["name"]["action"] == "write"
+    assert settings["name"]["command"] == "set name New"
+    assert settings["radio"]["status"] == "nominal"
+    assert settings["radio"]["action"] == "none"
+    assert settings["owner.info"]["status"] == "unknown"
+    assert settings["owner.info"]["action"] == "read"
+    assert settings["powersaving"]["status"] == "ignored"
+    assert settings["powersaving"]["action"] == "ignore"
+    assert report["plan"]["writes"][0]["key"] == "name"
+    assert report["plan"]["unknown"][0]["key"] == "owner.info"
+
+
+async def test_fleet_report_includes_configured_nodes_missing_from_observed_state(db):
+    config = Config(nodes=[NodeConfig(pubkey_prefix="deadbeef", label="lost-site")])
+
+    report = await build_fleet_report(db, config)
+
+    assert report["summary"]["configured_missing_nodes"] == 1
+    assert report["missing_nodes"][0]["pubkey_prefix"] == "deadbeef"
+    assert report["issues"]["ghosts"] == [
+        {"pubkey_prefix": "deadbeef", "label": "lost-site"}
+    ]
+    assert report["plan"]["unknown"][0]["reason"] == "node not known to gateway/DB"

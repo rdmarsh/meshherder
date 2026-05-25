@@ -46,6 +46,11 @@ The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`
 `nominal` means the observed value differs textually but is equivalent within expected firmware or
 computer representation tolerance.
 
+Implemented contract: `src/mch/report.py` builds `schema_version: 1` fleet/node reports consumed
+by CLI reporting and the optional read-only HTTP API. HTTP is loopback-only until authentication
+exists; it deliberately provides no sync, exec, or commissioning routes. A future dashboard and
+map should consume this model rather than deriving status independently.
+
 ## Command metadata
 
 MeshCore command knowledge should live in a small curated registry for commands mch actually uses,

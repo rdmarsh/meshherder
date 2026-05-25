@@ -5,6 +5,17 @@ details, node identities, generated private keys, local hostnames, or operator p
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 Use `SKILLS_USED.md` for a running skills log that can later be turned into resume bullets.
 
+## 2026-05-25 - Fleet Report API Foundation
+
+- Added a single normalized read-only fleet/node report model with `schema_version: 1`.
+- The model classifies node health, setting status (`ok`, `nominal`, `drift`, `unknown`,
+  `ignored`) and next action (`none`, `read`, `write`, `report`, `ignore`), retaining collected
+  facts such as `lat` and `lon` for later map presentation.
+- Existing status, plan, node-detail, and issues RPC payloads are compatibility projections from
+  the model; display-only CLI `status` and `plan` now request the fleet model directly.
+- Added an optional HTTP JSON transport for read-only local consumers. It binds only to loopback
+  addresses until authentication is designed and includes no write endpoints.
+
 ## 2026-05-24 - Status view improvements and passive last_seen
 
 **`clock` bare-command fix**: `_collect_facts()` was sending `get clock` instead of bare

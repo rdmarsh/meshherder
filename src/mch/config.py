@@ -7,6 +7,7 @@ import os
 import re
 from collections.abc import Hashable
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ _TOP_LEVEL_KEYS = {
     "profiles_url",
     "profiles_file",
     "messenger",
+    "api",
     "global",
     "groups",
     "nodes",
@@ -39,6 +41,7 @@ _TOP_LEVEL_KEYS = {
 _GATEWAY_KEYS = {"device", "baud", "name", "radio", "advert_on_start"}
 _SCHEDULER_KEYS = {"inter_node_delay_seconds", "sync_interval_days"}
 _MESSENGER_KEYS = {"allowed_prefixes", "announce_channel"}
+_API_KEYS = {"enabled", "host", "port"}
 _NODE_KEYS = {"pubkey_prefix", "group", "label", "default_policy", "settings", "operations", "via"}
 _GROUP_KEYS = {"name", "default_policy", "settings", "setting_overrides"}
 _GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides"}
@@ -179,6 +182,27 @@ class MessengerConfig:
 
 
 @dataclass
+class ApiConfig:
+    """Read-only HTTP API configuration for local dashboard and integration clients."""
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8743
+
+    def __post_init__(self) -> None:
+        try:
+            loopback = self.host == "localhost" or ip_address(self.host).is_loopback
+        except ValueError:
+            loopback = False
+        if not loopback:
+            raise ValueError(
+                "api.host must be a loopback address (127.0.0.1, ::1, or localhost)"
+                " until HTTP API authentication is implemented"
+            )
+        if not 0 <= self.port <= 65535:
+            raise ValueError("api.port must be between 0 and 65535")
+
+
+@dataclass
 class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -186,6 +210,7 @@ class Config:
     global_settings: GroupConfig = field(default_factory=lambda: GroupConfig(name="global"))
     groups: list[GroupConfig] = field(default_factory=list)
     messenger: MessengerConfig = field(default_factory=MessengerConfig)
+    api: ApiConfig = field(default_factory=ApiConfig)
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
     db_path: str = "/var/lib/meshherder/mch.db"
     socket_path: str = "/run/meshherder/mchd.sock"
@@ -223,6 +248,8 @@ def load(
     _reject_unknown_keys("scheduler", sched_raw, _SCHEDULER_KEYS)
     msg_raw = _mapping(raw.get("messenger", {}), "messenger")
     _reject_unknown_keys("messenger", msg_raw, _MESSENGER_KEYS)
+    api_raw = _mapping(raw.get("api", {}), "api")
+    _reject_unknown_keys("api", api_raw, _API_KEYS)
     nodes_raw = _list(raw.get("nodes", []), "nodes")
     global_raw = _mapping(raw.get("global", {}), "global")
     _reject_unknown_keys("global", global_raw, _GLOBAL_KEYS)
@@ -247,6 +274,7 @@ def load(
             ],
             announce_channel=msg_raw.get("announce_channel"),
         ),
+        api=ApiConfig(**api_raw),
         profiles_url=raw.get("profiles_url"),
         profiles_file=raw.get("profiles_file"),
     )
