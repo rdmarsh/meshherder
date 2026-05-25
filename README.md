@@ -529,9 +529,6 @@ nodes, issues, and planned work. Each node includes `health`, configured `fact_k
 `ignored`) and `action` (`none`, `read`, `write`, `report`, `ignore`). This is the contract a
 future green/red map dashboard should consume; the API never contacts nodes or makes changes.
 
-The initial `/api/v1/...` and `/healthz` paths remain accepted as compatibility aliases, but new
-integrations should use the command-shaped paths above.
-
 ### Changing a setting fleet-wide
 
 Add the setting to a group in `config.yaml`, assign nodes to the group, restart mchd, then run

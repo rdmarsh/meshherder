@@ -51,7 +51,7 @@ by CLI reporting and the optional read-only HTTP API. HTTP is loopback-only unti
 exists; it deliberately provides no sync, exec, or commissioning routes. A future dashboard and
 map should consume this model rather than deriving status independently.
 HTTP paths follow the existing read-only command vocabulary (`/status`, `/plan`, `/issues`,
-`/logs`, and `/health`) while retaining the initially released `/api/v1/...` forms as aliases.
+`/logs`, and `/health`).
 
 ## Command metadata
 
