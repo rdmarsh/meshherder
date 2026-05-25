@@ -62,8 +62,19 @@ keep `DESIGN.md` for stable architecture notes.
 - Extend the normalized fleet API model for dashboard requirements as they become concrete.
   - `schema_version: 1` reporting and a loopback-only read-only HTTP transport landed
     2026-05-25; `mch status` and `mch plan` now source their display data from that fleet model.
-  - Next goal: migrate mesh DM/channel summaries to the model and refine dashboard/map needs
-    without independently deriving health or actions.
+  - Before building the dashboard, split fleet-summary and node-detail representations:
+    `/status` currently returns all facts and settings for all nodes (about 29 KB for the
+    current 10-node live fleet). The polling/map response should instead contain summary counts
+    and lightweight marker rows: identity, group, state, health, last-seen/connect times,
+    `lat`/`lon`, and issue/drift counts.
+  - Keep `/status/<node>` as the full clickable detail response containing observed facts,
+    desired/observed settings, auth status, issues, and recent activity.
+  - Keep `/logs`, `/issues`, and `/plan` as independent resources because logs grow and refresh
+    separately, while issue and plan screens are fleet-wide views. Do not create separate
+    `/facts/<node>` or `/settings/<node>` endpoints until a real client needs independent
+    refresh cadence, payload reduction, or authorization boundaries.
+  - Next goal after that split: migrate mesh DM/channel summaries to the model and refine
+    dashboard/map needs without independently deriving health or actions.
   - Keep command verbs short and stable:
     - `mch status [NODE]` = current state and evidence.
     - `mch plan [NODE]` = what mchd would do next.
@@ -81,6 +92,10 @@ keep `DESIGN.md` for stable architecture notes.
     audit-only differences, needs observation, and blocked work.
   - Keep YAML as the source of truth for now, but make this model JSON-ready so a future web UI,
     OpenAPI schema, and mesh summaries do not scrape CLI text.
+  - Treat an observed setting value as evidence, like a fact, in user-facing detail screens;
+    do not merge settings into the `facts` storage/API concept. Settings also carry declared
+    desired value, policy, comparison result, and next action, which plain collected facts do
+    not. A future UI can group both under "observed values" while retaining their meaning.
 
 - Add a curated MeshCore command registry for commands mch actually uses.
   - Goal: one small hand-maintained table defining command shape and metadata for known fields,
@@ -415,11 +430,34 @@ keep `DESIGN.md` for stable architecture notes.
   model as existing CLI-triggered sync.
 - Channel or room-server reporting for fleet status.
 - Web UI with node map, using stored lat/lon facts.
+  - Start read-only: green/red status markers from the lightweight `/status` response, with
+    clickable node detail using `/status/<node>` and separate activity fetched from `/logs`.
+  - Later add settings/fact-collection editing pages: select a device, add a fact to collect or
+    change desired settings, review the generated config diff, then deliberately apply/save it.
+    The UI may eventually target YAML or a replacement structured config format, but must not
+    hide configuration changes or expose secret values.
 - Add an OpenAPI description when dashboard work starts.
   - Define the read-only `/health`, `/status`, `/status/<node>`, `/issues`, `/plan`, and
     `/logs` contracts once the dashboard's data requirements are concrete.
   - Use it to document response shapes and, if useful, generate typed frontend client code.
   - Do not add Swagger UI or schema-generation dependencies before there is a frontend consumer.
+- Use one API operation layer for future CLI and web interactions.
+  - Keep read-only reports separate from mutation operations: the current loopback HTTP API has
+    no sync, exec, commission, or configuration-write routes.
+  - When writes are justified, design authenticated, audited API operations for explicit actions
+    such as sync and reviewed configuration changes; do not expose arbitrary device execution as
+    a convenience endpoint.
+  - Configuration editing needs validation, diff/review, concurrent-change handling, and an
+    audit trail before a web page can save desired settings or collected-fact selections.
+- Add deliberate configuration export/import and backup workflows before considering a managed
+  configuration store.
+  - A normal export should contain desired configuration but not passwords or private keys.
+  - A secret export must be explicit and strongly protected (for example encrypted, or at least
+    visibly sensitive with restrictive file permissions); it must never be an ordinary web
+    download or an incidental DB backup.
+  - Import/apply should validate input and show a diff before changing active desired state.
+  - Keep `config.yaml` and `secrets.yaml` as operator-owned source of truth until these workflows
+    and the security model justify a different storage format.
 - Firmware age reporting from collected `ver` facts.
 - Docker image once packaging and runtime paths settle.
 - Bluetooth connection support through `meshcore_py.create_ble`.
@@ -463,6 +501,14 @@ keep `DESIGN.md` for stable architecture notes.
 - Do not auto-edit `config.yaml` or `secrets.yaml` from `mchd`.
   - Config and secrets are operator-managed source-of-truth files.
   - Commissioning should print paste-ready snippets only.
+  - A future authenticated configuration-management feature may replace this constraint only
+    after it provides validation, reviewable diffs, auditing, backup/export, and secret handling.
+
+- Do not store passwords or node private keys in the observational SQLite DB.
+  - The DB is currently rebuildable runtime/history state; making it a secret authority would
+    make ordinary DB backup, export, diagnostics, and API mistakes security-sensitive.
+  - Reconsider secret storage only with an explicit encryption, key-management, access-control,
+    redaction, migration, and recovery design.
 
 - Do not add a first-class `mch reset` command yet.
   - Bench reset/reflash can stay as documentation with explicit `esptool` commands.

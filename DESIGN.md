@@ -53,6 +53,20 @@ map should consume this model rather than deriving status independently.
 HTTP paths follow the existing read-only command vocabulary (`/status`, `/plan`, `/issues`,
 `/logs`, and `/health`).
 
+The first implementation exposes a complete fleet report from `/status`, including facts and
+settings for every node. That is useful while proving the model, but it is not the intended
+dashboard polling contract. Before a map UI is built, `/status` should become a lightweight fleet
+summary: health/state, identity, timestamps, marker coordinates, and issue/drift counts. Keep
+`lat`/`lon` in that summary so drawing the map does not require one detail request per marker.
+`/status/<node>` remains the full clickable detail view. Logs, plan, and fleet issues remain
+separate resources because they have different refresh and presentation needs.
+
+Future API-driven interactions should preserve a distinction between reads and writes. The CLI
+and a web UI can share daemon-side operation logic, but write endpoints require authentication,
+audit records, validation, and safe concurrency behavior first. In particular, editing desired
+settings or selecting new facts to collect should present a configuration diff for review before
+applying it; it must not turn an unauthenticated local status API into a configuration editor.
+
 ## Command metadata
 
 MeshCore command knowledge should live in a small curated registry for commands mch actually uses,
@@ -167,6 +181,26 @@ Comparison is field-aware for known numeric settings where firmware returns roun
 SF and CR are exact integers. `lat` and `lon` compare within roughly three decimal places. Status
 still displays the actual observed value and marks rows within expected tolerance with `*`.
 
+## Facts vs settings
+
+A value read from a setting is an observed fact in the ordinary English sense, and a future
+node-detail screen may reasonably display observed facts and observed settings together. They
+should not become the same data type in the management model.
+
+**Facts** are inventory/evidence mch collects without an intended desired value, policy, or
+write-back action, such as firmware version, hardware board, neighbours, or a value selected for
+visibility only.
+
+**Settings** are managed values with additional meaning: desired value, inheritance from
+global/group/node configuration, enforcement or audit policy, comparison status, write attempts,
+and a planned action. Even when the current setting is only being observed, retaining that
+classification permits it to be enforced later and explains why it appears in a plan or drift
+report.
+
+The API and database should therefore retain separate `facts` and `settings` collections. UI
+presentation may combine them under an "observed values" heading where useful, while exposing the
+desired/policy/action fields for settings.
+
 **Operations** are scheduled commands with no read-back or desired-value comparison. mchd sends
 the command string, records success or failure, and re-runs it after `every_hours` have elapsed
 since the last successful run.
@@ -203,6 +237,19 @@ login on every sync for nodes that have already authorised the gateway.
 
 Passwords are stored in `secrets.yaml` per node (or a `default:` entry for fleet-wide). The
 daemon never caches passwords in the DB.
+
+Do not move passwords or node private keys into the current SQLite database simply to make a web
+interface easier. The database is observational runtime/history state and can currently be
+rebuilt from operator-owned configuration. Making it authoritative for secrets would make normal
+database backup, export, diagnostics, and accidental API exposure security-critical. Any future
+secret store needs an explicit encryption, key-management, access-control, redaction, backup,
+migration, and recovery design.
+
+Configuration import/export is compatible with an API-first UI without changing this ownership
+model. A normal export should exclude secrets. Any secret export must be explicit and strongly
+protected, and importing desired state should validate and present a reviewable diff before it is
+applied. A future settings editor may manage YAML or a replacement structured format only after
+those controls exist.
 
 ## Two-layer commissioning
 
