@@ -3,7 +3,6 @@
 This journal records project decisions and lessons learned without preserving private bench
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
-Use `SKILLS_USED.md` for a running skills log that can later be turned into resume bullets.
 
 ## 2026-05-25 - Fleet Report API Foundation
 
