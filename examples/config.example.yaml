@@ -137,6 +137,9 @@ messenger:
 # settings; nodes override groups. This is optional.
 global:
   default_policy: audit
+  # Optional fleet-wide reachability radio. Use only when most managed nodes are contacted
+  # on this tuple; group and node via_radio values override it.
+  # via_radio: "916.575,62.5,7,8"
   settings:
     # Visible to guest logins and remote operators. Keep it operator-friendly.
     # URLs are clickable when someone logs in as guest. If you want a clickable

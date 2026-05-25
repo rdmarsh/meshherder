@@ -35,11 +35,11 @@ a future HTTP/OpenAPI interface, and compact mesh DM/channel summaries. `mch sta
 should not separately reconstruct desired-vs-observed meaning from raw DB records.
 
 Intended split:
-- `mch status [NODE]`: current state and evidence.
-- `mch plan [NODE]`: what mchd would do next.
-- `mch logs [NODE]`: history.
-- `mch suggest [NODE]`: recommendations.
-- `mch sync [NODE]`: do work now.
+- `mch status [LABEL_OR_PREFIX]`: current state and evidence.
+- `mch plan [LABEL_OR_PREFIX]`: what mchd would do next.
+- `mch logs [LABEL_OR_PREFIX]`: history.
+- `mch suggest [LABEL_OR_PREFIX]`: recommendations.
+- `mch sync [LABEL_OR_PREFIX]`: do work now.
 
 The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`, `ignored`, or
 `blocked`, and classify next action as `none`, `read`, `write`, `report`, `ignore`, or `blocked`.
@@ -181,8 +181,10 @@ path hashes:
 For normal management traffic, a node is contacted on the gateway's current radio tuple using its
 stored MeshCore contact path. If effective `via_radio` is set to a different radio tuple, mchd
 temporarily switches the gateway radio tuple before contacting the node and restores the home
-tuple afterward. `via_radio` can be declared on a node or inherited from its group, with a node
-value overriding its group. It is reachability-radio configuration, not a MeshCore path. Nodes
+tuple afterward. `via_radio` can be declared globally, on a group, or on a node; precedence is
+node, then group, then global fallback. A global value should only be used when it applies to
+most managed devices because otherwise it moves home-radio devices unnecessarily. It is
+reachability-radio configuration, not a MeshCore path. Nodes
 that have moved radio without an
 updated management-radio value can repeatedly time out even though their desired settings are
 otherwise valid; recovery path inspection and historical-radio fallback remain future work.
@@ -199,6 +201,17 @@ contact path, reset to flood routing and retry the probe once if that path times
 processing the node for that sync if flood also fails. Repeated failed scheduled probes should
 back off across cycles; delaying every read command within an already failing pass would only
 increase mesh load and operator wait time.
+
+Successful routing paths should also be retained as bounded observed history. This is useful when
+the gateway has fallen back to flood routing but a recently working repeater path is known, as
+observed for the Acacia Gardens and QH Paterson labels in field operation. Store only a small
+number of successful candidate paths with last-success time and hop count, prefer short recent
+paths, and try at most a tightly limited number before a single flood probe. Long paths impose
+greater latency and failure probability, so status should surface path length.
+
+In operator-facing views, `LABEL` means mch's local identifier and `MESH NAME` means the name
+advertised by the MeshCore device. Avoid using a `NODE` column heading where a local label is
+being shown; operators naturally use "node" for the mesh-visible device identity.
 
 The hardcoded setting policy fallback is `audit`. A desired setting is read and compared by
 default, but mchd only writes to a node when the setting, node, group, or top-level `global:`
@@ -411,5 +424,6 @@ section only records stable design gaps that affect the architecture.
 - **Factory reset notes**: for bench testing and replacement drills, documentation with the exact
   `esptool` erase/write commands is enough for now. This should stay outside normal sync and
   commissioning automation.
-- **Command naming**: the detail view should continue moving toward `mch status <node>` as the
-  primary interface. Older `mch node <node>` wording should be treated as legacy documentation.
+- **Command naming**: the detail view should continue moving toward
+  `mch status <label-or-prefix>` as the primary interface. Older `mch node` wording should be
+  treated as legacy documentation.

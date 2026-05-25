@@ -1,4 +1,4 @@
-.TH MCH 1 "2026-05-25" "meshherder 0.8.0" "User Commands"
+.TH MCH 1 "2026-05-25" "meshherder 0.8.1" "User Commands"
 .SH NAME
 mch \- manage MeshCore repeater nodes through the mchd daemon
 .SH SYNOPSIS
@@ -110,7 +110,7 @@ Sync one node immediately and wait for the result.
 Sync one node immediately while streaming fact reads, setting checks, enforcement
 actions, operations, and timeout failures as they occur.
 .TP
-.B exec \fINODE\fR \fICOMMAND...\fR
+.B exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
 Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked
 or require confirmation.
 .TP

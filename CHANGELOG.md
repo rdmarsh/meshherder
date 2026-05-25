@@ -3,6 +3,11 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.8.1 - 2026-05-25
+
+- Added `global.via_radio` as an optional fleet-wide reachability-radio fallback beneath node and
+  group overrides.
+
 ## 0.8.0 - 2026-05-25
 
 - Replaced per-node `via:` with `via_radio:` to identify the temporary radio tuple used to reach

@@ -28,9 +28,10 @@ Think Ansible for your nodes, running continuously in the background.
   policy.
 - **Read-only facts** — a configurable list of read-only data (firmware version, hardware name,
   role, and more) collected each sync cycle and stored in a local SQLite database.
-- **Multi-frequency support** — nodes on different radio settings? Add `via_radio:` to a node or
-  group entry. mchd temporarily switches the gateway radio tuple, manages the node, and restores
-  the home radio tuple when done. This is not a MeshCore routing hop.
+- **Multi-frequency support** — nodes on different radio settings? Add `via_radio:` globally, to
+  a group, or to a node. Node values override group values, which override the global fallback.
+  mchd temporarily switches the gateway radio tuple, manages the node, and restores the home
+  radio tuple when done. This is not a MeshCore routing hop.
 - **Staggered scheduler** — nodes are spread randomly across the sync window so mchd restarts never
   cause a sync surge.
 - **DM commands** — authorised MeshCore devices can ask mchd for field status over the mesh:
@@ -568,7 +569,7 @@ mch remove <label|prefix>     Delete one node's local DB state
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node immediately; CLI waits for the result
 mch sync --verbose <prefix>   Sync one node and stream live mesh-operation progress
-mch exec <node> <command>     Run a raw MeshCore CLI command on a node (e.g. ver, stats-radio)
+mch exec <label|prefix> <command>  Run a raw MeshCore CLI command (e.g. ver, stats-radio)
 mch commission                Commission a fresh or replacement MeshCore node (interactive wizard)
 mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch stop                      Stop mchd via systemd

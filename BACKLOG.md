@@ -45,14 +45,17 @@ keep `DESIGN.md` for stable architecture notes.
 
 ### Reporting And Commands
 
-- Add `mch ping [NODE]` to confirm whether a node is alive on selected radio settings.
+- Add `mch ping [LABEL_OR_PREFIX]` to confirm whether a device is alive on selected radio settings.
 - Show the selected reachability method during live operations: gateway home radio versus
   configured `via_radio:` radio-tuple switch, plus enough stored-contact path information to diagnose
   whether a no-response node needs a different radio tuple or a MeshCore path repair.
 - Add MeshCore management-path diagnostics and recovery controls.
   - Snapshot each managed contact's `out_path`, path length, and hash mode into observed state,
     and display it in status/API output.
-  - Add `mch path <node>`, `mch path reset <node>`, and eventually manual selection for known
+  - Retain a bounded history of successful paths with last-success time and hop count, to allow
+    one or two controlled recovery candidates before a single flood probe; prefer shorter recent
+    paths because long routes are slower and more fragile.
+  - Add `mch path <label-or-prefix>`, `mch path reset <label-or-prefix>`, and eventually manual selection for known
     repeater routes.
   - Log whether a probe used a stored path or flood fallback, and expose that result separately
     from the management radio tuple in status/API output.
@@ -60,7 +63,7 @@ keep `DESIGN.md` for stable architecture notes.
     pass; avoid ambiguously retrying an already-sent setting write after a lost response.
 - Add `mch discover` to find nearby nodes not yet present in gateway contacts.
 - Add an overall `mch health` view showing node health and required operator actions.
-- Make `mch suggest <node>` show differences from current configuration by default.
+- Make `mch suggest <label-or-prefix>` show differences from current configuration by default.
 - Consider latitude/longitude in suggestions so nearby nodes do not receive identical txdelay
   recommendations.
 - Keep `-v`/`--verbose` for commands that actively wait on mesh work (`sync`, commissioning, and
@@ -101,11 +104,11 @@ keep `DESIGN.md` for stable architecture notes.
   - Next goal after that split: migrate mesh DM/channel summaries to the model and refine
     dashboard/map needs without independently deriving health or actions.
   - Keep command verbs short and stable:
-    - `mch status [NODE]` = current state and evidence.
-    - `mch plan [NODE]` = what mchd would do next.
-    - `mch logs [NODE]` = history.
-    - `mch suggest [NODE]` = recommendations.
-    - `mch sync [NODE]` = do work now.
+    - `mch status [LABEL_OR_PREFIX]` = current state and evidence.
+    - `mch plan [LABEL_OR_PREFIX]` = what mchd would do next.
+    - `mch logs [LABEL_OR_PREFIX]` = history.
+    - `mch suggest [LABEL_OR_PREFIX]` = recommendations.
+    - `mch sync [LABEL_OR_PREFIX]` = do work now.
   - The normalized model should include identity, `last_seen`, `last_connected`, `next_sync_at`,
     facts, settings, issues, actions, and recent activity.
   - Setting classification should distinguish: `ok`, `nominal`, `drift`, `unknown`, `ignored`,
@@ -410,8 +413,8 @@ keep `DESIGN.md` for stable architecture notes.
   - More generally, allow settings to depend on facts such as uptime, role, or other observed data.
   - Keep this separate from ordinary static desired-state enforcement.
 
-- Continue `mch status <node>` convergence.
-  - Treat `mch node <node>` wording as legacy.
+- Continue `mch status <label-or-prefix>` convergence.
+  - Treat `mch node` wording as legacy.
   - Remove or redirect older docs/code references over time.
 
 - Polish `mch validate` output ordering.
@@ -420,7 +423,7 @@ keep `DESIGN.md` for stable architecture notes.
   - Revisit after core validation behavior settles.
 
 - Revisit retired-node command naming.
-  - `mch remove <node>` works, but `mch prune <node>` might be a better fit as the single-node form
+  - `mch remove <label-or-prefix>` works, but `mch prune <label-or-prefix>` might be a better fit as the single-item form
     of `mch prune`.
   - If changed, keep `mch remove` as an alias or compatibility path until the CLI settles.
 
@@ -579,6 +582,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 - 2026-05-25: Released `0.8.0`, replacing per-node `via:` with explicit `via_radio:` and adding
   group-level `via_radio` inheritance for sync and replacement commissioning.
+- 2026-05-25: Released `0.8.1`, adding `global.via_radio` as a fleet-wide fallback beneath node
+  and group reachability-radio overrides.
 - 2026-05-25: Queried stored contacts on `luna`: `qh-paterson` and `acacia` were already using
   flood routing (`out_path_len=-1`), while three test contacts had direct paths (`out_path_len=0`).
   Their recorded timeouts therefore are not explained by a stale repeater path.

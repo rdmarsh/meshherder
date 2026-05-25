@@ -242,8 +242,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_via_radio_release_version_is_0_8_0():
-    assert __version__ == "0.8.0"
+def test_global_via_radio_release_version_is_0_8_1():
+    assert __version__ == "0.8.1"
 
 
 def _run(args, rpc_response):

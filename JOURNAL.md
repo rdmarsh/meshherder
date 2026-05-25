@@ -68,6 +68,10 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   representing direct/zero-hop routing. A stored-path reset would not by itself recover the two
   field failures; radio reachability, node availability, or broader flood delivery remains to be
   investigated.
+- Released `0.8.1`: `global.via_radio` now supplies a fleet-wide reachability fallback, after
+  node and group overrides. Recorded the operator naming convention that `LABEL` is local while
+  `MESH NAME` is the device-advertised name, and planned bounded successful-path history because
+  field knowledge contained working repeater paths no longer present in the gateway contact data.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 

@@ -52,7 +52,7 @@ _NODE_KEYS = {
     "via_radio",
 }
 _GROUP_KEYS = {"name", "default_policy", "settings", "setting_overrides", "via_radio"}
-_GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides"}
+_GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides", "via_radio"}
 _SETTING_KEYS = {"desired", "policy", "poll_hours"}
 _OPERATION_KEYS = {"command", "every_hours", "fire_and_forget"}
 _RADIO_KEYS = {"freq", "bw", "sf", "cr"}
@@ -196,9 +196,14 @@ class MessengerConfig:
 def resolve_via_radio(
     node_cfg: NodeConfig,
     group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
 ) -> RadioConfig | None:
     """Return the radio tuple on which a node is reachable, if configured."""
-    return node_cfg.via_radio or (group_cfg.via_radio if group_cfg else None)
+    return (
+        node_cfg.via_radio
+        or (group_cfg.via_radio if group_cfg else None)
+        or (global_cfg.via_radio if global_cfg else None)
+    )
 
 
 @dataclass
@@ -552,6 +557,7 @@ def _parse_global(raw: dict[str, Any]) -> GroupConfig:
     return GroupConfig(
         name="global",
         default_policy=SettingPolicy(policy) if policy else None,
+        via_radio=_parse_radio(raw.get("via_radio")),
         settings=settings,
         setting_overrides=overrides,
     )

@@ -119,6 +119,7 @@ def test_global_settings_block_parses_like_group(tmp_path):
     p = _write_config(tmp_path, """\
         global:
           default_policy: audit
+          via_radio: "916.575,62.5,7,8"
           settings:
             owner.info:
               desired: "rdm"
@@ -131,6 +132,7 @@ def test_global_settings_block_parses_like_group(tmp_path):
     cfg = load(p)
 
     assert cfg.global_settings.default_policy == SettingPolicy.AUDIT
+    assert cfg.global_settings.via_radio == RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8)
     assert cfg.global_settings.settings["owner.info"].desired == "rdm"
     assert cfg.global_settings.settings["owner.info"].policy == SettingPolicy.ENFORCE
     assert cfg.global_settings.setting_overrides["powersaving"].policy == SettingPolicy.SKIP
