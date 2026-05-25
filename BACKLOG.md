@@ -50,7 +50,8 @@ keep `DESIGN.md` for stable architecture notes.
   configured `via_radio:` radio-tuple switch, plus enough stored-contact path information to diagnose
   whether a no-response node needs a different radio tuple or a MeshCore path repair.
 - Add MeshCore management-path diagnostics and recovery controls.
-  - Display each managed contact's stored `out_path`, path length, and hash mode.
+  - Snapshot each managed contact's `out_path`, path length, and hash mode into observed state,
+    and display it in status/API output.
   - Add `mch path <node>`, `mch path reset <node>`, and eventually manual selection for known
     repeater routes.
   - Log whether a probe used a stored path or flood fallback, and expose that result separately
@@ -578,6 +579,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 - 2026-05-25: Released `0.8.0`, replacing per-node `via:` with explicit `via_radio:` and adding
   group-level `via_radio` inheritance for sync and replacement commissioning.
+- 2026-05-25: Queried stored contacts on `luna`: `qh-paterson` and `acacia` were already using
+  flood routing (`out_path_len=-1`), while three test contacts had direct paths (`out_path_len=0`).
+  Their recorded timeouts therefore are not explained by a stale repeater path.
 - 2026-05-25: Released `0.7.2` correcting operator-visible terminology: switching the gateway
   radio tuple for management is distinct from a MeshCore routing hop/path.
 - 2026-05-25: Released `0.7.1` with `mch sync --verbose <node>` streaming progress during

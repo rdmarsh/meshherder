@@ -61,6 +61,13 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   distinction. Released this correction as `0.7.2`.
 - Released `0.8.0`: replaced ambiguous `via:` with `via_radio:` and allowed a group's
   `via_radio:` to supply the reachability radio for member nodes unless overridden per node.
+- After deploying `0.8.0`, read live contact routing fields from `luna`. Both `qh-paterson`
+  (`cde6cd06be51`) and `acacia` (`4d0385b9d942`) reported no stored path with
+  `out_path_len=-1`, meaning they were already flood-routed when management attempts failed.
+  `qh-test`, `qhtest01`, and `qhtest02` reported empty `out_path` with `out_path_len=0`,
+  representing direct/zero-hop routing. A stored-path reset would not by itself recover the two
+  field failures; radio reachability, node availability, or broader flood delivery remains to be
+  investigated.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 
