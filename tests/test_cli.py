@@ -824,12 +824,14 @@ def test_logs_no_entries():
 
 def test_logs_shows_entries():
     result = _run(["logs"], {"ok": True, "data": [
-        {"node_pubkey": "aabbccdd" * 8, "level": "INFO",
+        {"node_pubkey": "aabbccdd" * 8, "label": "site-a", "level": "INFO",
          "timestamp": "2026-05-19T10:00:00", "message": "synced ok"},
     ]})
     assert result.exit_code == 0
     assert "synced ok" in result.output
     assert "INFO" in result.output
+    assert "[site-a/aabbccddaabb]" in result.output
+    assert "ago)" in result.output
 
 
 def test_logs_newest_at_bottom():
@@ -842,6 +844,18 @@ def test_logs_newest_at_bottom():
     ]})
     assert result.exit_code == 0
     assert result.output.index("first event") < result.output.index("second event")
+
+
+def test_status_single_match_activity_includes_relative_age():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(logs=[
+        {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "event"},
+    ])
+
+    result = _run_multi(["status", "aabb"], status, detail)
+
+    assert "recent activity:" in result.output
+    assert "ago)" in result.output
 
 
 # ------ contacts ------

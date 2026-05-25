@@ -498,7 +498,15 @@ async def _dispatch(
                 return {"ok": False, "error": str(exc)}
             pubkey = node.pubkey if node else pubkey
         logs = await db.get_logs(pubkey, limit=limit)
-        return {"ok": True, "data": logs}
+        labels = {node.pubkey: node.label for node in await db.get_all_nodes()}
+        return {
+            "ok": True,
+            "data": [
+                {**entry, "label": labels.get(entry["node_pubkey"], "")}
+                if entry.get("node_pubkey") else entry
+                for entry in logs
+            ],
+        }
 
     if cmd == "issues":
         nodes = await db.get_all_nodes()
