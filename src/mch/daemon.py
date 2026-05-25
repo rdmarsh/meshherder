@@ -46,7 +46,8 @@ from mch.settings_compare import compare_setting
 
 log = logging.getLogger(__name__)
 
-FileSignature = tuple[int, int] | None
+# Include inode/change time so atomic replacements and timestamp-preserving copies are detected.
+FileSignature = tuple[int, int, int, int, int] | None
 CONFIG_WATCH_INTERVAL_SECONDS = 10.0
 CONFIG_ERROR_EXIT = getattr(os, "EX_CONFIG", 78)
 
@@ -744,7 +745,13 @@ class Daemon:
             except FileNotFoundError:
                 snapshot[path] = None
             else:
-                snapshot[path] = (stat.st_mtime_ns, stat.st_size)
+                snapshot[path] = (
+                    stat.st_mtime_ns,
+                    stat.st_ctime_ns,
+                    stat.st_size,
+                    stat.st_dev,
+                    stat.st_ino,
+                )
         return snapshot
 
     async def _watch_config_files(self) -> None:

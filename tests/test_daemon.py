@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -201,6 +202,24 @@ async def test_daemon_reload_updates_existing_config_object(tmp_path):
         allowed_prefixes=["aabbccdd"],
         announce_channel=None,
     )
+
+
+def test_daemon_config_snapshot_detects_equal_size_replacement_with_preserved_mtime(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("nodes:\n  - pubkey_prefix: aabbccdd\n    label: old\n")
+    config = load(config_path, load_secrets=False)
+    daemon = Daemon(config)
+    before = daemon._snapshot_config_files()
+    original_stat = config_path.stat()
+
+    replacement = tmp_path / "replacement.yaml"
+    replacement.write_text("nodes:\n  - pubkey_prefix: aabbccdd\n    label: new\n")
+    os.utime(replacement, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    replacement.replace(config_path)
+
+    assert config_path.stat().st_size == original_stat.st_size
+    assert config_path.stat().st_mtime_ns == original_stat.st_mtime_ns
+    assert daemon._snapshot_config_files() != before
 
 
 async def test_daemon_shutdown_waits_for_work_queue_cancellation_before_closing_db():

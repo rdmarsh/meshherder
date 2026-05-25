@@ -25,8 +25,6 @@ keep `DESIGN.md` for stable architecture notes.
 
 ### Operator Bugs
 
-- Fix config hot reload when `/etc/meshherder/config.yaml` is replaced with `cp`, not edited
-  in place.
 - Decide whether replacement commissioning should run an immediate sync after reboot rather
   than requiring a follow-up `mch sync <prefix>`.
 - Persist "config node not visible to gateway" startup warnings in `mch logs`, not only systemd
@@ -468,6 +466,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: Config/secrets hot reload now detects timestamp-preserving replacements and
+  atomic file swaps, rather than relying only on modification time and file size.
 - 2026-05-25: `mch commission new` now sanitizes local labels while retaining human-friendly
   mesh names, only emits configured groups, and includes the chosen mesh name as an enforced
   setting in generated config snippets. `mch plan` also shortens unobserved-value reasons to
