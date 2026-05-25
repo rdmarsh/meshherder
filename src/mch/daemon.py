@@ -154,7 +154,9 @@ async def _dispatch(
                 "desired": s.desired,
                 "observed": s.observed,
                 "policy": s.policy.value,
-                "update_attempts": s.update_attempts,
+                "update_attempts": (
+                    s.update_attempts if s.policy == SettingPolicy.ENFORCE else 0
+                ),
             }
             for s in drifted_records
         ]
@@ -259,7 +261,11 @@ async def _dispatch(
                     "observed": observed,
                     "policy": policy.value,
                     "update_attempts": (
-                        known.update_attempts if known and known.desired == desired else 0
+                        known.update_attempts
+                        if policy == SettingPolicy.ENFORCE
+                        and known
+                        and known.desired == desired
+                        else 0
                     ),
                     "drift": drift,
                     "approximate": observed is not None and comparison.approximate,
@@ -273,7 +279,9 @@ async def _dispatch(
                     "desired": s.desired,
                     "observed": s.observed,
                     "policy": s.policy.value,
-                    "update_attempts": s.update_attempts,
+                    "update_attempts": (
+                        s.update_attempts if s.policy == SettingPolicy.ENFORCE else 0
+                    ),
                     "drift": s.drift,
                 })
 
@@ -485,7 +493,9 @@ async def _dispatch(
                 "desired": s.desired,
                 "observed": s.observed,
                 "policy": s.policy.value,
-                "update_attempts": s.update_attempts,
+                "update_attempts": (
+                    s.update_attempts if s.policy == SettingPolicy.ENFORCE else 0
+                ),
             }
             for s in drifted_records
         ]

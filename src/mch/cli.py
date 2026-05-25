@@ -385,6 +385,13 @@ def _render_node_detail(data: dict[str, Any]) -> None:
 
     settings = data.get("settings", [])
     if settings:
+        def _tries(setting: dict[str, Any]) -> str:
+            return (
+                str(setting.get("update_attempts", 0))
+                if setting["policy"] == "enforce"
+                else "-"
+            )
+
         any_unobserved = any(s.get("observed") is None for s in settings)
         any_drift = any(s["drift"] for s in settings)
         any_approximate = any(s.get("approximate") for s in settings)
@@ -403,7 +410,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
         col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
         col_tries = max(
-            len("TRIES"), max(len(str(s.get("update_attempts", 0))) for s in settings)
+            len("TRIES"), max(len(_tries(s)) for s in settings)
         )
         def _srow(
             policy: str, key: str, observed: str, desired: str, tries: str, drift: str
@@ -428,7 +435,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 s["key"],
                 _sv(s.get("observed")),
                 _sv(s.get("desired")),
-                str(s.get("update_attempts", 0)),
+                _tries(s),
                 drift_flag,
             ))
         click.echo("")
@@ -455,6 +462,13 @@ def _render_issue_sections(
     click.echo("")
 
     if drifted:
+        def _tries(setting: dict[str, Any]) -> str:
+            return (
+                str(setting.get("update_attempts", 0))
+                if setting["policy"] == "enforce"
+                else "-"
+            )
+
         click.echo("drifted settings:")
         node_w = max(
             len("NODE"),
@@ -463,7 +477,7 @@ def _render_issue_sections(
         key_w = max(len("KEY"), max(len(s["key"]) for s in drifted))
         des_w = max(len("DESIRED"), max(_wlen(_sv(s.get("desired"))) for s in drifted))
         obs_w = max(len("OBSERVED"), max(_wlen(_sv(s.get("observed"))) for s in drifted))
-        tries_w = max(len("TRIES"), max(len(str(s.get("update_attempts", 0))) for s in drifted))
+        tries_w = max(len("TRIES"), max(len(_tries(s)) for s in drifted))
         def _drow(
             pubkey: str, node: str, key: str, desired: str, observed: str, tries: str, policy: str
         ) -> str:
@@ -477,7 +491,7 @@ def _render_issue_sections(
             node = s.get("label") or s["node_pubkey"][:16]
             click.echo(_drow(_pk(s["node_pubkey"]), node, s["key"],
                              _sv(s.get("desired")), _sv(s.get("observed")),
-                             str(s.get("update_attempts", 0)),
+                             _tries(s),
                              s["policy"]))
         click.echo("")
 

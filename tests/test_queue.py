@@ -530,6 +530,30 @@ async def test_cycle_audit_does_not_set(db):
     assert not any("set " in c for c in calls)
 
 
+async def test_changing_enforced_setting_to_audit_clears_update_attempts(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="off"),
+        CommandResult(success=False, error="timeout"),
+        CommandResult(success=True, text="off"),
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    assert (await db.get_settings("aabbccdd1122"))[0].update_attempts == 1
+
+    node_cfg.settings["powersaving"].policy = SettingPolicy.AUDIT
+    await wq.run_cycle()
+    assert (await db.get_settings("aabbccdd1122"))[0].update_attempts == 0
+
+
 async def test_cycle_desired_setting_without_policy_audits_only(db):
     node_cfg = _node(
         pubkey="aabbcc",
