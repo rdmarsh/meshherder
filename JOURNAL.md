@@ -15,8 +15,8 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 - Added an optional HTTP JSON transport for read-only local consumers. It binds only to loopback
   addresses until authentication is designed and includes no write endpoints.
 - Revised the public HTTP route vocabulary to match the existing read-only CLI commands:
-  `/health`, `/status`, `/status/<node>`, `/issues`, `/plan`, and `/logs`. Kept the originally
-  published `/api/v1/...` and `/healthz` paths as aliases rather than breaking early consumers.
+  `/health`, `/status`, `/status/<node>`, `/issues`, `/plan`, and `/logs`. Removed the draft
+  `/api/v1/...` and `/healthz` paths because the API is still under active development.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 

@@ -93,17 +93,17 @@ class ReadOnlyApi:
         parsed = urlsplit(target)
         path = parsed.path.rstrip("/") or "/"
         params = parse_qs(parsed.query)
-        if path in {"/health", "/healthz"}:
+        if path == "/health":
             return HTTPStatus.OK, {"ok": True}
-        if path in {"/status", "/api/v1/fleet"}:
+        if path == "/status":
             return HTTPStatus.OK, await build_fleet_report(self._db, self._config)
-        if path in {"/issues", "/api/v1/issues"}:
+        if path == "/issues":
             report = await build_fleet_report(self._db, self._config)
             return HTTPStatus.OK, report["issues"]
-        if path in {"/plan", "/api/v1/plan"}:
+        if path == "/plan":
             report = await build_fleet_report(self._db, self._config)
             return HTTPStatus.OK, report["plan"]
-        if path in {"/logs", "/api/v1/logs"}:
+        if path == "/logs":
             try:
                 limit = min(max(int(params.get("limit", ["50"])[0]), 1), 500)
             except ValueError:
@@ -125,9 +125,8 @@ class ReadOnlyApi:
                 if entry.get("node_pubkey") else entry
                 for entry in logs
             ]
-        prefixes = ("/status/", "/api/v1/nodes/")
-        prefix = next((candidate for candidate in prefixes if path.startswith(candidate)), None)
-        if prefix:
+        prefix = "/status/"
+        if path.startswith(prefix):
             query = unquote(path[len(prefix):])
             try:
                 node = await _resolve_node(query, self._db)

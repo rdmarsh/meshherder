@@ -82,29 +82,25 @@ async def test_api_routes_mirror_read_only_cli_commands(db, config):
     assert isinstance(logs, list)
 
 
-async def test_versioned_api_routes_remain_compatibility_aliases(db, config):
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/healthz",
+        "/api/v1/fleet",
+        "/api/v1/nodes/tower",
+        "/api/v1/issues",
+        "/api/v1/plan",
+        "/api/v1/logs?node=tower&limit=20",
+    ],
+)
+async def test_abandoned_draft_api_routes_are_not_exposed(path, db, config):
     await _seed_node(db)
     api = ReadOnlyApi(config, db)
 
-    status, fleet = await api.route("/api/v1/fleet")
-    node_status, node = await api.route("/api/v1/nodes/tower")
-    health_status, health = await api.route("/healthz")
-    issues_status, issues = await api.route("/api/v1/issues")
-    plan_status, plan = await api.route("/api/v1/plan")
-    logs_status, logs = await api.route("/api/v1/logs?node=tower&limit=20")
+    status, data = await api.route(path)
 
-    assert status == HTTPStatus.OK
-    assert isinstance(fleet, dict)
-    assert node_status == HTTPStatus.OK
-    assert isinstance(node, dict)
-    assert health_status == HTTPStatus.OK
-    assert health == {"ok": True}
-    assert issues_status == HTTPStatus.OK
-    assert isinstance(issues, dict)
-    assert plan_status == HTTPStatus.OK
-    assert isinstance(plan, dict)
-    assert logs_status == HTTPStatus.OK
-    assert isinstance(logs, list)
+    assert status == HTTPStatus.NOT_FOUND
+    assert data == {"error": "not found"}
 
 
 async def test_http_server_rejects_non_get_methods(db, config):
