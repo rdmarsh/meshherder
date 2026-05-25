@@ -29,7 +29,8 @@ Think Ansible for your nodes, running continuously in the background.
 - **Read-only facts** — a configurable list of read-only data (firmware version, hardware name,
   role, and more) collected each sync cycle and stored in a local SQLite database.
 - **Multi-frequency support** — nodes on different radio settings? Add `via:` to the node entry;
-  mchd hops the gateway, manages the node, and restores the home frequency when done.
+  mchd temporarily switches the gateway radio tuple, manages the node, and restores the home
+  radio tuple when done. This is not a MeshCore routing hop.
 - **Staggered scheduler** — nodes are spread randomly across the sync window so mchd restarts never
   cause a sync surge.
 - **DM commands** — authorised MeshCore devices can ask mchd for field status over the mesh:
@@ -46,7 +47,7 @@ Think Ansible for your nodes, running continuously in the background.
   to config. Destructive commands (reboot, clkreboot) require confirmation; irreversible commands
   (erase, set prv.key) are blocked.
 - **`mch commission`** — guided wizard to commission a fresh or replacement MeshCore node. Pauses
-  the sync queue, hops to the factory default frequency, discovers the node, generates or restores
+  the sync queue, switches to the factory default frequency, discovers the node, generates or restores
   a managed private key, pushes name/password/radio config, verifies the expected public key after
   reboot, then prints ready-to-paste snippets for `config.yaml` and `secrets.yaml`. No need to
   stop mchd.
@@ -614,8 +615,8 @@ A normal startup and sync looks like this:
 mchd: gateway connected: name='🤖 mch-gw' freq=915.075 bw=125 sf=9 cr=5
 mchd: work queue started (interval=1.0d)
 mchd: processing node '📡 Millbrook' (aabbccdd...)
-mchd: hopping to 916.575/62.5/SF7 for '📡 Millbrook'
-mchd: hopping radio: 915.075/125/SF9 → 916.575/62.5/SF7
+mchd: switching gateway radio to 916.575/62.5/SF7 for '📡 Millbrook'
+mchd: switching gateway radio: 915.075/125/SF9 -> 916.575/62.5/SF7
 mchd: radio restored: 915.075/125/SF9
 mchd: '📡 Millbrook' done — facts:5 settings:1/1 enforced drift:0 ops:0/0 failed
 ```

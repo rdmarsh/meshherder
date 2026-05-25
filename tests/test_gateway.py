@@ -327,8 +327,8 @@ def make_discover_payload(pubkey_hex: str = "a695e2be23f2" + "0" * 52) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_discover_hops_to_factory_freq_and_restores():
-    """discover() hops to factory freq then restores home freq."""
+async def test_discover_switches_to_factory_freq_and_restores():
+    """discover() switches to factory radio tuple then restores the home tuple."""
     fake_mc = make_discover_mc()
     gw = make_connected_gateway(fake_mc)
     gw.info = {**HOME_RADIO, "name": "TestGW"}
@@ -338,7 +338,7 @@ async def test_discover_hops_to_factory_freq_and_restores():
 
     calls = fake_mc.commands.set_radio.await_args_list
     assert len(calls) == 2
-    # first call: hop to factory freq
+    # first call: switch to factory frequency
     assert calls[0].args == FACTORY_FREQ
     # second call: restore home freq
     assert calls[1].args == (

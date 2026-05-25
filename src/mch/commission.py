@@ -347,7 +347,7 @@ async def handle_commission(
 
     async with wq.commission_session() as gateway:
         try:
-            # Save home radio state before discover() hops and restores it.
+            # Save home radio state before discover() switches and restores it.
             home_radio: tuple[float, float, int, int] = (
                 float(gateway.info.get("radio_freq") or 0),
                 float(gateway.info.get("radio_bw") or 0),
@@ -379,8 +379,8 @@ async def handle_commission(
             node_info = unknown[0]
             await _prog(f"found node {node_info['pubkey'][:12]}")
 
-            # discover() restored home freq; re-hop to factory so commands reach the node.
-            await gateway.hop_radio(*Gateway.FACTORY_FREQ)
+            # discover() restored home freq; switch back to factory so commands reach the node.
+            await gateway.switch_radio_temporarily(*Gateway.FACTORY_FREQ)
             try:
                 # DISCOVER_RESPONSE does not add the node to the gateway's contact store.
                 # add_commission_contact() inserts it with flood routing so send_command() succeeds.

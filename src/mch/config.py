@@ -108,7 +108,8 @@ class GatewayConfig:
     device: str = "/dev/meshcore0"
     baud: int = 115200
     name: str | None = None  # if set, mchd applies this name to the gateway on startup
-    radio: RadioConfig | None = None  # if set, forced to home freq on startup; restored per hop
+    # If set, forced to the home radio on startup and restored after temporary switches.
+    radio: RadioConfig | None = None
     advert_on_start: str = "never"  # "never" | "zerohop" — send advert after daemon restart
 
     def __post_init__(self) -> None:
@@ -159,7 +160,7 @@ class NodeConfig:
     default_policy: SettingPolicy | None = None
     settings: dict[str, SettingConfig] = field(default_factory=dict)
     operations: list[OperationConfig] = field(default_factory=list)
-    via: RadioConfig | None = None  # if set, gateway hops to this freq to manage the node
+    via: RadioConfig | None = None  # if set, gateway switches to this radio tuple for the node
 
 
 @dataclass

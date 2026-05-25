@@ -3,6 +3,11 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.7.2 - 2026-05-25
+
+- Corrected terminology in progress/log messages and documentation: temporarily switching the
+  gateway radio tuple for management is not a MeshCore routing hop/path.
+
 ## 0.7.1 - 2026-05-25
 
 - Added `mch sync -v|--verbose <node>` to stream progress while a foreground sync waits for

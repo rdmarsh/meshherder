@@ -1116,7 +1116,7 @@ def plan(ctx: click.Context, query: str | None) -> None:
 def commission(ctx: click.Context) -> None:
     """Interactively commission a new or replacement MeshCore node.
 
-    The gateway will hop to the factory frequency (869.618 MHz) and search
+    The gateway will switch to the factory frequency (869.618 MHz) and search
     for unmanaged nodes. Make sure only one new or replacement node is powered
     on and within range before proceeding.
     """

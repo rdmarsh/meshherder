@@ -55,6 +55,10 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   `via:`. Automatic probing of historical radios is not implemented.
 - Found a follow-up bug from the same trace: ordinary setting enforcement does not yet consume
   the command registry's slow-write timeout for `set radio`, even though commissioning does.
+- Corrected terminology after operator feedback and review of the upstream MeshCore FAQ:
+  MeshCore hops/paths are repeater routing concepts; changing the gateway's radio tuple is a
+  temporary radio switch, not a hop. Runtime/log wording and documentation should use that
+  distinction. Released this correction as `0.7.2`.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 
@@ -81,8 +85,8 @@ appeared, making `state: configured` look complete when new config had never bee
 indicator column header `~` is only shown when at least one row is actually drifted.
 
 **Radio debug logging**: added `log.debug("set_radio: ...")` before every
-`mc.commands.set_radio()` call in `hop_radio`, `restore_radio`, and `set_radio` in
-`gateway.py`. Visible at DEBUG log level without cluttering production INFO logs.
+`mc.commands.set_radio()` call in `switch_radio_temporarily`, `restore_radio`, and `set_radio`
+in `gateway.py`. Visible at DEBUG log level without cluttering production INFO logs.
 
 ## 2026-05-23 - Clock sync, settings vs operations, and powersaving fix
 
