@@ -749,12 +749,12 @@ def test_plan_shows_unknown_values():
         "known": None,
         "desired": "New",
         "policy": "enforce",
-        "reason": "no known value; sync must read first",
+        "reason": "not observed yet",
     }]))
 
     assert result.exit_code == 0
     assert "needs observation" in result.output
-    assert "sync must read first" in result.output
+    assert "not observed yet" in result.output
 
 
 def test_plan_filters_by_query():
@@ -1081,13 +1081,17 @@ def test_commission_new_happy_path():
         "",           # radio (accept gateway defaults)
         "y",          # confirm
     )
-    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]):
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
     assert result.exit_code == 0, result.output
     assert "a695e2be" in result.output  # pubkey_prefix shown
     assert "Restart or reload mchd" in result.output
     assert "mch status a695e2be" in result.output
     assert "Optional: mch sync a695e2be" in result.output
+    req = mock_rpc.call_args_list[1][0][1]
+    assert req["label"] == "Test-Site"
+    assert req["name"] == "Test Site"
+    assert "local label must be config-safe; using 'Test-Site'" in result.output
 
 
 def test_commission_new_cancel_aborts():
@@ -1213,8 +1217,8 @@ def test_commission_new_can_choose_config_group():
     assert req["group"] == "test"
 
 
-def test_commission_new_group_defaults_to_default_when_no_config_groups():
-    """When config has no groups, Enter keeps the free-form group as default."""
+def test_commission_new_leaves_group_unset_when_no_config_groups():
+    """When config has no groups, Enter cannot emit an undefined default group."""
     runner = CliRunner()
     scan_resp = {"ok": True, "data": {
         "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
@@ -1226,7 +1230,7 @@ def test_commission_new_group_defaults_to_default_when_no_config_groups():
         "pubkey_prefix": "a695e2be",
         "label": "Test Site",
         "name": "Test Site",
-        "group": "default",
+        "group": None,
         "target_freq": "915.800,250,10,5",
     }}
     with patch("mch.cli._profile_radio_options", return_value=[]), \
@@ -1242,7 +1246,7 @@ def test_commission_new_group_defaults_to_default_when_no_config_groups():
 
     assert result.exit_code == 0, result.output
     req = mock_rpc.call_args_list[1][0][1]
-    assert req["group"] == "default"
+    assert req["group"] is None
 
 
 def test_commission_new_group_defaults_to_first_config_group():

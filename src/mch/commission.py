@@ -14,12 +14,13 @@ ensuring gateway.discover() is called with the right dwell time.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from mch.command_registry import DEFAULT_COMMAND_TIMEOUT, command_timeout
-from mch.config import Config
+from mch.config import Config, validate_node_label
 from mch.gateway import Gateway
 from mch.meshkey import derive_public_key, generate_private_key
 
@@ -418,6 +419,17 @@ async def _commission_new(
     then applies password, name, and radio. The factory-generated identity is
     discarded so mch can print the private key needed for future replacement.
     """
+    label = req.get("label") or ""
+    try:
+        validate_node_label(label)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    group = req.get("group")
+    configured_groups = {configured.name for configured in config.groups}
+    if group and group not in configured_groups:
+        return {"ok": False, "error": f"group {group!r} is not configured"}
+
     # Always set an admin password; fall back to 'password' if not provided.
     admin_password = req.get("admin_password") or "password"
 
@@ -430,8 +442,6 @@ async def _commission_new(
         return {"ok": False, "error": login_error}
     guest_password = req.get("guest_password")
     name = req.get("name") or req.get("label") or ""
-    label = req.get("label") or ""
-    group = req.get("group")
     target_freq_str = req.get("target_freq")
 
     prv_key = req.get("prv_key") or generate_private_key()
@@ -477,7 +487,7 @@ async def _commission_new(
     if verify_error:
         return {"ok": False, "error": verify_error}
 
-    config_snippet = _build_config_snippet(pubkey_prefix, label, group, target_freq_str)
+    config_snippet = _build_config_snippet(pubkey_prefix, label, name, group, target_freq_str)
     secrets_snippet = _build_secrets_snippet(
         pubkey_prefix, admin_password, guest_password, prv_key
     )
@@ -572,6 +582,7 @@ async def _commission_replace(
 def _build_config_snippet(
     pubkey_prefix: str,
     label: str,
+    name: str,
     group: str | None,
     target_freq_str: str | None,
 ) -> str:
@@ -583,6 +594,13 @@ def _build_config_snippet(
         lines.append(f"    group: {group}")
     if target_freq_str:
         lines.append(f"    via: {target_freq_str}")
+    if name:
+        lines.extend([
+            "    settings:",
+            "      name:",
+            f"        desired: {json.dumps(name, ensure_ascii=False)}",
+            "        policy: enforce",
+        ])
     return "\n".join(lines)
 
 

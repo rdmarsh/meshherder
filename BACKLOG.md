@@ -27,12 +27,6 @@ keep `DESIGN.md` for stable architecture notes.
 
 - Fix config hot reload when `/etc/meshherder/config.yaml` is replaced with `cp`, not edited
   in place.
-- Avoid emitting invalid `commission new` snippets when a human-friendly mesh name contains
-  spaces: local labels must be sanitized or validated at prompt time while the mesh name may
-  retain spaces.
-- When no groups are configured, do not default commissioning to `group: default`; this produces
-  a config that fails to load because `default` is undefined.
-- Include the chosen desired mesh name in the `commission new` config snippet.
 - Decide whether replacement commissioning should run an immediate sync after reboot rather
   than requiring a follow-up `mch sync <prefix>`.
 - Persist "config node not visible to gateway" startup warnings in `mch logs`, not only systemd
@@ -474,13 +468,13 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: `mch commission new` now sanitizes local labels while retaining human-friendly
+  mesh names, only emits configured groups, and includes the chosen mesh name as an enforced
+  setting in generated config snippets. `mch plan` also shortens unobserved-value reasons to
+  `not observed yet`.
 - 2026-05-25: Setting enforcement now persists an update-attempt count for the current desired
   value and displays it as `TRIES` in node detail and drift summaries, exposing values repeatedly
   failing to converge.
-- 2026-05-24: `mch commission new` now receives configured group names from the daemon scan,
-  lists them in the wizard, defaults to `default` only when appropriate, and falls back to the first
-  configured group when no `default` group exists. Covered by CLI tests for no groups, explicit
-  group choice, and first-configured-group default.
 - 2026-05-24: Duplicate node labels in `config.yaml` are rejected during config load, so
   `mch validate` fails before ambiguous local labels can reach status/commissioning flows.
   Covered by `test_duplicate_labels_raise`.

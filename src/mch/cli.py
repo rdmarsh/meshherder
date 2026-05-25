@@ -20,7 +20,7 @@ from mch import __version__
 from mch.command_registry import parse_radio_tuple, validate_radio_tuple
 from mch.command_safety import blocked_exec_command, confirm_exec_command
 from mch.config import load as load_config
-from mch.config import secrets_identity_warnings
+from mch.config import sanitize_node_label, secrets_identity_warnings
 from mch.meshkey import derive_public_key, generate_private_key
 from mch.recommend import load_radio_presets
 
@@ -1282,8 +1282,11 @@ def _prompt_commission_group(
 ) -> str | None:
     """Prompt for a config group using numbered choices when groups are known."""
     if not group_options:
-        raw_group: str = click.prompt("Group label", default=current or "-").strip()
-        return None if raw_group == "-" else raw_group
+        while True:
+            raw_group: str = click.prompt("Group label (none configured)", default="-").strip()
+            if raw_group in ("", "-"):
+                return None
+            click.echo("  no groups are configured; enter - for none")
 
     default_group = current if current in group_options else group_options[0]
     default_choice = str(group_options.index(default_group) + 1)
@@ -1292,16 +1295,12 @@ def _prompt_commission_group(
     for idx, name in enumerate(group_options, 1):
         click.echo(f"  {idx}. {name}")
     click.echo("  n. none")
-    click.echo("  c. custom")
 
     while True:
         choice: str = click.prompt("Group", default=default_choice).strip()
         lowered = choice.lower()
         if lowered in ("n", "none", "-"):
             return None
-        if lowered == "c":
-            raw_group = click.prompt("Group label", default=current or "-").strip()
-            return None if raw_group == "-" else raw_group
         try:
             idx = int(choice) - 1
             if 0 <= idx < len(group_options):
@@ -1310,7 +1309,7 @@ def _prompt_commission_group(
             pass
         if choice in group_options:
             return choice
-        click.echo("  choose a number, n for none, or c for custom")
+        click.echo("  choose a configured group number or n for none")
 
 
 def _commission_new_wizard(
@@ -1341,7 +1340,7 @@ def _commission_new_wizard(
     elif group_options:
         group = group_options[0]
     else:
-        group = "default"
+        group = None
     name = ""
     admin_password = "password"
     guest_password = "guest"
@@ -1352,9 +1351,12 @@ def _commission_new_wizard(
 
     while True:  # outer: re-enter values loop
         # --- identity ---
-        label = click.prompt("Node label ", default=label).strip()
+        requested_label = click.prompt("Node label ", default=label).strip()
+        label = sanitize_node_label(requested_label)
+        if label != requested_label:
+            click.echo(f"  local label must be config-safe; using {label!r}")
         # Re-prompt name until within 31 bytes (MeshCore firmware cap).
-        name_default = name or label
+        name_default = name or requested_label or label
         while True:
             name = click.prompt("Node name  ", default=name_default).strip()
             encoded = name.encode("utf-8")

@@ -417,7 +417,7 @@ async def _dispatch(
                 comparison = compare_setting(key, desired, known.observed if known else None)
 
                 if known is None or known.observed is None:
-                    unknown.append({**item, "reason": "no known value; sync must read first"})
+                    unknown.append({**item, "reason": "not observed yet"})
                 elif comparison.equal:
                     continue
                 elif policy == SettingPolicy.ENFORCE:
