@@ -480,6 +480,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: Released `0.7.0` for the normalized fleet report model and optional read-only HTTP
+  API, with command-shaped `/health`, `/status`, `/issues`, `/plan`, and `/logs` routes.
 - 2026-05-25: Added the normalized read-only fleet report contract (`schema_version: 1`), routed
   status/plan/issue interpretation through it, switched terminal status/plan views to consume the
   fleet API model, and added an optional loopback-only HTTP JSON API for a future dashboard/map.

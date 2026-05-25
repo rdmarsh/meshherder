@@ -235,6 +235,10 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
+def test_fleet_api_release_version_is_0_7_0():
+    assert __version__ == "0.7.0"
+
+
 def _run(args, rpc_response):
     """Invoke a CLI command with _rpc mocked to return rpc_response."""
     runner = CliRunner()
