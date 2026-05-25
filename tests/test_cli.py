@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from mch import __version__
 from mch.cli import (
     _ago,
     _default_commission_label,
@@ -214,6 +215,15 @@ def test_filter_drift_empty_query_returns_all():
 # ---------------------------------------------------------------------------
 # CLI command rendering — CliRunner + mocked _rpc
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("flag", ["-V", "--version"])
+def test_version_options_report_source_version(flag: str):
+    result = CliRunner().invoke(cli, [flag])
+
+    assert result.exit_code == 0
+    assert result.output.endswith(f"version {__version__}\n")
+
 
 def _run(args, rpc_response):
     """Invoke a CLI command with _rpc mocked to return rpc_response."""

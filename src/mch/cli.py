@@ -16,6 +16,7 @@ from typing import Any
 
 import click
 
+from mch import __version__
 from mch.command_registry import parse_radio_tuple, validate_radio_tuple
 from mch.command_safety import blocked_exec_command, confirm_exec_command
 from mch.config import load as load_config
@@ -141,7 +142,7 @@ def _default_config_path() -> Path:
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(package_name="meshherder")
+@click.version_option(__version__, "-V", "--version")
 @click.option(
     "--socket", "-s",
     default=DEFAULT_SOCKET,
