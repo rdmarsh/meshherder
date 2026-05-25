@@ -319,6 +319,17 @@ def test_validate_invalid_config_exits_nonzero(tmp_path):
     assert "unknown config key" in result.output
 
 
+def test_validate_tab_indentation_explains_fix(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("nodes:\n\t- pubkey_prefix: aabbccdd\n")
+
+    result = CliRunner().invoke(cli, ["validate", "--config", str(config)])
+
+    assert result.exit_code != 0
+    assert "tab character in YAML indentation" in result.output
+    assert "replace tabs with spaces" in result.output
+
+
 def test_validate_explicit_missing_secrets_exits_nonzero(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text("gateway: {}\n")
