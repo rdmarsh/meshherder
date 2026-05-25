@@ -48,6 +48,12 @@ keep `DESIGN.md` for stable architecture notes.
 - Show the selected reachability method during live operations: gateway home radio versus
   configured `via:` radio-tuple switch, plus enough stored-contact path information to diagnose
   whether a no-response node needs a different radio tuple or a MeshCore path repair.
+- Add MeshCore management-path diagnostics and recovery controls.
+  - Display each managed contact's stored `out_path`, path length, and hash mode.
+  - Provide a deliberate operation to reset a broken stored path to flood routing, and consider
+    manual path selection for known repeater routes.
+  - Decide how a retried management read/write should report route changes before automating any
+    flood fallback for configuration enforcement.
 - Add `mch discover` to find nearby nodes not yet present in gateway contacts.
 - Add an overall `mch health` view showing node health and required operator actions.
 - Make `mch suggest <node>` show differences from current configuration by default.
@@ -371,8 +377,8 @@ keep `DESIGN.md` for stable architecture notes.
   - `NodeConfig.via` currently describes both how the gateway reaches a node and what radio config
     replacement commissioning should push.
   - Rename `via` as part of this work: in MeshCore, hop/path refers to packet routing, while this
-    field means "temporarily use this radio tuple." A name such as `on_radio` or
-    `management_radio` would avoid conflating those concepts.
+    field means "temporarily use this radio tuple." Prefer `management_radio`, leaving `path`
+    available for actual MeshCore route configuration.
   - Add a distinct desired node radio model before bridge-mediated management gets more complex.
 
 - Add named database migrations.

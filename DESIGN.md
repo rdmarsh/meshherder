@@ -186,6 +186,13 @@ path; its name should eventually be made less ambiguous. Nodes that have moved r
 updated management-radio value can repeatedly time out even though their desired settings are
 otherwise valid; recovery path inspection and historical-radio fallback remain future work.
 
+The current command flow is path-capable but not path-managing: `send_command()` sends through the
+gateway's stored MeshCore contact, whose `out_path` may already contain repeater hops. It does not
+display that path, force a chosen path, or fall back from a failed stored path to flood routing.
+By contrast, the dependency's direct-message retry helper can reset a broken path to flood after
+failed attempts. Management path inspection and controlled recovery need an explicit operator
+workflow before mchd can safely retry configuration writes over an alternative route.
+
 The hardcoded setting policy fallback is `audit`. A desired setting is read and compared by
 default, but mchd only writes to a node when the setting, node, group, or top-level `global:`
 block explicitly opts in with `policy: enforce` or `default_policy: enforce`. Desired values

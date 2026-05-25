@@ -458,7 +458,7 @@ class Gateway:
         dwell: float = 8.0,
     ) -> list[dict[str, Any]]:
         """
-        Hop to factory frequency, broadcast a node-discover request, collect
+        Switch to the factory radio tuple, broadcast a node-discover request, collect
         DISCOVER_RESPONSE events for `dwell` seconds, then restore radio.
 
         Subscribe before sending to avoid the race where a fast responder
