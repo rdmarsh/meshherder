@@ -51,7 +51,7 @@ profiles:
 # Universal settings recommended for all repeaters regardless of neighbour count.
 #
 # radio: the freq,bw,sf,cr string is sent via `set radio` and enforces the node's
-# radio configuration. This is separate from the NodeConfig `via:` block (gateway
+# radio configuration. This is separate from the `via_radio:` reachability value (gateway
 # management-radio switch). Verify the value matches your regional mesh before applying.
 universal:
   - key: radio

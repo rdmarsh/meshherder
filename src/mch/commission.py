@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from mch.command_registry import DEFAULT_COMMAND_TIMEOUT, command_timeout
-from mch.config import Config, validate_node_label
+from mch.config import Config, resolve_via_radio, validate_node_label
 from mch.gateway import Gateway
 from mch.meshkey import derive_public_key, generate_private_key
 
@@ -98,14 +98,16 @@ def _config_radio_options(config: Config) -> list[dict[str, str]]:
         setting = group.settings.get("radio")
         if setting and setting.desired:
             add(f"group {group.name}", setting.desired)
+        if group.via_radio:
+            add(f"group {group.name} reachability", _format_radio(group.via_radio))
 
     for node in config.nodes:
         node_label = node.label or node.pubkey_prefix
         setting = node.settings.get("radio")
         if setting and setting.desired:
             add(f"node {node_label}", setting.desired)
-        if node.via:
-            add(f"node {node_label}", _format_radio(node.via))
+        if node.via_radio:
+            add(f"node {node_label}", _format_radio(node.via_radio))
 
     return options
 
@@ -518,7 +520,7 @@ async def _commission_replace(
     """
     Restore a node's identity from secrets.yaml and push its config.
 
-    Sends: set prv.key (from secrets), password, guest.password, set radio (from via),
+    Sends: set prv.key (from secrets), password, guest.password, set radio (from via_radio),
     then reboot. Config and secrets files are not modified — the existing entries
     are already correct.
     """
@@ -550,8 +552,10 @@ async def _commission_replace(
     if ns.password:
         cmds.append((f"password {ns.password}", False))
     cmds.append((f"set prv.key {ns.prv_key}", False))
-    if node_cfg.via:
-        v = node_cfg.via
+    group_cfg = next((group for group in config.groups if group.name == node_cfg.group), None)
+    via_radio = resolve_via_radio(node_cfg, group_cfg)
+    if via_radio:
+        v = via_radio
         cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", False))
     cmds.append(("reboot", True))
 
@@ -593,7 +597,7 @@ def _build_config_snippet(
     if group:
         lines.append(f"    group: {group}")
     if target_freq_str:
-        lines.append(f"    via: {target_freq_str}")
+        lines.append(f"    via_radio: {target_freq_str}")
     if name:
         lines.extend([
             "    settings:",

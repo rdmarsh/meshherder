@@ -3,6 +3,13 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.8.0 - 2026-05-25
+
+- Replaced per-node `via:` with `via_radio:` to identify the temporary radio tuple used to reach
+  a node without confusing it with a MeshCore routing path.
+- Added group-level `via_radio:` inheritance, with per-node override, for normal sync and
+  replacement commissioning.
+
 ## 0.7.2 - 2026-05-25
 
 - Corrected terminology in progress/log messages and documentation: temporarily switching the

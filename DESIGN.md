@@ -179,10 +179,11 @@ path hashes:
 <https://github.com/meshcore-dev/MeshCore/blob/main/docs/faq.md>.
 
 For normal management traffic, a node is contacted on the gateway's current radio tuple using its
-stored MeshCore contact path. If `NodeConfig.via` is set to a different radio tuple, mchd
+stored MeshCore contact path. If effective `via_radio` is set to a different radio tuple, mchd
 temporarily switches the gateway radio tuple before contacting the node and restores the home
-tuple afterward. The existing `via` field is reachability-radio configuration, not a MeshCore
-path; its name should eventually be made less ambiguous. Nodes that have moved radio without an
+tuple afterward. `via_radio` can be declared on a node or inherited from its group, with a node
+value overriding its group. It is reachability-radio configuration, not a MeshCore path. Nodes
+that have moved radio without an
 updated management-radio value can repeatedly time out even though their desired settings are
 otherwise valid; recovery path inspection and historical-radio fallback remain future work.
 

@@ -47,7 +47,7 @@ keep `DESIGN.md` for stable architecture notes.
 
 - Add `mch ping [NODE]` to confirm whether a node is alive on selected radio settings.
 - Show the selected reachability method during live operations: gateway home radio versus
-  configured `via:` radio-tuple switch, plus enough stored-contact path information to diagnose
+  configured `via_radio:` radio-tuple switch, plus enough stored-contact path information to diagnose
   whether a no-response node needs a different radio tuple or a MeshCore path repair.
 - Add MeshCore management-path diagnostics and recovery controls.
   - Display each managed contact's stored `out_path`, path length, and hash mode.
@@ -377,11 +377,8 @@ keep `DESIGN.md` for stable architecture notes.
 ## Later
 
 - Split reachability radio from desired node radio.
-  - `NodeConfig.via` currently describes both how the gateway reaches a node and what radio config
+  - `via_radio` currently describes both how the gateway reaches a node and what radio config
     replacement commissioning should push.
-  - Rename `via` as part of this work: in MeshCore, hop/path refers to packet routing, while this
-    field means "temporarily use this radio tuple." Prefer short `rf`, leaving `path` available
-    for actual MeshCore route configuration; do not rename the gateway's own `radio` key.
   - Add a distinct desired node radio model before bridge-mediated management gets more complex.
 
 - Add named database migrations.
@@ -579,6 +576,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: Released `0.8.0`, replacing per-node `via:` with explicit `via_radio:` and adding
+  group-level `via_radio` inheritance for sync and replacement commissioning.
 - 2026-05-25: Released `0.7.2` correcting operator-visible terminology: switching the gateway
   radio tuple for management is distinct from a MeshCore routing hop/path.
 - 2026-05-25: Released `0.7.1` with `mch sync --verbose <node>` streaming progress during

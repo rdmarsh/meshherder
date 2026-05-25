@@ -17,15 +17,15 @@ def _write_config(tmp_path: Path, text: str) -> Path:
 
 
 # ------------------------------------------------------------------
-# via: block form
+# via_radio: reachability radio
 # ------------------------------------------------------------------
 
-def test_node_via_block_form(tmp_path):
-    """via: as a YAML mapping is parsed into RadioConfig."""
+def test_node_via_radio_block_form(tmp_path):
+    """via_radio: as a YAML mapping is parsed into RadioConfig."""
     p = _write_config(tmp_path, """\
         nodes:
           - pubkey_prefix: aabbccdd
-            via:
+            via_radio:
               freq: 916.575
               bw: 62.5
               sf: 7
@@ -33,29 +33,39 @@ def test_node_via_block_form(tmp_path):
     """)
     cfg = load(p)
     node = cfg.nodes[0]
-    assert node.via == RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8)
+    assert node.via_radio == RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8)
 
 
-def test_node_via_string_form(tmp_path):
-    """via: as a comma-separated string is parsed into RadioConfig."""
+def test_node_via_radio_string_form(tmp_path):
+    """via_radio: as a comma-separated string is parsed into RadioConfig."""
     p = _write_config(tmp_path, """\
         nodes:
           - pubkey_prefix: aabbccdd
-            via: "916.575,62.5,7,8"
+            via_radio: "916.575,62.5,7,8"
     """)
     cfg = load(p)
     node = cfg.nodes[0]
-    assert node.via == RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8)
+    assert node.via_radio == RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8)
 
 
-def test_node_via_absent(tmp_path):
-    """A node without via: has via=None."""
+def test_group_via_radio_string_form(tmp_path):
+    p = _write_config(tmp_path, """\
+        groups:
+          - name: alternate
+            via_radio: "916.575,62.5,7,8"
+    """)
+    cfg = load(p)
+    assert cfg.groups[0].via_radio == RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8)
+
+
+def test_node_via_radio_absent(tmp_path):
+    """A node without via_radio: has via_radio=None."""
     p = _write_config(tmp_path, """\
         nodes:
           - pubkey_prefix: aabbccdd
     """)
     cfg = load(p)
-    assert cfg.nodes[0].via is None
+    assert cfg.nodes[0].via_radio is None
 
 
 def test_load_records_config_and_secrets_paths(tmp_path):
@@ -164,7 +174,7 @@ def test_unknown_setting_desired_values_are_not_registry_validated(tmp_path):
 
 
 def test_node_radio_key_raises(tmp_path):
-    """Old radio: key on a node raises ValueError with a hint to use via:."""
+    """radio: on a node raises ValueError with a hint to use via_radio:."""
     p = _write_config(tmp_path, """\
         nodes:
           - pubkey_prefix: aabbccdd
@@ -174,7 +184,7 @@ def test_node_radio_key_raises(tmp_path):
               sf: 7
               cr: 8
     """)
-    with pytest.raises(ValueError, match="via"):
+    with pytest.raises(ValueError, match="via_radio"):
         load(p)
 
 
@@ -205,10 +215,10 @@ def test_radio_freq_rounded_to_three_decimal_places(tmp_path):
     p = _write_config(tmp_path, """\
         nodes:
           - pubkey_prefix: aabbccdd
-            via: "915.7999877,250,10,5"
+            via_radio: "915.7999877,250,10,5"
     """)
     cfg = load(p)
-    assert cfg.nodes[0].via.freq == 915.800
+    assert cfg.nodes[0].via_radio.freq == 915.800
 
 
 def test_gateway_advert_on_start_defaults_to_never(tmp_path):

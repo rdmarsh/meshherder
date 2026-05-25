@@ -160,6 +160,9 @@ groups:
 
   - name: repeaters
     default_policy: enforce
+    # Optional reachability radio inherited by group members unless overridden on a node.
+    # This is not the desired `settings.radio` value and not a MeshCore routing path.
+    # via_radio: "916.575,62.5,7,8"
     settings:
       # Two ways to configure a setting key:
       #
@@ -216,7 +219,7 @@ nodes:
         poll_hours: 12
 
   # Node on a non-default frequency.
-  # 'via:' tells mchd to temporarily switch the gateway to this radio tuple to reach
+  # 'via_radio:' tells mchd to temporarily switch the gateway to this radio tuple to reach
   # the node, run the full sync, then restore the gateway's home frequency.
   # The node is otherwise managed identically to any other node.
   #
@@ -224,13 +227,13 @@ nodes:
   - pubkey_prefix: 2fd9c7bb
     label: SiteC-Valley
     group: repeaters
-    via: "916.575,62.5,7,8"   # freq MHz, bw kHz, sf, cr
+    via_radio: "916.575,62.5,7,8"   # freq MHz, bw kHz, sf, cr
   #
   # Long form (explicit keys) - useful when you want to annotate each value:
   # - pubkey_prefix: 2fd9c7bb
   #   label: SiteC-Valley
   #   group: repeaters
-  #   via:
+  #   via_radio:
   #     freq: 916.575   # MHz
   #     bw: 62.5        # kHz
   #     sf: 7

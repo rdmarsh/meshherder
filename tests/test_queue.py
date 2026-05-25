@@ -929,7 +929,7 @@ async def test_run_node_verbose_describes_radio_switch_without_mesh_hop_wording(
     node_cfg = _node(
         pubkey="aabbcc",
         label="TestNode",
-        via=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8),
+        via_radio=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8),
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
@@ -1215,7 +1215,7 @@ async def test_node_on_different_freq_switches_radio(db):
     """A node with another radio tuple causes a temporary gateway switch and restore."""
     from mch.config import RadioConfig
     node_cfg = _node(pubkey="aabbcc", label="TestNode",
-                     via=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8))
+                     via_radio=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8))
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
 
@@ -1229,6 +1229,42 @@ async def test_node_on_different_freq_switches_radio(db):
     await wq.run_cycle()
     gw.switch_radio_temporarily.assert_awaited_once_with(916.575, 62.5, 7, 8)
     gw.restore_radio.assert_awaited_once_with(869.618, 62.5, 8, 5)
+
+
+async def test_node_inherits_group_via_radio(db):
+    """A group via_radio selects the gateway radio when the node has no override."""
+    from mch.config import RadioConfig
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", group="g")
+    group_cfg = _group(via_radio=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8))
+    cfg = _make_config(node_cfgs=[node_cfg], group_cfgs=[group_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    gw.switch_radio_temporarily.assert_awaited_once_with(916.575, 62.5, 7, 8)
+
+
+async def test_node_via_radio_overrides_group_via_radio(db):
+    from mch.config import RadioConfig
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        group="g",
+        via_radio=RadioConfig(freq=917.000, bw=125, sf=8, cr=5),
+    )
+    group_cfg = _group(via_radio=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8))
+    cfg = _make_config(node_cfgs=[node_cfg], group_cfgs=[group_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    gw.switch_radio_temporarily.assert_awaited_once_with(917.000, 125, 8, 5)
 
 
 async def test_node_no_radio_config_no_switch(db):
@@ -1252,7 +1288,7 @@ async def test_radio_restored_on_relogin_failure(db):
     from mch.config import RadioConfig
     node_cfg = _node(
         pubkey="aabbcc", label="TestNode",
-        via=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8),
+        via_radio=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8),
         settings={"name": SettingConfig(desired="X", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
