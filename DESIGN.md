@@ -201,6 +201,13 @@ The API and database should therefore retain separate `facts` and `settings` col
 presentation may combine them under an "observed values" heading where useful, while exposing the
 desired/policy/action fields for settings.
 
+Separate representation does not justify duplicate mesh traffic. If a key is selected as a
+collected fact and is also configured as a setting, one sync cycle should execute its read
+command only once and use the single observed value for both records. This is especially
+important on a low-bandwidth shared mesh. The sync implementation should eventually plan reads
+by resolved command, then feed each result into fact storage and setting comparison/write logic
+as required. A write prompted by drift remains a separate deliberate command.
+
 **Operations** are scheduled commands with no read-back or desired-value comparison. mchd sends
 the command string, records success or failure, and re-runs it after `every_hours` have elapsed
 since the last successful run.
@@ -250,6 +257,20 @@ model. A normal export should exclude secrets. Any secret export must be explici
 protected, and importing desired state should validate and present a reviewable diff before it is
 applied. A future settings editor may manage YAML or a replacement structured format only after
 those controls exist.
+
+## Messenger control
+
+The current messenger feature accepts read-oriented DM commands from
+`messenger.allowed_prefixes` and can send cycle announcements to
+`messenger.announce_channel`. A future configuration model may make inbound command handling and
+outbound announcements explicitly enableable and expose a friendlier channel selection, while
+retaining allow-listed sender public-key prefixes as the authorization boundary.
+
+An unapproved device sending a command is a request for messenger access, not evidence that the
+device should be trusted. It is reasonable to retain pending sender prefixes for operator review
+and expose them through a command such as `mch requests`; approval should produce or apply an
+explicit configuration change. These sender permissions are distinct from the MeshCore node ACL
+authorization used when mchd logs into a managed repeater.
 
 ## Two-layer commissioning
 

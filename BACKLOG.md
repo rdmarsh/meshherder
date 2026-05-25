@@ -96,6 +96,14 @@ keep `DESIGN.md` for stable architecture notes.
     do not merge settings into the `facts` storage/API concept. Settings also carry declared
     desired value, policy, comparison result, and next action, which plain collected facts do
     not. A future UI can group both under "observed values" while retaining their meaning.
+  - Deduplicate reads when the same key is requested as both a collected fact and a managed
+    setting. Today sync reads the key once in fact collection and again in setting processing,
+    unnecessarily using mesh airtime. Build a per-node read plan keyed by the actual read
+    command, send it once per cycle, then fan the observation out to both `node_facts` and
+    `settings` processing. Retain the two semantic views and their timestamps/status fields.
+  - Add focused tests for overlapping keys, including normal `get <key>` values and registry
+    special cases such as bare-command reads, proving one mesh request populates both views and
+    still performs drift/write decisions correctly.
 
 - Add a curated MeshCore command registry for commands mch actually uses.
   - Goal: one small hand-maintained table defining command shape and metadata for known fields,
@@ -429,6 +437,21 @@ keep `DESIGN.md` for stable architecture notes.
 - DM-triggered sync for already-managed nodes, using the same authorization and operation-lock
   model as existing CLI-triggered sync.
 - Channel or room-server reporting for fleet status.
+- Expand messenger configuration and authorization workflow.
+  - Existing configuration has `messenger.allowed_prefixes` for inbound DM commands and
+    `messenger.announce_channel` for outbound cycle summaries.
+  - Add explicit inbound/outbound controls, for example `receive_enabled`, `send_enabled`, and
+    named/selected channel configuration rather than relying on an empty allow-list or null slot
+    as the only off switch. Resolve whether MeshCore requires a stored channel slot as well as a
+    display name before choosing the config shape.
+  - Capture otherwise valid messages from unapproved public-key prefixes as pending access
+    requests without responding or authorizing them automatically.
+  - Add an operator command, naming TBD (`mch requests` or `mch messenger requests`), to list
+    pending sender prefixes and print a reviewable `messenger.allowed_prefixes` config addition.
+    This is messenger command authorization, not the MeshCore device ACL/perms used for node
+    login; do not conflate the two in the CLI or data model.
+  - If approving requests later becomes a UI/API action, it must follow the same authenticated,
+    reviewed configuration-write model as other desired-state edits.
 - Web UI with node map, using stored lat/lon facts.
   - Start read-only: green/red status markers from the lightweight `/status` response, with
     clickable node detail using `/status/<node>` and separate activity fetched from `/logs`.
