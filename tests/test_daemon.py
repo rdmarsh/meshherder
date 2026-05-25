@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -200,6 +201,42 @@ async def test_daemon_reload_updates_existing_config_object(tmp_path):
         allowed_prefixes=["aabbccdd"],
         announce_channel=None,
     )
+
+
+async def test_daemon_shutdown_waits_for_work_queue_cancellation_before_closing_db():
+    daemon = Daemon(Config())
+    events: list[str] = []
+    started = asyncio.Event()
+
+    async def running_work() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("work cancelled")
+            raise
+
+    task = asyncio.create_task(running_work())
+    daemon._work_queue_task = task
+    await started.wait()
+
+    async def stop_queue() -> None:
+        events.append("stop")
+        task.cancel()
+
+    daemon._wq = MagicMock()
+    daemon._wq.stop = AsyncMock(side_effect=stop_queue)
+    daemon._db = MagicMock()
+
+    async def close_db() -> None:
+        events.append("db closed")
+
+    daemon._db.close = AsyncMock(side_effect=close_db)
+
+    await daemon._shutdown()
+
+    assert events == ["stop", "work cancelled", "db closed"]
+    assert daemon._shutdown_complete.is_set()
 
 
 async def test_node_dispatch_full_pubkey_returns_facts(db, wq, config):

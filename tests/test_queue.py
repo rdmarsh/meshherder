@@ -1006,6 +1006,67 @@ async def test_cycle_state_configured_after_successful_enforcement(db):
     assert node.state == NodeState.CONFIGURED
 
 
+async def test_cycle_state_partial_when_setting_cannot_be_read(db):
+    node_cfg = _node(
+        pubkey="aabbcc", label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.PARTIAL
+    assert results[0].settings_failed == 1
+
+
+async def test_cycle_state_partial_when_node_processing_raises(db):
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=RuntimeError("serial failure"))
+    wq = WorkQueue(cfg, gw, db)
+
+    with pytest.raises(RuntimeError, match="serial failure"):
+        await wq.run_cycle()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.PARTIAL
+    logs = await db.get_logs(node.pubkey)
+    assert "sync failed before completion: serial failure" in logs[0]["message"]
+
+
+async def test_cycle_state_partial_when_node_processing_is_cancelled(db):
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    started = asyncio.Event()
+
+    async def blocked_send(*args, **kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=blocked_send)
+    wq = WorkQueue(cfg, gw, db)
+    task = asyncio.create_task(wq.run_cycle())
+    await started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.PARTIAL
+    logs = await db.get_logs(node.pubkey)
+    assert logs[0]["message"] == "sync interrupted before completion"
+
+
 async def test_cycle_observed_updated_after_set(db):
     """After a successful set, the observed value in the DB reflects the new value."""
     node_cfg = _node(
@@ -1163,6 +1224,20 @@ async def test_seed_node_labels_skips_unknown_nodes(db):
     await wq._seed_node_labels()  # should not raise
 
     assert await db.get_node("aabbccdd1122") is None
+
+
+async def test_recover_interrupted_nodes_marks_configuring_partial(db):
+    await db.upsert_node(
+        Node(pubkey="aabbccdd1122", name="N", label="L", state=NodeState.CONFIGURING)
+    )
+    wq = WorkQueue(_make_config(), _make_gateway(), db)
+
+    await wq._recover_interrupted_nodes()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.PARTIAL
+    logs = await db.get_logs(node.pubkey)
+    assert "sync interrupted before completion" in logs[0]["message"]
 
 
 # ---------------------------------------------------------------------------

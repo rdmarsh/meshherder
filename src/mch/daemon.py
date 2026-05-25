@@ -622,6 +622,9 @@ class Daemon:
         self._server: asyncio.Server | None = None
         self._config_snapshot: dict[Path, FileSignature] = {}
         self._config_watch_task: asyncio.Task[None] | None = None
+        self._work_queue_task: asyncio.Task[None] | None = None
+        self._shutdown_complete = asyncio.Event()
+        self._shutting_down = False
         self._reload_lock = asyncio.Lock()
 
     async def run(self) -> None:
@@ -693,7 +696,14 @@ class Daemon:
             )
 
         log.info("mchd started")
-        await self._wq.run()
+        self._work_queue_task = asyncio.create_task(self._wq.run(), name="work-queue")
+        try:
+            await self._work_queue_task
+        except asyncio.CancelledError:
+            if not self._shutting_down:
+                raise
+        if self._shutting_down:
+            await self._shutdown_complete.wait()
 
     def _watched_config_paths(self) -> list[Path]:
         paths: list[Path] = []
@@ -761,22 +771,31 @@ class Daemon:
             )
 
     async def _shutdown(self) -> None:
+        if self._shutting_down:
+            return
+        self._shutting_down = True
         log.info("shutting down")
-        if self._config_watch_task:
-            self._config_watch_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._config_watch_task
-        if self._wq:
-            await self._wq.stop()
-        if self._messenger:
-            self._messenger.stop()
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
-        if self._gateway:
-            await self._gateway.disconnect()
-        if self._db:
-            await self._db.close()
+        try:
+            if self._config_watch_task:
+                self._config_watch_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._config_watch_task
+            if self._wq:
+                await self._wq.stop()
+            if self._work_queue_task:
+                with suppress(asyncio.CancelledError):
+                    await self._work_queue_task
+            if self._messenger:
+                self._messenger.stop()
+            if self._server:
+                self._server.close()
+                await self._server.wait_closed()
+            if self._gateway:
+                await self._gateway.disconnect()
+            if self._db:
+                await self._db.close()
+        finally:
+            self._shutdown_complete.set()
 
 
 # ---------------------------------------------------------------------------
