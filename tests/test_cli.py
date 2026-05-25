@@ -458,7 +458,7 @@ def test_status_shows_drifted_section():
         "observed": "wrong", "policy": "enforce", "update_attempts": 20,
     }]))
     assert "drifted settings" in result.output
-    assert re.search(r"PUBKEY\s+NODE", result.output)
+    assert re.search(r"PUBKEY\s+LABEL", result.output)
     assert "owner.info" in result.output
     assert "site-a" in result.output
     assert "TRIES" in result.output
@@ -471,7 +471,7 @@ def test_status_shows_bad_state_section():
         "name": "wip 07", "state": "configuring", "last_seen": None,
     }]))
     assert "problem states" in result.output
-    assert re.search(r"PUBKEY\s+NODE", result.output)
+    assert re.search(r"PUBKEY\s+LABEL", result.output)
     assert "configuring" in result.output
     assert "wip 07" in result.output
 
@@ -490,7 +490,7 @@ def test_status_shows_open_nodes_section():
         "pubkey": "aabbccdd" * 8, "label": "wip 06", "name": "wip 06",
     }]))
     assert "open node" in result.output
-    assert re.search(r"PUBKEY\s+NODE", result.output)
+    assert re.search(r"PUBKEY\s+LABEL", result.output)
     assert "wip 06" in result.output
 
 

@@ -525,6 +525,8 @@ async def test_cycle_audit_does_not_set(db):
     results = await wq.run_cycle()
     assert results[0].settings_drifted == 1
     assert results[0].settings_enforced == 0
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.CONFIGURED
     # set command must NOT have been called
     calls = [str(c) for c in gw.send_command.call_args_list]
     assert not any("set " in c for c in calls)
@@ -1022,6 +1024,25 @@ async def test_cycle_state_partial_when_setting_cannot_be_read(db):
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.PARTIAL
     assert results[0].settings_failed == 1
+
+
+async def test_cycle_state_configured_when_audit_setting_cannot_be_read(db):
+    node_cfg = _node(
+        pubkey="aabbcc", label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.AUDIT)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.CONFIGURED
+    assert results[0].settings_failed == 1
+    assert results[0].enforced_settings_failed == 0
 
 
 async def test_cycle_state_partial_when_node_processing_raises(db):

@@ -472,8 +472,8 @@ def _render_issue_sections(
 
         click.echo("drifted settings:")
         node_w = max(
-            len("NODE"),
-            max((len(s.get("label") or s["node_pubkey"][:16]) for s in drifted), default=0),
+            len("LABEL"),
+            max((len(s.get("label") or "-") for s in drifted), default=0),
         )
         key_w = max(len("KEY"), max(len(s["key"]) for s in drifted))
         des_w = max(len("DESIRED"), max(_wlen(_sv(s.get("desired"))) for s in drifted))
@@ -486,10 +486,10 @@ def _render_issue_sections(
                 f"  {pubkey:<12}  {node:<{node_w}}  {key:<{key_w}}  {_wpad(desired, des_w)}"
                 f"  {_wpad(observed, obs_w)}  {tries:>{tries_w}}  {policy}"
             )
-        click.echo(_drow("PUBKEY", "NODE", "KEY", "DESIRED", "OBSERVED", "TRIES", "POLICY"))
-        click.echo(_drow("------", "----", "---", "-------", "--------", "-----", "------"))
+        click.echo(_drow("PUBKEY", "LABEL", "KEY", "DESIRED", "OBSERVED", "TRIES", "POLICY"))
+        click.echo(_drow("------", "-----", "---", "-------", "--------", "-----", "------"))
         for s in drifted:
-            node = s.get("label") or s["node_pubkey"][:16]
+            node = s.get("label") or "-"
             click.echo(_drow(_pk(s["node_pubkey"]), node, s["key"],
                              _sv(s.get("desired")), _sv(s.get("observed")),
                              _tries(s),
@@ -499,14 +499,14 @@ def _render_issue_sections(
     if bad_state:
         click.echo("problem states:")
         name_w = max(
-            _wlen("NODE"),
-            max((_wlen(n.get("label") or n["name"]) for n in bad_state), default=0),
+            _wlen("LABEL"),
+            max((_wlen(n.get("label") or "-") for n in bad_state), default=0),
         )
         fmt = "  {:<12}  {}  {:<12}  {:<16}"
-        click.echo(fmt.format("PUBKEY", _wpad("NODE", name_w), "STATE", "LAST SEEN"))
-        click.echo(fmt.format("------", _wpad("----", name_w), "-----", "---------"))
+        click.echo(fmt.format("PUBKEY", _wpad("LABEL", name_w), "STATE", "LAST SEEN"))
+        click.echo(fmt.format("------", _wpad("-----", name_w), "-----", "---------"))
         for n in bad_state:
-            label = n.get("label") or n["name"]
+            label = n.get("label") or "-"
             last = _ago(n.get("last_seen"))
             click.echo(fmt.format(_pk(n.get("pubkey")), _wpad(label, name_w), n["state"], last))
         click.echo("")
@@ -524,14 +524,14 @@ def _render_issue_sections(
     if open_nodes:
         click.echo("open nodes (no ACL - anyone on the mesh can send commands):")
         name_w = max(
-            _wlen("NODE"),
-            max((_wlen(n.get("label") or n["name"]) for n in open_nodes), default=0),
+            _wlen("LABEL"),
+            max((_wlen(n.get("label") or "-") for n in open_nodes), default=0),
         )
         fmt = "  {:<12}  {}"
-        click.echo(fmt.format("PUBKEY", _wpad("NODE", name_w)))
-        click.echo(fmt.format("------", _wpad("----", name_w)))
+        click.echo(fmt.format("PUBKEY", _wpad("LABEL", name_w)))
+        click.echo(fmt.format("------", _wpad("-----", name_w)))
         for n in open_nodes:
-            label = n.get("label") or n["name"]
+            label = n.get("label") or "-"
             click.echo(fmt.format(_pk(n.get("pubkey")), _wpad(label, name_w)))
 
 

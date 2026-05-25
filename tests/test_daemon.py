@@ -12,7 +12,7 @@ from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
 from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
-from mch.queue import OperationBusyError
+from mch.queue import NodeResult, OperationBusyError
 
 
 @asynccontextmanager
@@ -541,13 +541,46 @@ async def test_sync_dispatch_with_prefix_runs_node(db, wq, config):
     """sync with a pubkey prefix resolves via DB and calls run_node with the full pubkey."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    wq.run_node = AsyncMock(return_value=node)
+    wq.run_node = AsyncMock(return_value=NodeResult(pubkey=node.pubkey, name=node.name))
 
     resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config)
 
     assert resp["ok"] is True
     assert "Tower" in resp["data"]
     wq.run_node.assert_awaited_once_with("aabbccdd" * 8)
+
+
+async def test_sync_dispatch_reports_partial_result(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.PARTIAL)
+    await db.upsert_node(node)
+    wq.run_node = AsyncMock(return_value=NodeResult(
+        pubkey=node.pubkey,
+        name=node.name,
+        enforced_settings_drifted=1,
+        enforced_settings_failed=2,
+        operations_failed=1,
+    ))
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"] == (
+        "sync completed for 'Tower' (aabbccdd) "
+        "(partial: 1 enforced setting(s) still drifted; 2 enforced setting read(s) failed; "
+        "1 operation(s) failed)"
+    )
+
+
+async def test_sync_dispatch_reports_failed_result(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.OFFLINE)
+    await db.upsert_node(node)
+    wq.run_node = AsyncMock(return_value=NodeResult(
+        pubkey=node.pubkey, name=node.name, error="login rejected"
+    ))
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config)
+
+    assert resp == {"ok": False, "error": "sync failed for 'Tower' (aabbccdd): login rejected"}
 
 
 async def test_sync_dispatch_with_prefix_busy_returns_error(db, wq, config):
@@ -576,7 +609,7 @@ async def test_sync_dispatch_label_substring_resolves_to_full_pubkey(db, wq, con
     node = Node(pubkey="e2601d59" * 8, name="Quakers Hill Corb", label="qh-corb",
                 state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    wq.run_node = AsyncMock(return_value=node)
+    wq.run_node = AsyncMock(return_value=NodeResult(pubkey=node.pubkey, name=node.name))
 
     resp = await _dispatch({"cmd": "sync", "prefix": "corb"}, wq, db, config)
 
@@ -589,7 +622,7 @@ async def test_sync_dispatch_exact_label_resolves_to_full_pubkey(db, wq, config)
     node = Node(pubkey="e2601d59" * 8, name="Quakers Hill Corb", label="qh-corb",
                 state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    wq.run_node = AsyncMock(return_value=node)
+    wq.run_node = AsyncMock(return_value=NodeResult(pubkey=node.pubkey, name=node.name))
 
     resp = await _dispatch({"cmd": "sync", "prefix": "qh-corb"}, wq, db, config)
 
@@ -602,7 +635,7 @@ async def test_sync_dispatch_name_substring_resolves_to_full_pubkey(db, wq, conf
     node = Node(pubkey="e2601d59" * 8, name="Quakers Hill Corb", label="qh-corb",
                 state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    wq.run_node = AsyncMock(return_value=node)
+    wq.run_node = AsyncMock(return_value=NodeResult(pubkey=node.pubkey, name=node.name))
 
     resp = await _dispatch({"cmd": "sync", "prefix": "quakers"}, wq, db, config)
 

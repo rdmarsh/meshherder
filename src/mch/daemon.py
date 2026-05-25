@@ -35,6 +35,7 @@ from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
 from mch.models import NodeState, SettingPolicy
 from mch.queue import (
+    NodeResult,
     OperationBusyError,
     WorkQueue,
     all_setting_keys,
@@ -48,6 +49,26 @@ log = logging.getLogger(__name__)
 FileSignature = tuple[int, int] | None
 CONFIG_WATCH_INTERVAL_SECONDS = 10.0
 CONFIG_ERROR_EXIT = getattr(os, "EX_CONFIG", 78)
+
+
+def _sync_result_response(result: NodeResult) -> dict[str, Any]:
+    """Describe a forced node sync without claiming unresolved work succeeded."""
+    target = f"{result.name!r} ({result.pubkey[:8]})"
+    if result.error:
+        return {"ok": False, "error": f"sync failed for {target}: {result.error}"}
+
+    partial = []
+    if result.enforced_settings_drifted:
+        partial.append(f"{result.enforced_settings_drifted} enforced setting(s) still drifted")
+    if result.enforced_settings_failed:
+        partial.append(f"{result.enforced_settings_failed} enforced setting read(s) failed")
+    if result.operations_failed:
+        partial.append(f"{result.operations_failed} operation(s) failed")
+    if partial:
+        details = "; ".join(partial)
+        return {"ok": True, "data": f"sync completed for {target} (partial: {details})"}
+
+    return {"ok": True, "data": f"synced {target}"}
 
 
 async def _handle_advert(db: Database, pubkey: str) -> None:
@@ -320,7 +341,7 @@ async def _dispatch(
                 return {"ok": False, "error": f"no node found matching {prefix!r}"}
             try:
                 result = await wq.run_node(node.pubkey)
-                return {"ok": True, "data": f"synced {result.name!r} ({result.pubkey[:8]})"}
+                return _sync_result_response(result)
             except OperationBusyError as exc:
                 return {"ok": False, "error": str(exc)}
             except ValueError as exc:

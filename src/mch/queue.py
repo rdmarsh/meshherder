@@ -166,6 +166,8 @@ class NodeResult:
     settings_enforced: int = 0
     settings_drifted: int = 0
     settings_failed: int = 0
+    enforced_settings_drifted: int = 0
+    enforced_settings_failed: int = 0
     operations_run: int = 0
     operations_failed: int = 0
     error: str | None = None
@@ -696,13 +698,22 @@ class WorkQueue:
             result.facts_collected = await self._collect_facts(pubkey, contact, node, node_cfg)
 
             # enforce / audit settings
-            s_checked, s_enforced, s_drifted, s_failed = await self._process_settings(
+            (
+                s_checked,
+                s_enforced,
+                s_drifted,
+                s_failed,
+                enforce_drifted,
+                enforce_failed,
+            ) = await self._process_settings(
                 pubkey, contact, node_cfg, group_cfg, global_cfg, node
             )
             result.settings_checked = s_checked
             result.settings_enforced = s_enforced
             result.settings_drifted = s_drifted
             result.settings_failed = s_failed
+            result.enforced_settings_drifted = enforce_drifted
+            result.enforced_settings_failed = enforce_failed
 
             # seed operations from config into DB, then run what's pending
             await self._seed_operations(pubkey, node_cfg)
@@ -741,7 +752,7 @@ class WorkQueue:
                     raise
 
         # mark node state
-        if s_drifted > 0 or s_failed > 0 or op_failed > 0:
+        if enforce_drifted > 0 or enforce_failed > 0 or op_failed > 0:
             node.state = NodeState.PARTIAL
         else:
             node.state = NodeState.CONFIGURED
@@ -761,9 +772,10 @@ class WorkQueue:
         await self._db.upsert_node(node)
 
         log.info(
-            "  %r done — facts:%d settings:%d/%d enforced drift:%d read-failed:%d ops:%d/%d failed",
+            "  %r done — facts:%d settings:%d/%d drift:%d enforce-unresolved:%d "
+            "read-failed:%d ops:%d/%d failed",
             name, result.facts_collected,
-            s_enforced, s_checked, s_drifted, s_failed,
+            s_enforced, s_checked, s_drifted, enforce_drifted, s_failed,
             op_run, op_failed,
         )
         return result
@@ -855,9 +867,10 @@ class WorkQueue:
         group_cfg: GroupConfig | None,
         global_cfg: GroupConfig | None,
         node: Node,
-    ) -> tuple[int, int, int, int]:
-        """Check settings and return counts for checked, enforced, drifted, and failed reads."""
+    ) -> tuple[int, int, int, int, int, int]:
+        """Check settings, including reportable drift and enforce-blocking failures."""
         checked = enforced = drifted = read_failed = 0
+        enforced_drifted = enforced_read_failed = 0
         keys = all_setting_keys(node_cfg, group_cfg, global_cfg)
         existing = {s.key: s for s in await self._db.get_settings(pubkey)}
 
@@ -873,6 +886,8 @@ class WorkQueue:
             if not res.success:
                 log.warning("get %s failed for %s: %s", key, pubkey[:12], res.error)
                 read_failed += 1
+                if policy == SettingPolicy.ENFORCE:
+                    enforced_read_failed += 1
                 continue
 
             checked += 1
@@ -908,6 +923,7 @@ class WorkQueue:
             if is_drift:
                 drifted += 1
                 if policy == SettingPolicy.ENFORCE:
+                    enforced_drifted += 1
                     log.info("  enforcing %s: observed=%r desired=%r", key, observed, desired)
                     assert desired is not None
                     write_cmd = write_command_for_key(key, desired)
@@ -918,6 +934,7 @@ class WorkQueue:
                     if set_res.success:
                         enforced += 1
                         drifted -= 1  # enforcement fixed it — don't count as residual drift
+                        enforced_drifted -= 1
                         setting.drift = False
                         setting.observed = desired  # update observed to reflect the new value
                         if key == "name" and desired:
@@ -943,7 +960,7 @@ class WorkQueue:
 
             await self._db.upsert_setting(setting)
 
-        return checked, enforced, drifted, read_failed
+        return checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed
 
     async def _seed_operations(self, pubkey: str, node_cfg: NodeConfig) -> None:
         """Queue any config operations that are due (never run, or past every_hours)."""
