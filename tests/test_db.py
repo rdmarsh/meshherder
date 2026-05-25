@@ -100,6 +100,7 @@ async def test_upsert_and_get_setting(db):
         desired="Alice",
         policy=SettingPolicy.AUDIT,
         poll_hours=24,
+        update_attempts=3,
     )
     await db.upsert_setting(setting)
 
@@ -108,6 +109,7 @@ async def test_upsert_and_get_setting(db):
     assert settings[0].key == "owner.info"
     assert settings[0].policy == SettingPolicy.AUDIT
     assert settings[0].desired == "Alice"
+    assert settings[0].update_attempts == 3
 
 
 async def test_setting_drift_tracking(db):

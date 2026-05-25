@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS settings (
     observed        TEXT,
     last_checked    TEXT,
     last_set        TEXT,
+    update_attempts INTEGER NOT NULL DEFAULT 0,
     drift           INTEGER NOT NULL DEFAULT 0,
     UNIQUE(node_pubkey, key),
     FOREIGN KEY (node_pubkey) REFERENCES nodes(pubkey)
@@ -95,6 +96,13 @@ class Database:
         try:
             await self._db.execute(
                 "ALTER TABLE nodes ADD COLUMN label TEXT NOT NULL DEFAULT ''"
+            )
+        except aiosqlite.OperationalError:
+            pass  # column already exists
+        # migration: count write attempts for each setting's current desired value
+        try:
+            await self._db.execute(
+                "ALTER TABLE settings ADD COLUMN update_attempts INTEGER NOT NULL DEFAULT 0"
             )
         except aiosqlite.OperationalError:
             pass  # column already exists
@@ -206,9 +214,9 @@ class Database:
         await db.execute(
             """
             INSERT INTO settings (node_pubkey, key, desired, policy, poll_hours,
-                                  observed, last_checked, last_set, drift)
+                                  observed, last_checked, last_set, update_attempts, drift)
             VALUES (:node_pubkey, :key, :desired, :policy, :poll_hours,
-                    :observed, :last_checked, :last_set, :drift)
+                    :observed, :last_checked, :last_set, :update_attempts, :drift)
             ON CONFLICT(node_pubkey, key) DO UPDATE SET
                 desired     = excluded.desired,
                 policy      = excluded.policy,
@@ -216,6 +224,7 @@ class Database:
                 observed    = excluded.observed,
                 last_checked= excluded.last_checked,
                 last_set    = excluded.last_set,
+                update_attempts= excluded.update_attempts,
                 drift       = excluded.drift
             """,
             {
@@ -227,6 +236,7 @@ class Database:
                 "observed":     setting.observed,
                 "last_checked": _dt(setting.last_checked),
                 "last_set":     _dt(setting.last_set),
+                "update_attempts": setting.update_attempts,
                 "drift":        int(setting.drift),
             },
         )
@@ -405,6 +415,7 @@ def _row_to_setting(row: aiosqlite.Row) -> SettingRecord:
         observed=row["observed"],
         last_checked=_parse_dt(row["last_checked"]),
         last_set=_parse_dt(row["last_set"]),
+        update_attempts=row["update_attempts"],
         drift=bool(row["drift"]),
     )
 

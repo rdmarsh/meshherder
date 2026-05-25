@@ -445,12 +445,14 @@ def test_status_shows_drifted_section():
     result = _run(["status"], _status_resp(drifted=[{
         "node_pubkey": "aabbccdd" * 8, "label": "site-a",
         "key": "owner.info", "desired": "Managed by mch",
-        "observed": "wrong", "policy": "enforce",
+        "observed": "wrong", "policy": "enforce", "update_attempts": 20,
     }]))
     assert "drifted settings" in result.output
     assert re.search(r"PUBKEY\s+NODE", result.output)
     assert "owner.info" in result.output
     assert "site-a" in result.output
+    assert "TRIES" in result.output
+    assert "20" in result.output
 
 
 def test_status_shows_bad_state_section():
@@ -542,11 +544,14 @@ def test_status_single_match_shows_settings_drift_flag():
     detail = _detail(settings=[{
         "key": "owner.info", "desired": "Managed by mch",
         "observed": "wrong", "policy": "enforce", "drift": True,
+        "update_attempts": 20,
         "last_checked": None, "last_set": None,
     }])
     result = _run_multi(["status", "aabb"], status, detail)
     assert "~" in result.output
     assert "owner.info" in result.output
+    assert "TRIES" in result.output
+    assert "20" in result.output
 
 
 def test_status_single_match_shows_approximate_settings_marker():
@@ -560,7 +565,10 @@ def test_status_single_match_shows_approximate_settings_marker():
     result = _run_multi(["status", "aabb"], status, detail)
     assert "* = nominal (within expected tolerance)" in result.output
     assert "radio" in result.output
-    assert re.search(r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+\*", result.output)
+    assert re.search(
+        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+0\s+\*",
+        result.output,
+    )
 
 
 def test_status_no_match():

@@ -401,6 +401,37 @@ async def test_cycle_enforces_drifted_setting(db):
     assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
 
 
+async def test_failed_enforcement_counts_attempts_for_current_desired_value(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="off"),
+        CommandResult(success=False, error="timeout"),
+        CommandResult(success=True, text="off"),
+        CommandResult(success=False, error="timeout"),
+        CommandResult(success=True, text="on"),
+        CommandResult(success=False, error="timeout"),
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+    await wq.run_cycle()
+    settings = await db.get_settings("aabbccdd1122")
+    assert settings[0].update_attempts == 2
+
+    node_cfg.settings["powersaving"].desired = "off"
+    await wq.run_cycle()
+    settings = await db.get_settings("aabbccdd1122")
+    assert settings[0].update_attempts == 1
+
+
 async def test_cycle_does_not_enforce_close_enough_radio_roundoff(db):
     node_cfg = _node(
         pubkey="aabbcc",
@@ -452,8 +483,8 @@ async def test_bare_command_key_uses_bare_read_and_write(db):
     sent = [c.args[1] for c in gw.send_command.await_args_list]
     assert "powersaving" in sent, f"expected bare 'powersaving' read, got: {sent}"
     assert "powersaving on" in sent, f"expected bare 'powersaving on' write, got: {sent}"
-    assert "get powersaving" not in sent, f"'get powersaving' must not be sent"
-    assert "set powersaving on" not in sent, f"'set powersaving on' must not be sent"
+    assert "get powersaving" not in sent, "'get powersaving' must not be sent"
+    assert "set powersaving on" not in sent, "'set powersaving on' must not be sent"
 
 
 async def test_cycle_updates_db_name_when_name_is_enforced(db):
@@ -1121,7 +1152,9 @@ async def test_collect_facts_clock_sends_bare_command(db):
     cfg.facts = ["clock"]
     contact = _contact("aabbccdd1122")
     gw = _make_gateway(contacts=[contact])
-    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="2026-05-24 00:00:00"))
+    gw.send_command = AsyncMock(
+        return_value=CommandResult(success=True, text="2026-05-24 00:00:00")
+    )
     wq = WorkQueue(cfg, gw, db)
 
     await wq.run_cycle()
