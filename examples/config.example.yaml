@@ -103,6 +103,16 @@ messenger:
   # in the app. Omit or set to null to disable channel announcements.
   # announce_channel: 1
 
+# Read-only HTTP API for local integrations and a future dashboard.
+# Disabled by default. It exposes normalized fleet/node status, facts (including
+# lat/lon for a future map), issues, planned actions, and logs. It does not expose
+# sync, exec, commission, or any write operation.
+# Until API authentication exists, mchd only permits loopback binds.
+# api:
+#   enabled: true
+#   host: 127.0.0.1
+#   port: 8743
+
 # Setting policies control what mchd does when it checks a setting on a node.
 # Checks happen at each scheduled sync cycle for the node - not continuously.
 # When a node's turn comes up in the scheduler, mchd reads the current value

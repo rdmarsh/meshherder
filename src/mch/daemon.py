@@ -26,23 +26,26 @@ from typing import Any
 
 from meshcore.events import EventType
 
-from mch.command_registry import write_command_for_key
+from mch.api import ReadOnlyApi
 from mch.command_safety import blocked_exec_command
 from mch.config import Config
 from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
-from mch.models import NodeState, SettingPolicy
 from mch.queue import (
     NodeResult,
     OperationBusyError,
     WorkQueue,
-    all_setting_keys,
-    resolve_desired,
-    resolve_policy,
 )
-from mch.settings_compare import compare_setting
+from mch.report import (
+    build_fleet_report,
+    build_node_report,
+    legacy_issues,
+    legacy_node,
+    legacy_plan,
+    legacy_status,
+)
 
 log = logging.getLogger(__name__)
 
@@ -161,84 +164,21 @@ async def _dispatch(
 ) -> dict[str, Any]:
     cmd = req.get("cmd", "")
 
+    if cmd == "fleet":
+        return {"ok": True, "data": await build_fleet_report(db, config)}
+
+    if cmd == "fleet_node":
+        query = req.get("query", "")
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"node {query!r} not found"}
+        return {"ok": True, "data": await build_node_report(db, config, node)}
+
     if cmd == "status":
-        nodes = await db.get_all_nodes()
-        pubkey_to_node = {n.pubkey: n for n in nodes}
-
-        drifted_records = await db.get_drifted_settings()
-        drifted = [
-            {
-                "node_pubkey": s.node_pubkey,
-                "label": (
-                    pubkey_to_node[s.node_pubkey].label if s.node_pubkey in pubkey_to_node else ""
-                ),
-                "key": s.key,
-                "desired": s.desired,
-                "observed": s.observed,
-                "policy": s.policy.value,
-                "update_attempts": (
-                    s.update_attempts if s.policy == SettingPolicy.ENFORCE else 0
-                ),
-            }
-            for s in drifted_records
-        ]
-
-        _bad_states = {
-            NodeState.UNKNOWN, NodeState.OFFLINE, NodeState.CONFIGURING, NodeState.PARTIAL,
-        }
-        bad_state = [
-            {
-                "pubkey": n.pubkey,
-                "label": n.label,
-                "name": n.name,
-                "state": n.state.value,
-                "last_seen": n.last_seen.isoformat() if n.last_seen else None,
-            }
-            for n in nodes if n.state in _bad_states
-        ]
-
-        db_pubkeys = {n.pubkey for n in nodes}
-        ghosts = [
-            {"pubkey_prefix": nc.pubkey_prefix, "label": nc.label}
-            for nc in config.nodes
-            if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)
-        ]
-
-        _has_default_password = "default" in config.secrets
-        open_nodes = [
-            {"pubkey": n.pubkey, "label": n.label, "name": n.name}
-            for n in nodes
-            if n.state == NodeState.CONFIGURED
-            and not n.auth_required
-            and not n.auth_cached
-            and not _has_default_password
-            and not any(n.pubkey.startswith(p) for p in config.secrets)
-        ]
-
-        rows = []
-        for n in nodes:
-            facts = await db.get_facts(n.pubkey)
-            rows.append({
-                "pubkey": n.pubkey,
-                "name": n.name,
-                "label": n.label,
-                "group": n.group,
-                "state": n.state.value,
-                "last_seen": n.last_seen.isoformat() if n.last_seen else None,
-                "last_connected": n.last_connected.isoformat() if n.last_connected else None,
-                "neighbors": facts.get("neighbors"),
-                "ver": facts.get("ver"),
-            })
-        return {
-            "ok": True,
-            "data": {
-                "nodes": rows,
-                "drifted": drifted,
-                "bad_state": bad_state,
-                "ghosts": ghosts,
-                "open_nodes": open_nodes,
-            },
-        }
+        return {"ok": True, "data": legacy_status(await build_fleet_report(db, config))}
 
     if cmd == "node":
         pubkey = req.get("pubkey", "")
@@ -248,86 +188,8 @@ async def _dispatch(
             return {"ok": False, "error": str(exc)}
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
-        raw_facts = await db.get_facts(node.pubkey)
-        # show ??? for any fact in config that hasn't been collected yet
-        node_facts: dict[str, str | None] = {key: "???" for key in config.facts}
-        node_facts.update(raw_facts)
-        db_settings = {s.key: s for s in await db.get_settings(node.pubkey)}
-        logs = await db.get_logs(node.pubkey, limit=20)
-
-        # Merge desired config with DB observations so newly-added settings are
-        # visible even before the next sync cycle.
-        node_cfg = next(
-            (nc for nc in config.nodes if node.pubkey.startswith(nc.pubkey_prefix)),
-            None,
-        )
-        groups = {g.name: g for g in config.groups}
-        group_cfg = groups.get(node_cfg.group) if node_cfg and node_cfg.group else None
-
-        settings_out: list[dict[str, Any]] = []
-        config_keys: set[str] = set()
-        if node_cfg:
-            for key in sorted(all_setting_keys(node_cfg, group_cfg, config.global_settings)):
-                policy = resolve_policy(key, node_cfg, group_cfg, config.global_settings)
-                desired = resolve_desired(key, node_cfg, group_cfg, config.global_settings)
-                if policy == SettingPolicy.SKIP or desired is None:
-                    continue
-                config_keys.add(key)
-                known = db_settings.get(key)
-                observed = known.observed if known else None
-                comparison = compare_setting(key, desired, observed)
-                drift = observed is not None and not comparison.equal
-                settings_out.append({
-                    "key": key,
-                    "desired": desired,
-                    "observed": observed,
-                    "policy": policy.value,
-                    "update_attempts": (
-                        known.update_attempts
-                        if policy == SettingPolicy.ENFORCE
-                        and known
-                        and known.desired == desired
-                        else 0
-                    ),
-                    "drift": drift,
-                    "approximate": observed is not None and comparison.approximate,
-                })
-
-        # DB settings no longer in config (stale/removed keys)
-        for key, s in sorted(db_settings.items()):
-            if key not in config_keys:
-                settings_out.append({
-                    "key": key,
-                    "desired": s.desired,
-                    "observed": s.observed,
-                    "policy": s.policy.value,
-                    "update_attempts": (
-                        s.update_attempts if s.policy == SettingPolicy.ENFORCE else 0
-                    ),
-                    "drift": s.drift,
-                })
-
-        return {
-            "ok": True,
-            "data": {
-                "pubkey": node.pubkey,
-                "name": node.name,
-                "label": node.label,
-                "group": node.group,
-                "state": node.state.value,
-                "last_seen": node.last_seen.isoformat() if node.last_seen else None,
-                "last_connected": node.last_connected.isoformat() if node.last_connected else None,
-                "auth_required": node.auth_required,
-                "auth_cached": node.auth_cached,
-                "passwd_known": (
-                    "default" in config.secrets
-                    or any(node.pubkey.startswith(p) for p in config.secrets)
-                ),
-                "facts": node_facts,
-                "settings": settings_out,
-                "logs": logs,
-            },
-        }
+        report = await build_node_report(db, config, node)
+        return {"ok": True, "data": legacy_node(report, config)}
 
     if cmd == "sync":
         prefix = req.get("prefix")
@@ -373,60 +235,7 @@ async def _dispatch(
             return {"ok": False, "error": str(exc)}
 
     if cmd == "plan":
-        nodes = await db.get_all_nodes()
-        groups = {g.name: g for g in config.groups}
-
-        writes: list[dict[str, Any]] = []
-        audits: list[dict[str, Any]] = []
-        unknown: list[dict[str, Any]] = []
-
-        for node_cfg in config.nodes:
-            node = next((n for n in nodes if n.pubkey.startswith(node_cfg.pubkey_prefix)), None)
-            if node is None:
-                unknown.append({
-                    "pubkey": node_cfg.pubkey_prefix,
-                    "label": node_cfg.label,
-                    "mesh_name": "",
-                    "key": "",
-                    "desired": None,
-                    "known": None,
-                    "policy": "",
-                    "reason": "node not known to gateway/DB",
-                })
-                continue
-
-            group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
-            known_settings = {s.key: s for s in await db.get_settings(node.pubkey)}
-
-            for key in sorted(all_setting_keys(node_cfg, group_cfg, config.global_settings)):
-                policy = resolve_policy(key, node_cfg, group_cfg, config.global_settings)
-                desired = resolve_desired(key, node_cfg, group_cfg, config.global_settings)
-                if policy == SettingPolicy.SKIP or desired is None:
-                    continue
-
-                known = known_settings.get(key)
-                item = {
-                    "pubkey": node.pubkey,
-                    "label": node.label,
-                    "mesh_name": node.name,
-                    "key": key,
-                    "desired": desired,
-                    "known": known.observed if known else None,
-                    "policy": policy.value,
-                }
-
-                comparison = compare_setting(key, desired, known.observed if known else None)
-
-                if known is None or known.observed is None:
-                    unknown.append({**item, "reason": "not observed yet"})
-                elif comparison.equal:
-                    continue
-                elif policy == SettingPolicy.ENFORCE:
-                    writes.append({**item, "command": write_command_for_key(key, desired)})
-                elif policy == SettingPolicy.AUDIT:
-                    audits.append(item)
-
-        return {"ok": True, "data": {"writes": writes, "audits": audits, "unknown": unknown}}
+        return {"ok": True, "data": legacy_plan(await build_fleet_report(db, config))}
 
     if cmd == "contacts":
         return {"ok": True, "data": await wq.unfiled_contacts()}
@@ -509,67 +318,7 @@ async def _dispatch(
         }
 
     if cmd == "issues":
-        nodes = await db.get_all_nodes()
-        # drifted settings
-        drifted_records = await db.get_drifted_settings()
-        pubkey_to_node = {n.pubkey: n for n in nodes}
-        drifted = [
-            {
-                "node_pubkey": s.node_pubkey,
-                "label": (
-                    pubkey_to_node[s.node_pubkey].label if s.node_pubkey in pubkey_to_node else ""
-                ),
-                "key": s.key,
-                "desired": s.desired,
-                "observed": s.observed,
-                "policy": s.policy.value,
-                "update_attempts": (
-                    s.update_attempts if s.policy == SettingPolicy.ENFORCE else 0
-                ),
-            }
-            for s in drifted_records
-        ]
-        # nodes in a problematic state
-        _bad_states = {
-            NodeState.UNKNOWN, NodeState.OFFLINE, NodeState.CONFIGURING, NodeState.PARTIAL,
-        }
-        bad_state = [
-            {
-                "pubkey": n.pubkey,
-                "label": n.label,
-                "name": n.name,
-                "state": n.state.value,
-                "last_seen": n.last_seen.isoformat() if n.last_seen else None,
-            }
-            for n in nodes if n.state in _bad_states
-        ]
-        # config entries with no matching DB node
-        db_pubkeys = {n.pubkey for n in nodes}
-        ghosts = [
-            {"pubkey_prefix": nc.pubkey_prefix, "label": nc.label}
-            for nc in config.nodes
-            if not any(pk.startswith(nc.pubkey_prefix) for pk in db_pubkeys)
-        ]
-        # nodes that synced successfully with no ACL protection
-        _has_default_password = "default" in config.secrets
-        open_nodes = [
-            {"pubkey": n.pubkey, "label": n.label, "name": n.name}
-            for n in nodes
-            if n.state == NodeState.CONFIGURED
-            and not n.auth_required
-            and not n.auth_cached
-            and not _has_default_password
-            and not any(n.pubkey.startswith(p) for p in config.secrets)
-        ]
-        return {
-            "ok": True,
-            "data": {
-                "drifted": drifted,
-                "bad_state": bad_state,
-                "ghosts": ghosts,
-                "open_nodes": open_nodes,
-            },
-        }
+        return {"ok": True, "data": legacy_issues(await build_fleet_report(db, config))}
 
     if cmd == "suggest":
         from pathlib import Path as _Path
@@ -650,6 +399,7 @@ class Daemon:
         self._wq: WorkQueue | None = None
         self._messenger: Messenger | None = None
         self._server: asyncio.Server | None = None
+        self._api: ReadOnlyApi | None = None
         self._config_snapshot: dict[Path, FileSignature] = {}
         self._config_watch_task: asyncio.Task[None] | None = None
         self._work_queue_task: asyncio.Task[None] | None = None
@@ -714,6 +464,10 @@ class Daemon:
         )
         os.chmod(sock_path, 0o660)  # group-writable so mch group members can connect
         log.info("control socket listening at %s", sock_path)
+
+        if config.api.enabled:
+            self._api = ReadOnlyApi(config, self._db)
+            await self._api.start()
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -826,6 +580,8 @@ class Daemon:
             if self._server:
                 self._server.close()
                 await self._server.wait_closed()
+            if self._api:
+                await self._api.close()
             if self._gateway:
                 await self._gateway.disconnect()
             if self._db:

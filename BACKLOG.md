@@ -59,10 +59,11 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Next
 
-- Unify `status` / `plan` around an API-ready node report model.
-  - Goal: mchd should classify node state, desired-vs-observed settings, issues, and next actions
-    once, then let `mch status`, `mch plan`, future HTTP/OpenAPI endpoints, and mesh DM/channel
-    summaries render different views of the same model.
+- Extend the normalized fleet API model for dashboard requirements as they become concrete.
+  - `schema_version: 1` reporting and a loopback-only read-only HTTP transport landed
+    2026-05-25; `mch status` and `mch plan` now source their display data from that fleet model.
+  - Next goal: migrate mesh DM/channel summaries to the model and refine dashboard/map needs
+    without independently deriving health or actions.
   - Keep command verbs short and stable:
     - `mch status [NODE]` = current state and evidence.
     - `mch plan [NODE]` = what mchd would do next.
@@ -474,6 +475,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: Added the normalized read-only fleet report contract (`schema_version: 1`), routed
+  status/plan/issue interpretation through it, switched terminal status/plan views to consume the
+  fleet API model, and added an optional loopback-only HTTP JSON API for a future dashboard/map.
 - 2026-05-25: `mch logs` identifies node entries by configured label and pubkey prefix, and
   log timestamps now include relative ages in fleet and node-detail activity output.
 - 2026-05-25: YAML tab-indentation parse failures in config and secrets now report the

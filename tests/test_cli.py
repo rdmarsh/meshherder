@@ -434,6 +434,15 @@ def _detail(pubkey="aabbccdd" * 8, name="Tower", label="site-a", group=None,
     }}
 
 
+def _fleet_resp(nodes=None, plan=None):
+    return {"ok": True, "data": {
+        "schema_version": 1,
+        "nodes": nodes or [],
+        "issues": {"drifted": [], "bad_state": [], "ghosts": [], "open_nodes": []},
+        "plan": plan or {"writes": [], "audits": [], "unknown": []},
+    }}
+
+
 def _run_multi(args, *responses):
     """Invoke a CLI command with _rpc mocked to return responses in sequence."""
     runner = CliRunner()
@@ -445,6 +454,57 @@ def test_status_no_nodes():
     result = _run(["status"], _status_resp())
     assert result.exit_code == 0
     assert "0 nodes" in result.output
+
+
+def test_status_renders_canonical_fleet_api_response():
+    result = _run(["status"], _fleet_resp(nodes=[{
+        "pubkey": "aabbccdd" * 8,
+        "name": "Tower",
+        "label": "site-a",
+        "group": "repeaters",
+        "state": "configured",
+        "last_seen": None,
+        "last_connected": None,
+        "facts": {"ver": "v1.15.0", "neighbors": "4"},
+    }]))
+
+    assert result.exit_code == 0
+    assert "site-a" in result.output
+    assert "v1.15.0" in result.output
+    assert "4" in result.output
+
+
+def test_status_detail_renders_canonical_node_api_unknown_fact():
+    fleet = _fleet_resp(nodes=[{
+        "pubkey": "aabbccdd" * 8,
+        "name": "Tower",
+        "label": "site-a",
+        "group": None,
+        "state": "configured",
+        "last_seen": None,
+        "last_connected": None,
+        "facts": {},
+    }])
+    detail = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8,
+        "name": "Tower",
+        "label": "site-a",
+        "group": None,
+        "state": "configured",
+        "last_seen": None,
+        "last_connected": None,
+        "auth": {"cached": True, "password_known": True},
+        "fact_keys": ["ver"],
+        "facts": {},
+        "settings": [],
+        "logs": [],
+    }}
+
+    result = _run_multi(["status", "site-a"], fleet, detail)
+
+    assert result.exit_code == 0
+    assert "ver:" in result.output
+    assert "???" in result.output
 
 
 def test_status_lists_nodes():
@@ -742,6 +802,22 @@ def test_plan_shows_enforced_writes():
     assert "planned writes" in result.output
     assert "set name New" in result.output
     assert "site-a" in result.output
+
+
+def test_plan_renders_canonical_fleet_api_response():
+    result = _run(["plan"], _fleet_resp(plan={"writes": [{
+        "pubkey": "aabbccdd" * 8,
+        "label": "site-a",
+        "mesh_name": "Tower",
+        "key": "name",
+        "known": "Old",
+        "desired": "New",
+        "policy": "enforce",
+        "command": "set name New",
+    }], "audits": [], "unknown": []}))
+
+    assert result.exit_code == 0
+    assert "set name New" in result.output
 
 
 def test_plan_shows_audit_drift_without_write():
