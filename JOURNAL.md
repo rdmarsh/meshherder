@@ -72,6 +72,14 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   node and group overrides. Recorded the operator naming convention that `LABEL` is local while
   `MESH NAME` is the device-advertised name, and planned bounded successful-path history because
   field knowledge contained working repeater paths no longer present in the gateway contact data.
+- Deploying `0.8.1` exposed a shutdown problem: systemd stopped `mchd` during a sync after the
+  gateway switched to `915.800/250/SF11`, but the process remained in command timeouts until
+  systemd's 90-second stop deadline. The restarted daemon detected that radio and restored its
+  configured home tuple `915.075/125/SF9`; prompt cancellation and restore still need fixing.
+- Operator-reported known working routes were Acacia Gardens via `e260,5f6c,68be` and QH
+  Paterson via `e260,5f6c`, despite both current gateway contact entries being flood-routed.
+  This supports bounded successful-path history rather than treating the current contact path as
+  the only useful recovery candidate.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 

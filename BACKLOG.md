@@ -42,6 +42,13 @@ keep `DESIGN.md` for stable architecture notes.
   reset that contact to flood routing and retry once after timeout, then abort the rest of this
   node sync if flood also fails. Back off future scheduled attempts for repeatedly unreachable
   nodes rather than adding extra delay between commands that are already timing out.
+- Cancel an in-flight sync promptly during daemon shutdown and restore the gateway home radio
+  before exiting. A `2026-05-25` deploy caught `mchd` in a switched-radio sync;
+  `systemctl restart mchd` hit its 90-second stop timeout and startup had to restore the home
+  radio.
+- Randomize independent read-only fact/setting query order after a successful reachability probe
+  so recurring partial connections do not always fail on the same trailing keys. Keep
+  commissioning and dependent/write command sequences deterministic.
 
 ### Reporting And Commands
 
@@ -55,8 +62,11 @@ keep `DESIGN.md` for stable architecture notes.
   - Retain a bounded history of successful paths with last-success time and hop count, to allow
     one or two controlled recovery candidates before a single flood probe; prefer shorter recent
     paths because long routes are slower and more fragile.
-  - Add `mch path <label-or-prefix>`, `mch path reset <label-or-prefix>`, and eventually manual selection for known
-    repeater routes.
+  - Record operator-reported working candidates for investigation: Acacia Gardens previously
+    reached via `e260,5f6c,68be`, and QH Paterson via `e260,5f6c`, even though the gateway
+    currently reports both contacts as flood-routed.
+  - Add `mch path <label-or-prefix>`, `mch path reset <label-or-prefix>`, and eventually manual
+    selection for known repeater routes.
   - Log whether a probe used a stored path or flood fallback, and expose that result separately
     from the management radio tuple in status/API output.
   - Only automate stored-path-to-flood fallback for a reachability probe/read before the write
