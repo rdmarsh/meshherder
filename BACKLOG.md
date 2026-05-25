@@ -33,15 +33,29 @@ keep `DESIGN.md` for stable architecture notes.
   does not lose the route needed for the next sync. Consider known historical radio values as a
   recovery aid, including the last observed `radio` value as a candidate when desired radio
   differs and the configured reachability route no longer responds.
+- Apply command-registry timeout metadata to ordinary desired-state enforcement, not only
+  commissioning. `radio` already records a 180-second write timeout from live testing, but
+  `_process_settings()` currently sends `set radio` through the default 30-second path; this can
+  misreport a slow successful device write as failure.
+- Avoid spending minutes polling every fact and setting when a node is plainly unreachable.
+  Design a conservative failure threshold or reachability probe that aborts the remainder of a
+  node sync after repeated no-response timeouts, while preserving useful recovery attempts and
+  clear logs.
 
 ### Reporting And Commands
 
 - Add `mch ping [NODE]` to confirm whether a node is alive on selected radio settings.
+- Show the selected reachability method during live operations: gateway home radio versus
+  configured `via:` hop, and enough stored-contact routing information to diagnose whether a
+  no-response node needs a radio hop or a mesh route repair.
 - Add `mch discover` to find nearby nodes not yet present in gateway contacts.
 - Add an overall `mch health` view showing node health and required operator actions.
 - Make `mch suggest <node>` show differences from current configuration by default.
 - Consider latitude/longitude in suggestions so nearby nodes do not receive identical txdelay
   recommendations.
+- Keep `-v`/`--verbose` for commands that actively wait on mesh work (`sync`, commissioning, and
+  likely future `ping`/`discover`). Do not add a meaningless verbose mode to immediate read-only
+  rendering commands unless there is real diagnostic data to expose.
 
 ### Configuration And Commissioning Ideas
 

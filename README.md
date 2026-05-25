@@ -15,6 +15,7 @@ Think Ansible for your nodes, running continuously in the background.
 |---|---|
 | [`README.md`](README.md) | User-facing install, configuration, and command reference. |
 | [`BACKLOG.md`](BACKLOG.md) | Canonical active todo list, wishlist, deferred ideas, and non-goals. |
+| [`CHANGELOG.md`](CHANGELOG.md) | Released version history and operator-visible changes. |
 | [`DESIGN.md`](DESIGN.md) | Stable architecture notes and design rationale. |
 | [`DEVELOP.md`](DEVELOP.md) | Repeatable bench and development procedures. |
 | [`JOURNAL.md`](JOURNAL.md) | Dated implementation decisions and lessons learned. |

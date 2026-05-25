@@ -170,6 +170,14 @@ Gateway-owning operations are serialized by a high-level WorkQueue operation loc
 manual full sync, forced node sync, raw `mch exec`, and commissioning cannot overlap; manual CLI
 operations return `busy: <operation>` if another workflow owns the gateway/radio.
 
+For normal management traffic, a node is contacted on the gateway's current radio using its stored
+MeshCore contact route. If `NodeConfig.via` is set to a different radio tuple, mchd temporarily
+hops the gateway to that tuple before contacting the node and restores the gateway radio
+afterward. `via` is therefore reachability configuration, not automatic radio discovery. Nodes
+that have moved radio without an updated `via` value can repeatedly time out even though their
+desired settings are otherwise valid; recovery routing and historical-radio fallback remain
+future work.
+
 The hardcoded setting policy fallback is `audit`. A desired setting is read and compared by
 default, but mchd only writes to a node when the setting, node, group, or top-level `global:`
 block explicitly opts in with `policy: enforce` or `default_policy: enforce`. Desired values
