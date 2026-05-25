@@ -28,6 +28,12 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   import/export handling.
 - Clarified that collected settings are factual observations but remain distinct from facts in
   the model because they also carry desired values, policy, drift classification, and actions.
+- Identified avoidable mesh load when the same key is configured as both a fact and a setting:
+  the current sync path reads it in both passes. Future work should read once per cycle and fan
+  that observation out to both semantic views.
+- Captured the future messenger direction: explicit send/receive configuration, channel
+  selection, and operator-reviewed pending sender requests without confusing DM authorization
+  with managed-node login permissions.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 
