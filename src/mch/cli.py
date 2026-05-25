@@ -84,7 +84,8 @@ async def _request(
     on_progress: Any = None,
 ) -> dict[str, Any]:
     try:
-        reader, writer = await asyncio.open_unix_connection(socket_path, limit=2**22)  # 4MB — contacts response can exceed the 64KB default
+        # Contacts output can exceed asyncio's 64 KB default stream limit.
+        reader, writer = await asyncio.open_unix_connection(socket_path, limit=2**22)
     except (FileNotFoundError, ConnectionRefusedError):
         click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
         click.echo("  is mchd running?  try: mchd --help", err=True)
@@ -401,10 +402,18 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
         col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
         col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
-        def _srow(policy: str, key: str, observed: str, desired: str, drift: str) -> str:
-            return f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(observed, col_obs)}  {_wpad(desired, col_des)}  {drift}"
-        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "DRIFT"))
-        click.echo(_srow("------", "---", "-------", "--------", "-----"))
+        col_tries = max(
+            len("TRIES"), max(len(str(s.get("update_attempts", 0))) for s in settings)
+        )
+        def _srow(
+            policy: str, key: str, observed: str, desired: str, tries: str, drift: str
+        ) -> str:
+            return (
+                f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(observed, col_obs)}"
+                f"  {_wpad(desired, col_des)}  {tries:>{col_tries}}  {drift}"
+            )
+        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "TRIES", "DRIFT"))
+        click.echo(_srow("------", "---", "-------", "--------", "-----", "-----"))
         for s in settings:
             if s.get("observed") is None:
                 drift_flag = "???"
@@ -419,6 +428,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 s["key"],
                 _sv(s.get("observed")),
                 _sv(s.get("desired")),
+                str(s.get("update_attempts", 0)),
                 drift_flag,
             ))
         click.echo("")
@@ -453,14 +463,21 @@ def _render_issue_sections(
         key_w = max(len("KEY"), max(len(s["key"]) for s in drifted))
         des_w = max(len("DESIRED"), max(_wlen(_sv(s.get("desired"))) for s in drifted))
         obs_w = max(len("OBSERVED"), max(_wlen(_sv(s.get("observed"))) for s in drifted))
-        def _drow(pubkey: str, node: str, key: str, desired: str, observed: str, policy: str) -> str:
-            return f"  {pubkey:<12}  {node:<{node_w}}  {key:<{key_w}}  {_wpad(desired, des_w)}  {_wpad(observed, obs_w)}  {policy}"
-        click.echo(_drow("PUBKEY", "NODE", "KEY", "DESIRED", "OBSERVED", "POLICY"))
-        click.echo(_drow("------", "----", "---", "-------", "--------", "------"))
+        tries_w = max(len("TRIES"), max(len(str(s.get("update_attempts", 0))) for s in drifted))
+        def _drow(
+            pubkey: str, node: str, key: str, desired: str, observed: str, tries: str, policy: str
+        ) -> str:
+            return (
+                f"  {pubkey:<12}  {node:<{node_w}}  {key:<{key_w}}  {_wpad(desired, des_w)}"
+                f"  {_wpad(observed, obs_w)}  {tries:>{tries_w}}  {policy}"
+            )
+        click.echo(_drow("PUBKEY", "NODE", "KEY", "DESIRED", "OBSERVED", "TRIES", "POLICY"))
+        click.echo(_drow("------", "----", "---", "-------", "--------", "-----", "------"))
         for s in drifted:
             node = s.get("label") or s["node_pubkey"][:16]
             click.echo(_drow(_pk(s["node_pubkey"]), node, s["key"],
                              _sv(s.get("desired")), _sv(s.get("observed")),
+                             str(s.get("update_attempts", 0)),
                              s["policy"]))
         click.echo("")
 
@@ -916,7 +933,10 @@ def plan(ctx: click.Context, query: str | None) -> None:
         return max(_wlen("LABEL"), max((_wlen(_label(item)) for item in items), default=0))
 
     def _col_width(items: list[dict[str, Any]], header: str, field: str) -> int:
-        return max(_wlen(header), max((_wlen(_value(item.get(field))) for item in items), default=0))
+        return max(
+            _wlen(header),
+            max((_wlen(_value(item.get(field))) for item in items), default=0),
+        )
 
     if writes:
         click.echo("planned writes (next sync would enforce):")

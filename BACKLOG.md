@@ -23,6 +23,44 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Inbox
 
+### Operator Bugs
+
+- Fix config hot reload when `/etc/meshherder/config.yaml` is replaced with `cp`, not edited
+  in place.
+- Avoid emitting invalid `commission new` snippets when a human-friendly mesh name contains
+  spaces: local labels must be sanitized or validated at prompt time while the mesh name may
+  retain spaces.
+- When no groups are configured, do not default commissioning to `group: default`; this produces
+  a config that fails to load because `default` is undefined.
+- Include the chosen desired mesh name in the `commission new` config snippet.
+- Decide whether replacement commissioning should run an immediate sync after reboot rather
+  than requiring a follow-up `mch sync <prefix>`.
+- Persist "config node not visible to gateway" startup warnings in `mch logs`, not only systemd
+  output.
+- Give a clearer actionable error for YAML tab indentation mistakes in settings blocks.
+- Separate the radio used to reach a node from a changed desired radio, so enforcing a new radio
+  does not lose the route needed for the next sync. Consider known historical radio values as a
+  recovery aid.
+
+### Reporting And Commands
+
+- Add `mch ping [NODE]` to confirm whether a node is alive on selected radio settings.
+- Add `mch discover` to find nearby nodes not yet present in gateway contacts.
+- Add an overall `mch health` view showing node health and required operator actions.
+- Show node labels in fleet log output, align recent activity fields, and add relative ages next
+  to timestamps in logs.
+- Make `mch suggest <node>` show differences from current configuration by default.
+- Consider latitude/longitude in suggestions so nearby nodes do not receive identical txdelay
+  recommendations.
+
+### Configuration And Commissioning Ideas
+
+- Add operator-facing descriptions or generated YAML comments for enumerated setting values.
+  For `path.hash.mode`, document modes `0` through `2`, mark `3` reserved, and warn that
+  multi-byte advert hashes need firmware support across the forwarding network.
+- Clarify that the public key shown in new-node commissioning is generated output, not an
+  editable label or requested identity.
+- Explore optional vanity generated pubkey prefixes, with an explicit cost/time warning.
 - Decide whether `mch commission new` and `mch commission replace` should become explicit
   subcommands, with bare `mch commission` kept as an interactive wizard.
 - Decide where field metadata should live for validating MeshCore `set` values: local command
@@ -436,6 +474,9 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: Setting enforcement now persists an update-attempt count for the current desired
+  value and displays it as `TRIES` in node detail and drift summaries, exposing values repeatedly
+  failing to converge.
 - 2026-05-24: `mch commission new` now receives configured group names from the daemon scan,
   lists them in the wizard, defaults to `default` only when appropriate, and falls back to the first
   configured group when no `default` group exists. Covered by CLI tests for no groups, explicit

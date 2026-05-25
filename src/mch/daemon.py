@@ -20,16 +20,17 @@ import signal
 import sys
 from contextlib import suppress
 from dataclasses import fields
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from meshcore.events import EventType
 
 from mch.command_registry import write_command_for_key
 from mch.command_safety import blocked_exec_command
 from mch.config import Config
 from mch.config import load as load_config
 from mch.db import Database
-from meshcore.events import EventType
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
 from mch.models import NodeState, SettingPolicy
@@ -47,8 +48,6 @@ log = logging.getLogger(__name__)
 FileSignature = tuple[int, int] | None
 CONFIG_WATCH_INTERVAL_SECONDS = 10.0
 CONFIG_ERROR_EXIT = getattr(os, "EX_CONFIG", 78)
-
-UTC = timezone.utc
 
 
 async def _handle_advert(db: Database, pubkey: str) -> None:
@@ -155,6 +154,7 @@ async def _dispatch(
                 "desired": s.desired,
                 "observed": s.observed,
                 "policy": s.policy.value,
+                "update_attempts": s.update_attempts,
             }
             for s in drifted_records
         ]
@@ -226,7 +226,8 @@ async def _dispatch(
             return {"ok": False, "error": f"node {pubkey!r} not found"}
         raw_facts = await db.get_facts(node.pubkey)
         # show ??? for any fact in config that hasn't been collected yet
-        facts = {key: "???" for key in config.facts} | raw_facts
+        node_facts: dict[str, str | None] = {key: "???" for key in config.facts}
+        node_facts.update(raw_facts)
         db_settings = {s.key: s for s in await db.get_settings(node.pubkey)}
         logs = await db.get_logs(node.pubkey, limit=20)
 
@@ -257,6 +258,9 @@ async def _dispatch(
                     "desired": desired,
                     "observed": observed,
                     "policy": policy.value,
+                    "update_attempts": (
+                        known.update_attempts if known and known.desired == desired else 0
+                    ),
                     "drift": drift,
                     "approximate": observed is not None and comparison.approximate,
                 })
@@ -269,6 +273,7 @@ async def _dispatch(
                     "desired": s.desired,
                     "observed": s.observed,
                     "policy": s.policy.value,
+                    "update_attempts": s.update_attempts,
                     "drift": s.drift,
                 })
 
@@ -288,7 +293,7 @@ async def _dispatch(
                     "default" in config.secrets
                     or any(node.pubkey.startswith(p) for p in config.secrets)
                 ),
-                "facts": facts,
+                "facts": node_facts,
                 "settings": settings_out,
                 "logs": logs,
             },
@@ -480,6 +485,7 @@ async def _dispatch(
                 "desired": s.desired,
                 "observed": s.observed,
                 "policy": s.policy.value,
+                "update_attempts": s.update_attempts,
             }
             for s in drifted_records
         ]

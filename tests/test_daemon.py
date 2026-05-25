@@ -670,6 +670,7 @@ async def test_status_dispatch_returns_drifted_array(db, wq, config):
         desired="Managed by mch",
         observed="something else",
         policy=SettingPolicy.ENFORCE,
+        update_attempts=4,
         drift=True,
     )
     await db.upsert_setting(setting)
@@ -677,6 +678,31 @@ async def test_status_dispatch_returns_drifted_array(db, wq, config):
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
     assert len(resp["data"]["drifted"]) == 1
+    assert resp["data"]["drifted"][0]["update_attempts"] == 4
+
+
+async def test_node_dispatch_resets_displayed_attempts_for_new_desired_value(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key="owner.info",
+        desired="Old",
+        observed="old observed",
+        policy=SettingPolicy.ENFORCE,
+        update_attempts=4,
+    ))
+    config.nodes = [
+        NodeConfig(
+            pubkey_prefix="aabbccdd",
+            label="site-a",
+            settings={"owner.info": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
+        )
+    ]
+
+    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+
+    assert resp["data"]["settings"][0]["update_attempts"] == 0
 
 
 async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, config):

@@ -71,6 +71,7 @@ class SettingRecord:
     observed: str | None = None   # last value returned by `get <key>`
     last_checked: datetime | None = None
     last_set: datetime | None = None
+    update_attempts: int = 0      # writes attempted for the current desired value
     drift: bool = False           # True when observed != desired and policy != SKIP
 
 

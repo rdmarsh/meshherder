@@ -532,7 +532,7 @@ class WorkQueue:
                 if node_cfg and node_cfg.group else None
             )
 
-            global_cfg = self._config.global_settings
+            global_cfg: GroupConfig | None = self._config.global_settings
             if node_cfg is None:
                 # not in config — create a minimal NodeConfig so we can at least process it
                 from mch.config import NodeConfig as _NC
@@ -818,6 +818,7 @@ class WorkQueue:
         """Check and optionally enforce all settings. Returns (checked, enforced, drifted)."""
         checked = enforced = drifted = 0
         keys = all_setting_keys(node_cfg, group_cfg, global_cfg)
+        existing = {s.key: s for s in await self._db.get_settings(pubkey)}
 
         for key in sorted(keys):
             policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
@@ -838,6 +839,7 @@ class WorkQueue:
                 node.name = observed
             comparison = compare_setting(key, desired, observed)
             is_drift = desired is not None and not comparison.equal
+            previous = existing.get(key)
 
             setting = SettingRecord(
                 node_pubkey=pubkey,
@@ -846,6 +848,16 @@ class WorkQueue:
                 policy=policy,
                 observed=observed,
                 last_checked=datetime.now(UTC),
+                last_set=(
+                    previous.last_set
+                    if previous is not None and previous.desired == desired
+                    else None
+                ),
+                update_attempts=(
+                    previous.update_attempts
+                    if previous is not None and previous.desired == desired
+                    else 0
+                ),
                 drift=is_drift,
             )
 
@@ -853,7 +865,9 @@ class WorkQueue:
                 drifted += 1
                 if policy == SettingPolicy.ENFORCE:
                     log.info("  enforcing %s: observed=%r desired=%r", key, observed, desired)
+                    assert desired is not None
                     write_cmd = write_command_for_key(key, desired)
+                    setting.update_attempts += 1
                     set_res = await self._send_authed(
                         contact, write_cmd, node, node_cfg
                     )
