@@ -437,8 +437,9 @@ mch contacts                # nodes visible to the gateway but not yet in config
 ### Forcing a sync
 
 ```
-mch sync <prefix>  # sync one node right now (CLI waits for the result)
-mch sync           # sweep all nodes in the background
+mch sync <prefix>            # sync one node right now (CLI waits for the result)
+mch sync --verbose <prefix>  # sync one node and print each read/write wait as it runs
+mch sync                     # sweep all nodes in the background
 ```
 
 Use `mch sync <prefix>` after editing a node's desired settings in config — it applies the changes
@@ -564,6 +565,7 @@ mch prune --yes               Delete listed local DB state for retired nodes
 mch remove <label|prefix>     Delete one node's local DB state
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node immediately; CLI waits for the result
+mch sync --verbose <prefix>   Sync one node and stream live mesh-operation progress
 mch exec <node> <command>     Run a raw MeshCore CLI command on a node (e.g. ver, stats-radio)
 mch commission                Commission a fresh or replacement MeshCore node (interactive wizard)
 mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
@@ -589,6 +591,7 @@ reschedules the node back into normal rotation. Use this when you need a result 
 
 ```
 mch sync aabbccdd    # sync the node whose pubkey starts with aabbccdd; CLI waits for the result
+mch sync --verbose qh-wold   # print reads, timeouts, writes, and operations while waiting
 ```
 
 `mch sync` (no argument) starts a full sweep of every node in the background — the CLI returns
@@ -616,7 +619,7 @@ mchd: radio restored: 915.075/125/SF9
 mchd: '📡 Millbrook' done — facts:5 settings:1/1 enforced drift:0 ops:0/0 failed
 ```
 
-Per-node activity (settings changes, operation results, errors) is also stored in the local
+Per-node activity (settings changes, operation results, and fact/setting read failures) is stored in the local
 database and shown by `mch status <prefix>` and `mch logs`:
 
 ```
@@ -638,11 +641,16 @@ mch logs -n 100        # last 100 entries
 If a node shows as `partial`, `mch logs <prefix>` will show what failed:
 
 ```
-2026-05-17 14:38 [ERROR] operation failed: 'reboot': timeout — no response from node
+2026-05-25 17:03 [WARNING] read advert.interval failed: timeout - no response from node
 ```
 
-In this case `reboot` timed out because the node rebooted before it could reply — mark it
-`fire_and_forget: true` in your config and it will be treated as success.
+`TRIES` in status/issue output is write-attempt count, not read-timeout count. A timed-out
+enforced setting read cannot be compared or written and therefore does not increment `TRIES`;
+it appears in `mch logs` and in the final partial-sync result instead.
+
+The systemd journal remains the daemon/service diagnostic log, including startup, service
+failure, and radio/session debugging. `mch logs` is the node activity history; `mch status`
+reports mesh state. For daemon process health use `systemctl status mchd --no-pager`.
 
 ## Upgrade
 

@@ -98,6 +98,13 @@ def test_filter_contacts_name_case_insensitive():
     assert result[0]["adv_name"] == "Millbrook"
 
 
+def test_filter_contacts_lowercase_prefix_matches_mixed_case_name():
+    contacts = [_contact("4d0385b9d942f20c", "Acacia Gardens")]
+    result = _filter_contacts(contacts, "aca")
+    assert len(result) == 1
+    assert result[0]["adv_name"] == "Acacia Gardens"
+
+
 def test_filter_contacts_name_partial_match():
     result = _filter_contacts(CONTACTS, "hill")
     assert len(result) == 1
@@ -235,8 +242,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_fleet_api_release_version_is_0_7_0():
-    assert __version__ == "0.7.0"
+def test_verbose_sync_release_version_is_0_7_1():
+    assert __version__ == "0.7.1"
 
 
 def _run(args, rpc_response):
@@ -979,6 +986,24 @@ def test_sync_all_nodes():
 def test_sync_single_node():
     result = _run(["sync", "aabbcc"], {"ok": True, "data": "synced 'Tower' (aabbccdd)"})
     assert result.exit_code == 0
+    assert "synced" in result.output
+
+
+def test_sync_single_node_verbose_prints_daemon_progress():
+    def fake_rpc(socket, payload, timeout=30, on_progress=None):
+        assert payload == {"cmd": "sync", "prefix": "aabbcc", "verbose": True}
+        assert on_progress is not None
+        on_progress("reading fact: ver")
+        on_progress("fact ver failed: timeout")
+        return {"ok": True, "data": "synced 'Tower' (aabbccdd)"}
+
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=fake_rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "sync", "--verbose", "aabbcc"])
+
+    assert result.exit_code == 0
+    assert "reading fact: ver" in result.output
+    assert "fact ver failed: timeout" in result.output
     assert "synced" in result.output
 
 

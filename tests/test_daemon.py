@@ -569,6 +569,34 @@ async def test_sync_dispatch_with_prefix_runs_node(db, wq, config):
     wq.run_node.assert_awaited_once_with("aabbccdd" * 8)
 
 
+async def test_sync_dispatch_verbose_streams_node_progress(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    async def run_node(pubkey, *, progress=None):
+        assert pubkey == node.pubkey
+        assert progress is not None
+        await progress("reading fact: ver")
+        return NodeResult(pubkey=node.pubkey, name=node.name)
+
+    wq.run_node = AsyncMock(side_effect=run_node)
+    writer = MagicMock()
+    writer.drain = AsyncMock()
+
+    resp = await _dispatch(
+        {"cmd": "sync", "prefix": "aabbcc", "verbose": True},
+        wq,
+        db,
+        config,
+        writer,
+    )
+
+    assert resp["ok"] is True
+    writer.write.assert_called_once_with(
+        b'{"type": "progress", "msg": "reading fact: ver"}\n'
+    )
+
+
 async def test_sync_dispatch_reports_partial_result(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.PARTIAL)
     await db.upsert_node(node)

@@ -35,6 +35,20 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   selection, and operator-reviewed pending sender requests without confusing DM authorization
   with managed-node login permissions.
 
+## 2026-05-25 - Verbose Forced Sync And Operational Logs
+
+- Released as `0.7.1`: `mch sync --verbose <node>` streams per-command progress while a
+  foreground sync waits on slow or unreachable mesh responses.
+- Fact and setting read failures are now persisted as node activity so `mch logs <node>` explains
+  a partial sync without requiring access to `journalctl`. The journal remains the daemon/service
+  diagnostic stream; systemd process state is intentionally not mixed into mesh status.
+- `TRIES` means enforced write attempts. A setting read timeout never reaches comparison/write
+  and correctly does not increment that value.
+- The observed `mch contacts acai` miss was not a case-sensitivity defect: contact-name matching
+  already ignores case, but `acai` is not a contiguous substring of `Acacia`.
+- Kept a full messaging inbox outside project scope; messenger work remains focused on operational
+  commands, notifications, and explicit authorization review.
+
 ## 2026-05-24 - Status view improvements and passive last_seen
 
 **`clock` bare-command fix**: `_collect_facts()` was sending `get clock` instead of bare

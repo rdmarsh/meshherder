@@ -202,12 +202,28 @@ async def _dispatch(
                 return {"ok": False, "error": str(exc)}
             if node is None:
                 return {"ok": False, "error": f"no node found matching {prefix!r}"}
+            sync_progress_cb = None
+            if writer is not None and req.get("verbose"):
+                async def sync_progress_cb(msg: str) -> None:
+                    try:
+                        writer.write(
+                            (json.dumps({"type": "progress", "msg": msg}) + "\n").encode()
+                        )
+                        await writer.drain()
+                    except (ConnectionResetError, BrokenPipeError):
+                        raise ClientDisconnected("sync client disconnected") from None
             try:
-                result = await wq.run_node(node.pubkey)
+                if sync_progress_cb is None:
+                    result = await wq.run_node(node.pubkey)
+                else:
+                    result = await wq.run_node(node.pubkey, progress=sync_progress_cb)
                 return _sync_result_response(result)
             except OperationBusyError as exc:
                 return {"ok": False, "error": str(exc)}
             except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            except ClientDisconnected as exc:
+                log.info("%s", exc)
                 return {"ok": False, "error": str(exc)}
         # no prefix — full cycle in background
         try:

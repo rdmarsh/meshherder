@@ -31,7 +31,8 @@ keep `DESIGN.md` for stable architecture notes.
   output.
 - Separate the radio used to reach a node from a changed desired radio, so enforcing a new radio
   does not lose the route needed for the next sync. Consider known historical radio values as a
-  recovery aid.
+  recovery aid, including the last observed `radio` value as a candidate when desired radio
+  differs and the configured reachability route no longer responds.
 
 ### Reporting And Commands
 
@@ -541,6 +542,10 @@ keep `DESIGN.md` for stable architecture notes.
   - Current DM commands should remain read-only/status-oriented unless a clear operator need
     justifies write actions.
 
+- Do not turn Mesh Herder into a general message inbox/reply client.
+  - Retain focused operational DM commands, authorization requests, and notifications; a full
+    messaging client is unrelated product scope and creates ongoing UI/storage responsibilities.
+
 - Do not put dangerous identity/radio/reset commands into ordinary desired-state enforcement.
   - Keep those in deliberate commissioning or replacement flows.
 
@@ -549,6 +554,10 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: Released `0.7.1` with `mch sync --verbose <node>` streaming progress during
+  foreground node syncs; fact and setting read failures are now retained in `mch logs`.
+  Confirmed `mch contacts` name filtering is already case-insensitive (`aca` matches `Acacia`;
+  `acai` is a different substring).
 - 2026-05-25: Released `0.7.0` for the normalized fleet report model and optional read-only HTTP
   API, with command-shaped `/health`, `/status`, `/issues`, `/plan`, and `/logs` routes.
 - 2026-05-25: Added the normalized read-only fleet report contract (`schema_version: 1`), routed
