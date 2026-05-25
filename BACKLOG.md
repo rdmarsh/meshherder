@@ -203,6 +203,17 @@ keep `DESIGN.md` for stable architecture notes.
     non-zero values, or emit `lat: 0` / `lon: 0` as explicit placeholders — choice TBD.
   - When implemented, also write the values to the node via `set lat` / `set lon` during
     commissioning (these don't require reboot per the MeshCore CLI reference).
+  - Add optional home-location proximity warnings, using an operator-friendly centre plus radius
+    rather than a manually calculated bounding box, for example:
+    ```yaml
+    location:
+      center: -33.73,150.90
+      warn_outside_km: 20
+    ```
+    Warn when entered or observed coordinates lie outside that radius. Keep ordinary geographic
+    bounds (`lat` -90..90, `lon` -180..180) as hard validation; do not reject intentional
+    out-of-area deployments. A raw bounding-box form can be considered later for unusual
+    non-circular deployment areas.
   - **Name length interacts with location**: per the MeshCore CLI reference, a node's
     advertised name is capped at **32 bytes when no location is set, dropping to 24 bytes
     once `lat`/`lon` are non-zero** (the 8 bytes go to the lat+lon floats in the advert).
