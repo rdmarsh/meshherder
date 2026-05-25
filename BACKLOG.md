@@ -415,6 +415,11 @@ keep `DESIGN.md` for stable architecture notes.
   model as existing CLI-triggered sync.
 - Channel or room-server reporting for fleet status.
 - Web UI with node map, using stored lat/lon facts.
+- Add an OpenAPI description when dashboard work starts.
+  - Define the read-only `/health`, `/status`, `/status/<node>`, `/issues`, `/plan`, and
+    `/logs` contracts once the dashboard's data requirements are concrete.
+  - Use it to document response shapes and, if useful, generate typed frontend client code.
+  - Do not add Swagger UI or schema-generation dependencies before there is a frontend consumer.
 - Firmware age reporting from collected `ver` facts.
 - Docker image once packaging and runtime paths settle.
 - Bluetooth connection support through `meshcore_py.create_ble`.
