@@ -380,17 +380,27 @@ def status(ctx: click.Context, query: str | None) -> None:
 
 @cli.command()
 @click.argument("node", required=False)
+@click.option("--verbose", "-v", is_flag=True, help="Stream progress for a single-node sync.")
 @click.pass_context
-def sync(ctx: click.Context, node: str | None) -> None:
+def sync(ctx: click.Context, node: str | None, verbose: bool) -> None:
     """Trigger an immediate sync cycle, or sync a single node.
 
     NODE: pubkey prefix, label substring, or name substring. Omit to sync all nodes.
     """
+    if verbose and not node:
+        raise click.UsageError("--verbose requires NODE; full-fleet sync runs in the background")
     payload: dict[str, Any] = {"cmd": "sync"}
     if node:
         payload["prefix"] = node
+        if verbose:
+            payload["verbose"] = True
         # inline single-node sync can take many per-operation timeouts (30s each)
-        resp = _rpc(ctx.obj["socket"], payload, timeout=300)
+        resp = _rpc(
+            ctx.obj["socket"],
+            payload,
+            timeout=300,
+            on_progress=(lambda msg: click.echo(f"  {msg}")) if verbose else None,
+        )
     else:
         resp = _rpc(ctx.obj["socket"], payload)
     data = _check(resp)

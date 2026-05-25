@@ -67,6 +67,12 @@ audit records, validation, and safe concurrency behavior first. In particular, e
 settings or selecting new facts to collect should present a configuration diff for review before
 applying it; it must not turn an unauthenticated local status API into a configuration editor.
 
+Keep service diagnostics distinct from node activity. The systemd journal owns daemon startup,
+process failures, and detailed transport/radio debugging. The database-backed `/logs` and
+`mch logs` views retain operator-relevant node history, including writes, operations, drift, and
+read failures that explain a partial sync. `mch status` reports mesh state; it is not a
+replacement for `systemctl status mchd`.
+
 ## Command metadata
 
 MeshCore command knowledge should live in a small curated registry for commands mch actually uses,

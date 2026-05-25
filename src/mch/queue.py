@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -46,6 +46,12 @@ from mch.models import (
 )
 
 log = logging.getLogger(__name__)
+ProgressCallback = Callable[[str], Awaitable[None]] | None
+
+
+async def _progress(callback: ProgressCallback, message: str) -> None:
+    if callback is not None:
+        await callback(message)
 
 
 # ---------------------------------------------------------------------------
@@ -513,7 +519,7 @@ class WorkQueue:
                 await self._db.set_next_sync(node.pubkey, now + timedelta(seconds=delay))
                 log.debug("rescheduled %r in %.0fs", node.pubkey[:12], delay)
 
-    async def run_node(self, prefix: str) -> NodeResult:
+    async def run_node(self, prefix: str, *, progress: ProgressCallback = None) -> NodeResult:
         """
         Force an immediate sync of a single node identified by pubkey prefix.
 
@@ -560,7 +566,9 @@ class WorkQueue:
                 node_cfg = _NC(pubkey_prefix=pubkey[:8])
                 global_cfg = None
 
-            result = await self._process_node(node_cfg, group_cfg, global_cfg, contact)
+            result = await self._process_node(
+                node_cfg, group_cfg, global_cfg, contact, progress=progress
+            )
 
             interval_s = self._config.scheduler.sync_interval_days * 86400
             jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
@@ -658,12 +666,15 @@ class WorkQueue:
         group_cfg: GroupConfig | None,
         global_cfg: GroupConfig | None,
         contact: dict[str, Any],
+        *,
+        progress: ProgressCallback = None,
     ) -> NodeResult:
         pubkey = contact["public_key"]
         name = contact.get("adv_name", node_cfg.label)
         result = NodeResult(pubkey=pubkey, name=name)
 
         log.info("processing node %r (%s…)", name, pubkey[:12])
+        await _progress(progress, f"syncing {name!r} ({pubkey[:12]})")
 
         # ensure node exists in db
         node = await self._db.get_node(pubkey) or Node(pubkey=pubkey, name=name)
@@ -690,12 +701,18 @@ class WorkQueue:
                     "  hopping to %.3f/%d/SF%d for %r",
                     node_radio.freq, node_radio.bw, node_radio.sf, name,
                 )
+                await _progress(
+                    progress,
+                    f"hopping radio to {node_radio.freq:.3f}/{node_radio.bw:g}/SF{node_radio.sf}",
+                )
                 saved_radio = await self._gateway.hop_radio(
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
                 )
 
             # collect facts
-            result.facts_collected = await self._collect_facts(pubkey, contact, node, node_cfg)
+            result.facts_collected = await self._collect_facts(
+                pubkey, contact, node, node_cfg, progress=progress
+            )
 
             # enforce / audit settings
             (
@@ -706,7 +723,7 @@ class WorkQueue:
                 enforce_drifted,
                 enforce_failed,
             ) = await self._process_settings(
-                pubkey, contact, node_cfg, group_cfg, global_cfg, node
+                pubkey, contact, node_cfg, group_cfg, global_cfg, node, progress=progress
             )
             result.settings_checked = s_checked
             result.settings_enforced = s_enforced
@@ -717,7 +734,9 @@ class WorkQueue:
 
             # seed operations from config into DB, then run what's pending
             await self._seed_operations(pubkey, node_cfg)
-            op_run, op_failed = await self._run_operations(pubkey, contact, node_cfg, node)
+            op_run, op_failed = await self._run_operations(
+                pubkey, contact, node_cfg, node, progress=progress
+            )
             result.operations_run = op_run
             result.operations_failed = op_failed
 
@@ -778,6 +797,11 @@ class WorkQueue:
             s_enforced, s_checked, s_drifted, enforce_drifted, s_failed,
             op_run, op_failed,
         )
+        await _progress(
+            progress,
+            f"done: facts={result.facts_collected} settings={s_checked} "
+            f"drift={s_drifted} read-failed={s_failed} ops-failed={op_failed}",
+        )
         return result
 
     async def _mark_sync_incomplete(self, node: Node, message: str) -> None:
@@ -834,13 +858,20 @@ class WorkQueue:
         return result
 
     async def _collect_facts(
-        self, pubkey: str, contact: dict[str, Any], node: Node, node_cfg: NodeConfig
+        self,
+        pubkey: str,
+        contact: dict[str, Any],
+        node: Node,
+        node_cfg: NodeConfig,
+        *,
+        progress: ProgressCallback = None,
     ) -> int:
         """Run all declared fact commands and store results."""
         collected = 0
         for key in self._config.facts:
             # neighbors, ver/board, and clock are bare commands; everything else is `get <key>`
             cmd = read_command_for_key(key)
+            await _progress(progress, f"reading fact: {key}")
             res = await self._send_authed(contact, cmd, node, node_cfg)
             if res.success and res.text:
                 if key == "neighbors":
@@ -856,7 +887,10 @@ class WorkQueue:
                 ))
                 collected += 1
             else:
-                log.debug("fact %r failed for %s: %s", key, pubkey[:12], res.error)
+                error = res.error or "no response"
+                log.debug("fact %r failed for %s: %s", key, pubkey[:12], error)
+                await self._db.write_log(pubkey, "WARNING", f"fact {key} failed: {error}")
+                await _progress(progress, f"fact {key} failed: {error}")
         return collected
 
     async def _process_settings(
@@ -867,6 +901,8 @@ class WorkQueue:
         group_cfg: GroupConfig | None,
         global_cfg: GroupConfig | None,
         node: Node,
+        *,
+        progress: ProgressCallback = None,
     ) -> tuple[int, int, int, int, int, int]:
         """Check settings, including reportable drift and enforce-blocking failures."""
         checked = enforced = drifted = read_failed = 0
@@ -882,9 +918,13 @@ class WorkQueue:
                 continue
 
             read_cmd = read_command_for_key(key)
+            await _progress(progress, f"reading setting: {key}")
             res = await self._send_authed(contact, read_cmd, node, node_cfg)
             if not res.success:
-                log.warning("get %s failed for %s: %s", key, pubkey[:12], res.error)
+                error = res.error or "no response"
+                log.warning("get %s failed for %s: %s", key, pubkey[:12], error)
+                await self._db.write_log(pubkey, "WARNING", f"read {key} failed: {error}")
+                await _progress(progress, f"setting {key} read failed: {error}")
                 read_failed += 1
                 if policy == SettingPolicy.ENFORCE:
                     enforced_read_failed += 1
@@ -925,6 +965,7 @@ class WorkQueue:
                 if policy == SettingPolicy.ENFORCE:
                     enforced_drifted += 1
                     log.info("  enforcing %s: observed=%r desired=%r", key, observed, desired)
+                    await _progress(progress, f"enforcing setting: {key}")
                     assert desired is not None
                     write_cmd = write_command_for_key(key, desired)
                     setting.update_attempts += 1
@@ -943,11 +984,13 @@ class WorkQueue:
                         await self._db.write_log(
                             pubkey, "INFO", f"set {key}={desired!r} (was {observed!r})"
                         )
+                        await _progress(progress, f"setting {key} updated")
                     else:
                         log.warning("  set %s failed: %s", key, set_res.error)
                         await self._db.write_log(
                             pubkey, "ERROR", f"set {key} failed: {set_res.error}"
                         )
+                        await _progress(progress, f"setting {key} write failed: {set_res.error}")
                 else:
                     log.info(
                         "  drift: %s observed=%r desired=%r (policy=%s — not enforcing)",
@@ -957,6 +1000,7 @@ class WorkQueue:
                         pubkey, "WARNING",
                         f"drift: {key} observed={observed!r} desired={desired!r} ({policy.value})"
                     )
+                    await _progress(progress, f"setting {key} drifted ({policy.value} only)")
 
             await self._db.upsert_setting(setting)
 
@@ -992,6 +1036,8 @@ class WorkQueue:
         contact: dict[str, Any],
         node_cfg: NodeConfig,
         node: Node,
+        *,
+        progress: ProgressCallback = None,
     ) -> tuple[int, int]:
         """Run pending one-shot operations. Returns (run, failed)."""
         run = failed = 0
@@ -1001,6 +1047,7 @@ class WorkQueue:
 
         for op in pending:
             log.info("  operation: %r", op.command)
+            await _progress(progress, f"running operation: {op.command}")
             faf = op_cfg_by_cmd.get(op.command, OperationConfig()).fire_and_forget
             res = await self._send_authed(contact, op.command, node, node_cfg)
             op.run_at = datetime.now(UTC)

@@ -896,6 +896,33 @@ async def test_run_node_forces_immediate_sync(db):
     assert result.reachable is True
 
 
+async def test_run_node_verbose_reports_fact_and_setting_progress(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    node = Node(pubkey="aabbccdd1122", name="TestNode")
+    await db.upsert_node(node)
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [_contact("aabbccdd1122")]
+    messages: list[str] = []
+
+    async def progress(message: str) -> None:
+        messages.append(message)
+
+    await wq.run_node("aabbcc", progress=progress)
+
+    assert "reading fact: ver" in messages
+    assert "fact ver failed: timeout" in messages
+    assert "reading setting: powersaving" in messages
+    assert "setting powersaving read failed: timeout" in messages
+
+
 async def test_run_node_odd_prefix_rejected(db):
     """Prefix with an odd number of hex chars is rejected (convention: must be even)."""
     cfg = _make_config()
@@ -1024,6 +1051,37 @@ async def test_cycle_state_partial_when_setting_cannot_be_read(db):
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.PARTIAL
     assert results[0].settings_failed == 1
+
+
+async def test_setting_read_timeout_is_retained_in_activity_log(db):
+    node_cfg = _node(
+        pubkey="aabbcc", label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("read powersaving failed: timeout" in entry["message"] for entry in logs)
+
+
+async def test_fact_read_timeout_is_retained_in_activity_log(db):
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("fact ver failed: timeout" in entry["message"] for entry in logs)
 
 
 async def test_cycle_state_configured_when_audit_setting_cannot_be_read(db):
