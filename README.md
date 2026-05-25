@@ -485,6 +485,35 @@ GET /api/v1/plan
 GET /api/v1/logs?node=<label-or-prefix>&limit=50
 ```
 
+Example queries:
+
+```bash
+# Confirm the local API is responding.
+curl -s http://127.0.0.1:8743/healthz
+
+# Fetch the fleet report, including summary counts, nodes, issues, and planned work.
+curl -s http://127.0.0.1:8743/api/v1/fleet
+
+# Fetch one node by label or public-key prefix.
+curl -s http://127.0.0.1:8743/api/v1/nodes/SiteA-Rooftop
+curl -s http://127.0.0.1:8743/api/v1/nodes/aabbccdd
+
+# Fetch issue and action views directly.
+curl -s http://127.0.0.1:8743/api/v1/issues
+curl -s http://127.0.0.1:8743/api/v1/plan
+
+# Fetch the most recent logs, or logs for one node.
+curl -s 'http://127.0.0.1:8743/api/v1/logs?limit=20'
+curl -s 'http://127.0.0.1:8743/api/v1/logs?node=SiteA-Rooftop&limit=20'
+```
+
+Add `| jq` to any example for readable formatted output when `jq` is installed:
+
+```bash
+curl -s http://127.0.0.1:8743/api/v1/fleet | jq
+curl -s http://127.0.0.1:8743/api/v1/nodes/SiteA-Rooftop | jq '.health, .facts, .settings'
+```
+
 `/api/v1/fleet` returns `schema_version: 1`, a health summary, nodes, unresolved configured
 nodes, issues, and planned work. Each node includes `health`, configured `fact_keys`, collected `facts` such as
 `lat`/`lon`, and settings classified with `status` (`ok`, `nominal`, `drift`, `unknown`,
