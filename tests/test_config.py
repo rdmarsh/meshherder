@@ -71,6 +71,14 @@ def test_load_records_config_and_secrets_paths(tmp_path):
     assert cfg.secrets_path == str(secrets.resolve())
 
 
+def test_tab_indentation_in_config_has_actionable_error(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("nodes:\n\t- pubkey_prefix: aabbccdd\n")
+
+    with pytest.raises(ValueError, match="replace tabs with spaces"):
+        load(path, load_secrets=False)
+
+
 def test_global_settings_block_parses_like_group(tmp_path):
     p = _write_config(tmp_path, """\
         global:
@@ -215,6 +223,16 @@ def test_corrupt_secrets_raises_value_error(tmp_path):
     secrets.write_text(": bad [yaml\n")
     secrets.chmod(0o600)
     with pytest.raises(ValueError, match="not valid YAML"):
+        load(p, secrets_path=secrets)
+
+
+def test_tab_indentation_in_secrets_has_actionable_error(tmp_path):
+    p = _write_config(tmp_path, "gateway: {}\n")
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("nodes:\n\taabbccdd: password\n")
+    secrets.chmod(0o600)
+
+    with pytest.raises(ValueError, match="replace tabs with spaces"):
         load(p, secrets_path=secrets)
 
 

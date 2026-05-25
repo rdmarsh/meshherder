@@ -79,6 +79,17 @@ class _NoDuplicateKeysLoader(yaml.SafeLoader):
                 seen.add(key)
         return super().construct_mapping(node, deep=deep)
 
+
+def _yaml_error(kind: str, exc: yaml.YAMLError) -> ValueError:
+    """Format parse failures with an actionable hint for common YAML mistakes."""
+    detail = str(exc)
+    if "\\t" in detail or "tab" in detail.lower():
+        return ValueError(
+            f"{kind} file contains a tab character in YAML indentation; "
+            "replace tabs with spaces"
+        )
+    return ValueError(f"{kind} file is not valid YAML: {detail}")
+
 log = logging.getLogger(__name__)
 
 
@@ -198,7 +209,7 @@ def load(
     try:
         raw = yaml.load(config_path.read_text(), Loader=_NoDuplicateKeysLoader)
     except yaml.YAMLError as exc:
-        raise ValueError(f"config file is not valid YAML: {exc}") from exc
+        raise _yaml_error("config", exc) from exc
 
     if not isinstance(raw, dict):
         kind = type(raw).__name__ if raw is not None else "empty file"
@@ -504,7 +515,7 @@ def _load_secrets(path: Path) -> dict[str, NodeSecrets]:
     try:
         raw = yaml.load(path.read_text(), Loader=_NoDuplicateKeysLoader) or {}
     except yaml.YAMLError as exc:
-        raise ValueError(f"secrets file is not valid YAML: {exc}") from exc
+        raise _yaml_error("secrets", exc) from exc
     if not isinstance(raw, dict):
         raise ValueError(
             f"secrets file must be a YAML mapping, got {type(raw).__name__}"

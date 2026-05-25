@@ -29,7 +29,6 @@ keep `DESIGN.md` for stable architecture notes.
   than requiring a follow-up `mch sync <prefix>`.
 - Persist "config node not visible to gateway" startup warnings in `mch logs`, not only systemd
   output.
-- Give a clearer actionable error for YAML tab indentation mistakes in settings blocks.
 - Separate the radio used to reach a node from a changed desired radio, so enforcing a new radio
   does not lose the route needed for the next sync. Consider known historical radio values as a
   recovery aid.
@@ -477,6 +476,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: YAML tab-indentation parse failures in config and secrets now report the
+  actionable fix: replace indentation tabs with spaces.
 - 2026-05-25: Config/secrets hot reload now detects timestamp-preserving replacements and
   atomic file swaps, rather than relying only on modification time and file size.
 - 2026-05-25: `mch commission new` now sanitizes local labels while retaining human-friendly
