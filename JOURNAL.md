@@ -14,6 +14,9 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   the model; display-only CLI `status` and `plan` now request the fleet model directly.
 - Added an optional HTTP JSON transport for read-only local consumers. It binds only to loopback
   addresses until authentication is designed and includes no write endpoints.
+- Revised the public HTTP route vocabulary to match the existing read-only CLI commands:
+  `/health`, `/status`, `/status/<node>`, `/issues`, `/plan`, and `/logs`. Kept the originally
+  published `/api/v1/...` and `/healthz` paths as aliases rather than breaking early consumers.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 
