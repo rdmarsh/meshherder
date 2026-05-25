@@ -698,14 +698,17 @@ class WorkQueue:
             gw_freq = self._gateway.info.get("radio_freq")
             if node_radio is not None and node_radio.freq != gw_freq:
                 log.info(
-                    "  hopping to %.3f/%d/SF%d for %r",
+                    "  switching gateway radio to %.3f/%d/SF%d for %r",
                     node_radio.freq, node_radio.bw, node_radio.sf, name,
                 )
                 await _progress(
                     progress,
-                    f"hopping radio to {node_radio.freq:.3f}/{node_radio.bw:g}/SF{node_radio.sf}",
+                    (
+                        f"switching gateway radio to "
+                        f"{node_radio.freq:.3f}/{node_radio.bw:g}/SF{node_radio.sf}"
+                    ),
                 )
-                saved_radio = await self._gateway.hop_radio(
+                saved_radio = await self._gateway.switch_radio_temporarily(
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
                 )
 

@@ -31,7 +31,7 @@ meshcore-cli -s /dev/cu.usbserial-XXXX -b 115200 -r get radio
 meshcore-cli -s /dev/cu.usbserial-XXXX -b 115200 -r get public.key
 ```
 
-Factory-frequency discovery can be done manually by hopping the attached node, discovering, then
+Factory-frequency discovery can be done manually by switching the attached node radio, discovering, then
 restoring the test mesh frequency. Be careful: `set radio` changes the attached node's radio.
 
 ```bash

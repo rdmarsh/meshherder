@@ -46,8 +46,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 - Add `mch ping [NODE]` to confirm whether a node is alive on selected radio settings.
 - Show the selected reachability method during live operations: gateway home radio versus
-  configured `via:` hop, and enough stored-contact routing information to diagnose whether a
-  no-response node needs a radio hop or a mesh route repair.
+  configured `via:` radio-tuple switch, plus enough stored-contact path information to diagnose
+  whether a no-response node needs a different radio tuple or a MeshCore path repair.
 - Add `mch discover` to find nearby nodes not yet present in gateway contacts.
 - Add an overall `mch health` view showing node health and required operator actions.
 - Make `mch suggest <node>` show differences from current configuration by default.
@@ -370,7 +370,9 @@ keep `DESIGN.md` for stable architecture notes.
 - Split reachability radio from desired node radio.
   - `NodeConfig.via` currently describes both how the gateway reaches a node and what radio config
     replacement commissioning should push.
-  - Keep `via` for gateway/routing reachability.
+  - Rename `via` as part of this work: in MeshCore, hop/path refers to packet routing, while this
+    field means "temporarily use this radio tuple." A name such as `on_radio` or
+    `management_radio` would avoid conflating those concepts.
   - Add a distinct desired node radio model before bridge-mediated management gets more complex.
 
 - Add named database migrations.
@@ -568,6 +570,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: Released `0.7.2` correcting operator-visible terminology: switching the gateway
+  radio tuple for management is distinct from a MeshCore routing hop/path.
 - 2026-05-25: Released `0.7.1` with `mch sync --verbose <node>` streaming progress during
   foreground node syncs; fact and setting read failures are now retained in `mch logs`.
   Confirmed `mch contacts` name filtering is already case-insensitive (`aca` matches `Acacia`;

@@ -170,13 +170,21 @@ Gateway-owning operations are serialized by a high-level WorkQueue operation loc
 manual full sync, forced node sync, raw `mch exec`, and commissioning cannot overlap; manual CLI
 operations return `busy: <operation>` if another workflow owns the gateway/radio.
 
-For normal management traffic, a node is contacted on the gateway's current radio using its stored
-MeshCore contact route. If `NodeConfig.via` is set to a different radio tuple, mchd temporarily
-hops the gateway to that tuple before contacting the node and restores the gateway radio
-afterward. `via` is therefore reachability configuration, not automatic radio discovery. Nodes
-that have moved radio without an updated `via` value can repeatedly time out even though their
-desired settings are otherwise valid; recovery routing and historical-radio fallback remain
-future work.
+### MeshCore hop/path terminology
+
+In MeshCore, a **hop** is traversal through a repeater in a packet path. It is not a change of
+frequency, bandwidth, spreading factor, or coding rate. The upstream MeshCore FAQ documents
+zero-hop versus flooded adverts, a firmware hop limit, and packet paths represented by repeater
+path hashes:
+<https://github.com/meshcore-dev/MeshCore/blob/main/docs/faq.md>.
+
+For normal management traffic, a node is contacted on the gateway's current radio tuple using its
+stored MeshCore contact path. If `NodeConfig.via` is set to a different radio tuple, mchd
+temporarily switches the gateway radio tuple before contacting the node and restores the home
+tuple afterward. The existing `via` field is reachability-radio configuration, not a MeshCore
+path; its name should eventually be made less ambiguous. Nodes that have moved radio without an
+updated management-radio value can repeatedly time out even though their desired settings are
+otherwise valid; recovery path inspection and historical-radio fallback remain future work.
 
 The hardcoded setting policy fallback is `audit`. A desired setting is read and compared by
 default, but mchd only writes to a node when the setting, node, group, or top-level `global:`

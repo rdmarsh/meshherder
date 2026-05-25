@@ -27,7 +27,7 @@ gateway:
   # Home frequency for the gateway.
   # If set, mchd forces the gateway to these settings on startup - useful after
   # a crash or a factory-reset radio that has reverted to default settings.
-  # After every per-node frequency hop, the gateway is always restored here.
+  # After every per-node radio-tuple switch, the gateway is always restored here.
   # If not set, mchd leaves the gateway on whatever frequency it is already on.
   #
   # freq, bw, and sf must match the mesh you are joining - nodes cannot hear each
@@ -216,7 +216,7 @@ nodes:
         poll_hours: 12
 
   # Node on a non-default frequency.
-  # 'via:' tells mchd to temporarily hop the gateway to this frequency to reach
+  # 'via:' tells mchd to temporarily switch the gateway to this radio tuple to reach
   # the node, run the full sync, then restore the gateway's home frequency.
   # The node is otherwise managed identically to any other node.
   #

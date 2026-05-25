@@ -47,7 +47,7 @@ def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
         return discovered or []
 
     gw.discover = AsyncMock(side_effect=_discover)
-    gw.hop_radio = AsyncMock(return_value=None)
+    gw.switch_radio_temporarily = AsyncMock(return_value=None)
     gw.restore_radio = AsyncMock(return_value=None)
     gw.add_commission_contact = AsyncMock(
         side_effect=lambda ni: {"public_key": ni["pubkey"], "adv_name": ""}
@@ -1022,7 +1022,7 @@ async def test_commission_scan_returns_none_gateway_radio_when_not_configured():
 
 
 # ---------------------------------------------------------------------------
-# handle_commission — radio re-hop after discover
+# handle_commission - return to factory radio after discover
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -1047,8 +1047,8 @@ async def test_commission_new_adds_contact_before_commands():
 
 
 @pytest.mark.asyncio
-async def test_commission_new_rehops_to_factory_before_commands():
-    """After discover() restores home freq, handle_commission re-hops to factory for commands."""
+async def test_commission_new_switches_back_to_factory_before_commands():
+    """After discover() restores home freq, commission switches back for commands."""
     from mch.commission import handle_commission
     from mch.gateway import Gateway
 
@@ -1063,7 +1063,7 @@ async def test_commission_new_rehops_to_factory_before_commands():
         "name": "TestNode", "target_freq": "915.800,250,10,5",
     }, wq, db, cfg)
 
-    gw.hop_radio.assert_called_once_with(*Gateway.FACTORY_FREQ)
+    gw.switch_radio_temporarily.assert_called_once_with(*Gateway.FACTORY_FREQ)
 
 
 @pytest.mark.asyncio
@@ -1158,8 +1158,8 @@ async def test_commission_replace_login_failure_returns_error():
 
 
 @pytest.mark.asyncio
-async def test_commission_replace_rehops_to_factory_before_commands():
-    """'replace' mode also re-hops to factory freq before sending commands."""
+async def test_commission_replace_switches_back_to_factory_before_commands():
+    """'replace' mode also switches to factory radio before sending commands."""
     from mch.commission import handle_commission
     from mch.gateway import Gateway
 
@@ -1177,7 +1177,7 @@ async def test_commission_replace_rehops_to_factory_before_commands():
         "pubkey_prefix": "aabbccdd",
     }, wq, db, cfg)
 
-    gw.hop_radio.assert_called_once_with(*Gateway.FACTORY_FREQ)
+    gw.switch_radio_temporarily.assert_called_once_with(*Gateway.FACTORY_FREQ)
 
 
 # ---------------------------------------------------------------------------

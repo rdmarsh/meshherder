@@ -242,8 +242,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_verbose_sync_release_version_is_0_7_1():
-    assert __version__ == "0.7.1"
+def test_meshcore_routing_terminology_release_version_is_0_7_2():
+    assert __version__ == "0.7.2"
 
 
 def _run(args, rpc_response):

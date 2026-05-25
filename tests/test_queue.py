@@ -192,7 +192,7 @@ def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:
     gw.get_contacts = AsyncMock(return_value=contacts or [])
     gw.login = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text=cmd_text))
-    gw.hop_radio = AsyncMock(return_value=(915.800, 250, 10, 5))
+    gw.switch_radio_temporarily = AsyncMock(return_value=(915.800, 250, 10, 5))
     gw.restore_radio = AsyncMock()
     gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
     return gw
@@ -923,6 +923,32 @@ async def test_run_node_verbose_reports_fact_and_setting_progress(db):
     assert "setting powersaving read failed: timeout" in messages
 
 
+async def test_run_node_verbose_describes_radio_switch_without_mesh_hop_wording(db):
+    from mch.config import RadioConfig
+
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        via=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8),
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [_contact("aabbccdd1122")]
+    messages: list[str] = []
+
+    async def progress(message: str) -> None:
+        messages.append(message)
+
+    await wq.run_node("aabbcc", progress=progress)
+
+    assert "switching gateway radio to 916.575/62.5/SF7" in messages
+    assert not any("hop" in message for message in messages)
+
+
 async def test_run_node_odd_prefix_rejected(db):
     """Prefix with an odd number of hex chars is rejected (convention: must be even)."""
     cfg = _make_config()
@@ -1182,11 +1208,11 @@ async def test_unfiled_contacts_excludes_non_repeaters(db):
 
 
 # ------------------------------------------------------------------
-# frequency hopping
+# temporary gateway radio switching
 # ------------------------------------------------------------------
 
-async def test_node_on_different_freq_hops_radio(db):
-    """A node with a radio config causes the gateway to hop before processing and restore after."""
+async def test_node_on_different_freq_switches_radio(db):
+    """A node with another radio tuple causes a temporary gateway switch and restore."""
     from mch.config import RadioConfig
     node_cfg = _node(pubkey="aabbcc", label="TestNode",
                      via=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8))
@@ -1195,18 +1221,18 @@ async def test_node_on_different_freq_hops_radio(db):
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
-    gw.hop_radio = AsyncMock(return_value=(869.618, 62.5, 8, 5))
+    gw.switch_radio_temporarily = AsyncMock(return_value=(869.618, 62.5, 8, 5))
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
 
     await wq.run_cycle()
-    gw.hop_radio.assert_awaited_once_with(916.575, 62.5, 7, 8)
+    gw.switch_radio_temporarily.assert_awaited_once_with(916.575, 62.5, 7, 8)
     gw.restore_radio.assert_awaited_once_with(869.618, 62.5, 8, 5)
 
 
-async def test_node_no_radio_config_no_hop(db):
-    """A node without a radio config never causes a frequency hop."""
+async def test_node_no_radio_config_no_switch(db):
+    """A node without another radio tuple never switches the gateway radio."""
     node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
@@ -1217,7 +1243,7 @@ async def test_node_no_radio_config_no_hop(db):
     wq = WorkQueue(cfg, gw, db)
 
     await wq.run_cycle()
-    gw.hop_radio.assert_not_awaited()
+    gw.switch_radio_temporarily.assert_not_awaited()
     gw.restore_radio.assert_not_awaited()
 
 
@@ -1235,14 +1261,14 @@ async def test_radio_restored_on_relogin_failure(db):
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
-    gw.hop_radio = AsyncMock(return_value=(869.618, 62.5, 8, 5))
+    gw.switch_radio_temporarily = AsyncMock(return_value=(869.618, 62.5, 8, 5))
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.login = AsyncMock(return_value=False)  # re-login fails → _ReloginFailed
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
     wq = WorkQueue(cfg, gw, db)
 
     await wq.run_cycle()
-    gw.hop_radio.assert_awaited_once()
+    gw.switch_radio_temporarily.assert_awaited_once()
     gw.restore_radio.assert_awaited_once()  # restored even on failure
 
 

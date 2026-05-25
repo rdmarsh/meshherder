@@ -247,7 +247,7 @@ class Gateway:
     # auth
     # ------------------------------------------------------------------
 
-    async def hop_radio(
+    async def switch_radio_temporarily(
         self, freq: float, bw: float, sf: int, cr: int
     ) -> tuple[float, float, int, int]:
         """
@@ -262,7 +262,7 @@ class Gateway:
         saved_sf: int = int(self.info.get("radio_sf") or 0)
         saved_cr: int = int(self.info.get("radio_cr") or 0)
         log.info(
-            "hopping radio: %.3f/%g/SF%d → %.3f/%g/SF%d",
+            "switching gateway radio: %.3f/%g/SF%d -> %.3f/%g/SF%d",
             saved_freq, saved_bw, saved_sf, freq, bw, sf,
         )
         log.debug("set_radio: %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
@@ -277,7 +277,7 @@ class Gateway:
     async def restore_radio(
         self, freq: float, bw: float, sf: int, cr: int
     ) -> None:
-        """Restore the gateway radio config after a frequency hop."""
+        """Restore the gateway radio config after a temporary radio switch."""
         mc = self._require_connected()
         log.debug("set_radio (restore): %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
         await mc.commands.set_radio(freq, bw, sf, cr)
@@ -468,7 +468,7 @@ class Gateway:
         """
         mc = self._require_connected()
         freq, bw, sf, cr = factory_freq
-        saved = await self.hop_radio(freq, bw, sf, cr)
+        saved = await self.switch_radio_temporarily(freq, bw, sf, cr)
 
         discovered: list[dict[str, Any]] = []
 
