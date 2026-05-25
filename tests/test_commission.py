@@ -797,6 +797,32 @@ async def test_commission_replace_sends_radio_inherited_from_group_via_radio():
 
 
 @pytest.mark.asyncio
+async def test_commission_replace_sends_radio_inherited_from_global_via_radio():
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        global_settings=GroupConfig(
+            name="global",
+            via_radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+        ),
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
+        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
+    )
+
+    await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    sent = [call.args[1] for call in gw.send_command.call_args_list]
+    assert any("set radio 915.800" in c for c in sent)
+
+
+@pytest.mark.asyncio
 async def test_commission_replace_sends_reboot_last():
     """'replace' mode always sends reboot as the final command."""
     from mch.commission import handle_commission
@@ -1002,6 +1028,7 @@ async def test_commission_scan_returns_config_radio_options():
         global_settings=GroupConfig(
             name="global",
             settings={"radio": SettingConfig(desired="915.075,125,9,5")},
+            via_radio=RadioConfig(freq=915.200, bw=125, sf=9, cr=5),
         ),
         groups=[
             GroupConfig(
@@ -1026,6 +1053,7 @@ async def test_commission_scan_returns_config_radio_options():
     assert resp["data"]["radio_options"] == [
         {"label": "gateway/home radio", "value": "915.800,250,10,5"},
         {"label": "global", "value": "915.075,125,9,5"},
+        {"label": "global reachability", "value": "915.200,125,9,5"},
         {"label": "group repeaters", "value": "915.500,125,9,5"},
         {"label": "group repeaters reachability", "value": "915.600,125,9,5"},
         {"label": "node site-a", "value": "916.575,62.5,7,8"},

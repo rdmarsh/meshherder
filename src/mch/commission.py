@@ -93,6 +93,8 @@ def _config_radio_options(config: Config) -> list[dict[str, str]]:
     setting = config.global_settings.settings.get("radio")
     if setting and setting.desired:
         add("global", setting.desired)
+    if config.global_settings.via_radio:
+        add("global reachability", _format_radio(config.global_settings.via_radio))
 
     for group in config.groups:
         setting = group.settings.get("radio")
@@ -553,7 +555,7 @@ async def _commission_replace(
         cmds.append((f"password {ns.password}", False))
     cmds.append((f"set prv.key {ns.prv_key}", False))
     group_cfg = next((group for group in config.groups if group.name == node_cfg.group), None)
-    via_radio = resolve_via_radio(node_cfg, group_cfg)
+    via_radio = resolve_via_radio(node_cfg, group_cfg, config.global_settings)
     if via_radio:
         v = via_radio
         cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", False))

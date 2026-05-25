@@ -694,7 +694,7 @@ class WorkQueue:
             if not contact.get("flags", 0) & 1:
                 await self._gateway.set_contact_favourite(contact)
 
-            node_radio = resolve_via_radio(node_cfg, group_cfg)
+            node_radio = resolve_via_radio(node_cfg, group_cfg, global_cfg)
             gw_freq = self._gateway.info.get("radio_freq")
             if node_radio is not None and node_radio.freq != gw_freq:
                 log.info(
