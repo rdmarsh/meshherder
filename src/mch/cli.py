@@ -353,8 +353,13 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
 
     for entry in reversed(data):
         ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
-        node_label = f" [{entry['node_pubkey'][:12]}]" if entry.get("node_pubkey") else ""
-        click.echo(f"{ts} [{entry['level']:<5}]{node_label} {entry['message']}")
+        age = _ago(entry.get("timestamp"))
+        if entry.get("node_pubkey"):
+            identity = entry.get("label") or entry["node_pubkey"][:12]
+            node_label = f" [{identity}/{entry['node_pubkey'][:12]}]"
+        else:
+            node_label = ""
+        click.echo(f"{ts} ({age}) [{entry['level']:<5}]{node_label} {entry['message']}")
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +452,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         for entry in reversed(logs[:10]):
             ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
             level = entry["level"]
-            click.echo(f"  [{level:<5}] {ts}  {entry['message']}")
+            click.echo(f"  [{level:<5}] {ts} ({_ago(entry.get('timestamp'))})  {entry['message']}")
 
 
 def _render_issue_sections(

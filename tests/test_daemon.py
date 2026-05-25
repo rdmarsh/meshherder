@@ -700,7 +700,7 @@ async def test_contacts_dispatch_excludes_already_managed(db, wq, config):
 
 async def test_logs_dispatch_all_logs_when_no_pubkey(db, wq, config):
     """logs with no pubkey returns all log entries."""
-    node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
     await db.write_log(node.pubkey, "INFO", "synced ok")
     await db.write_log(None, "INFO", "daemon started")
@@ -708,6 +708,8 @@ async def test_logs_dispatch_all_logs_when_no_pubkey(db, wq, config):
     resp = await _dispatch({"cmd": "logs"}, wq, db, config)
     assert resp["ok"] is True
     assert len(resp["data"]) == 2
+    node_entry = next(entry for entry in resp["data"] if entry.get("node_pubkey"))
+    assert node_entry["label"] == "site-a"
 
 
 async def test_logs_dispatch_filtered_by_pubkey_prefix(db, wq, config):

@@ -38,8 +38,6 @@ keep `DESIGN.md` for stable architecture notes.
 - Add `mch ping [NODE]` to confirm whether a node is alive on selected radio settings.
 - Add `mch discover` to find nearby nodes not yet present in gateway contacts.
 - Add an overall `mch health` view showing node health and required operator actions.
-- Show node labels in fleet log output, align recent activity fields, and add relative ages next
-  to timestamps in logs.
 - Make `mch suggest <node>` show differences from current configuration by default.
 - Consider latitude/longitude in suggestions so nearby nodes do not receive identical txdelay
   recommendations.
@@ -476,6 +474,8 @@ keep `DESIGN.md` for stable architecture notes.
 
 ## Done Recently
 
+- 2026-05-25: `mch logs` identifies node entries by configured label and pubkey prefix, and
+  log timestamps now include relative ages in fleet and node-detail activity output.
 - 2026-05-25: YAML tab-indentation parse failures in config and secrets now report the
   actionable fix: replace indentation tabs with spaces.
 - 2026-05-25: Config/secrets hot reload now detects timestamp-preserving replacements and
