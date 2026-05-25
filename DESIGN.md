@@ -193,6 +193,12 @@ By contrast, the dependency's direct-message retry helper can reset a broken pat
 failed attempts. Management path inspection and controlled recovery need an explicit operator
 workflow before mchd can safely retry configuration writes over an alternative route.
 
+A future reachability check should be conservative: attempt a read-only probe on the stored
+contact path, reset to flood routing and retry the probe once if that path times out, then stop
+processing the node for that sync if flood also fails. Repeated failed scheduled probes should
+back off across cycles; delaying every read command within an already failing pass would only
+increase mesh load and operator wait time.
+
 The hardcoded setting policy fallback is `audit`. A desired setting is read and compared by
 default, but mchd only writes to a node when the setting, node, group, or top-level `global:`
 block explicitly opts in with `policy: enforce` or `default_policy: enforce`. Desired values

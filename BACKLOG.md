@@ -38,9 +38,10 @@ keep `DESIGN.md` for stable architecture notes.
   `_process_settings()` currently sends `set radio` through the default 30-second path; this can
   misreport a slow successful device write as failure.
 - Avoid spending minutes polling every fact and setting when a node is plainly unreachable.
-  Design a conservative failure threshold or reachability probe that aborts the remainder of a
-  node sync after repeated no-response timeouts, while preserving useful recovery attempts and
-  clear logs.
+  Add a cheap reachability probe before the full fact/setting pass: try the stored contact path,
+  reset that contact to flood routing and retry once after timeout, then abort the rest of this
+  node sync if flood also fails. Back off future scheduled attempts for repeatedly unreachable
+  nodes rather than adding extra delay between commands that are already timing out.
 
 ### Reporting And Commands
 
@@ -50,10 +51,12 @@ keep `DESIGN.md` for stable architecture notes.
   whether a no-response node needs a different radio tuple or a MeshCore path repair.
 - Add MeshCore management-path diagnostics and recovery controls.
   - Display each managed contact's stored `out_path`, path length, and hash mode.
-  - Provide a deliberate operation to reset a broken stored path to flood routing, and consider
-    manual path selection for known repeater routes.
-  - Decide how a retried management read/write should report route changes before automating any
-    flood fallback for configuration enforcement.
+  - Add `mch path <node>`, `mch path reset <node>`, and eventually manual selection for known
+    repeater routes.
+  - Log whether a probe used a stored path or flood fallback, and expose that result separately
+    from the management radio tuple in status/API output.
+  - Only automate stored-path-to-flood fallback for a reachability probe/read before the write
+    pass; avoid ambiguously retrying an already-sent setting write after a lost response.
 - Add `mch discover` to find nearby nodes not yet present in gateway contacts.
 - Add an overall `mch health` view showing node health and required operator actions.
 - Make `mch suggest <node>` show differences from current configuration by default.
@@ -377,8 +380,8 @@ keep `DESIGN.md` for stable architecture notes.
   - `NodeConfig.via` currently describes both how the gateway reaches a node and what radio config
     replacement commissioning should push.
   - Rename `via` as part of this work: in MeshCore, hop/path refers to packet routing, while this
-    field means "temporarily use this radio tuple." Prefer `management_radio`, leaving `path`
-    available for actual MeshCore route configuration.
+    field means "temporarily use this radio tuple." Prefer short `rf`, leaving `path` available
+    for actual MeshCore route configuration; do not rename the gateway's own `radio` key.
   - Add a distinct desired node radio model before bridge-mediated management gets more complex.
 
 - Add named database migrations.
