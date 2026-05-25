@@ -42,8 +42,16 @@ _GATEWAY_KEYS = {"device", "baud", "name", "radio", "advert_on_start"}
 _SCHEDULER_KEYS = {"inter_node_delay_seconds", "sync_interval_days"}
 _MESSENGER_KEYS = {"allowed_prefixes", "announce_channel"}
 _API_KEYS = {"enabled", "host", "port"}
-_NODE_KEYS = {"pubkey_prefix", "group", "label", "default_policy", "settings", "operations", "via"}
-_GROUP_KEYS = {"name", "default_policy", "settings", "setting_overrides"}
+_NODE_KEYS = {
+    "pubkey_prefix",
+    "group",
+    "label",
+    "default_policy",
+    "settings",
+    "operations",
+    "via_radio",
+}
+_GROUP_KEYS = {"name", "default_policy", "settings", "setting_overrides", "via_radio"}
 _GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides"}
 _SETTING_KEYS = {"desired", "policy", "poll_hours"}
 _OPERATION_KEYS = {"command", "every_hours", "fire_and_forget"}
@@ -160,13 +168,16 @@ class NodeConfig:
     default_policy: SettingPolicy | None = None
     settings: dict[str, SettingConfig] = field(default_factory=dict)
     operations: list[OperationConfig] = field(default_factory=list)
-    via: RadioConfig | None = None  # if set, gateway switches to this radio tuple for the node
+    # Radio tuple used to contact this node; overrides the group value when set.
+    via_radio: RadioConfig | None = None
 
 
 @dataclass
 class GroupConfig:
     name: str
     default_policy: SettingPolicy | None = None
+    # Radio tuple used to contact members that do not set their own value.
+    via_radio: RadioConfig | None = None
     # settings: desired values applied to all nodes in this group
     settings: dict[str, SettingConfig] = field(default_factory=dict)
     # setting_overrides: policy-only overrides (no desired value required)
@@ -180,6 +191,14 @@ class MessengerConfig:
     allowed_prefixes: list[str] = field(default_factory=list)
     # channel slot number to post cycle summaries to (e.g. 1 for #mch)
     announce_channel: int | None = None
+
+
+def resolve_via_radio(
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+) -> RadioConfig | None:
+    """Return the radio tuple on which a node is reachable, if configured."""
+    return node_cfg.via_radio or (group_cfg.via_radio if group_cfg else None)
 
 
 @dataclass
@@ -420,7 +439,7 @@ def _validate_settings(settings: dict[str, SettingConfig], context: str) -> None
 
 
 def _parse_radio(raw: Any) -> RadioConfig | None:
-    """Parse a via/radio value: either a mapping or a "freq,bw,sf,cr" string.
+    """Parse a radio value: either a mapping or a "freq,bw,sf,cr" string.
 
     Frequencies are rounded to 3 decimal places (1 kHz resolution) so that
     firmware float noise (e.g. 915.7999877 for a set value of 915.800) does
@@ -443,7 +462,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
     if "radio" in raw:
         raise ValueError(
             f"node {raw.get('pubkey_prefix')!r}: 'radio:' is no longer supported"
-            " - use 'via:' instead (same format)"
+            " - use 'via_radio:' instead (same format)"
         )
     _reject_unknown_keys(context, raw, _NODE_KEYS)
 
@@ -461,7 +480,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
         _parse_operation(op, f"{context}.operations[{i}]")
         for i, op in enumerate(operations_raw)
     ]
-    via = _parse_radio(raw.get("via"))
+    via_radio = _parse_radio(raw.get("via_radio"))
 
     label = raw.get("label", "")
     validate_node_label(label)
@@ -473,7 +492,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
         default_policy=SettingPolicy(policy) if policy else None,
         settings=settings,
         operations=operations,
-        via=via,
+        via_radio=via_radio,
     )
 
 
@@ -507,6 +526,7 @@ def _parse_group(raw: Any, context: str = "group") -> GroupConfig:
     return GroupConfig(
         name=raw["name"],
         default_policy=SettingPolicy(policy) if policy else None,
+        via_radio=_parse_radio(raw.get("via_radio")),
         settings=settings,
         setting_overrides=overrides,
     )

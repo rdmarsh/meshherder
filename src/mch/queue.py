@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from mch.command_registry import read_command_for_key, write_command_for_key
 from mch.command_safety import fire_and_forget_command
-from mch.config import Config, GroupConfig, NodeConfig, OperationConfig
+from mch.config import Config, GroupConfig, NodeConfig, OperationConfig, resolve_via_radio
 from mch.db import Database
 from mch.gateway import CommandResult, Gateway
 from mch.settings_compare import compare_setting
@@ -694,7 +694,7 @@ class WorkQueue:
             if not contact.get("flags", 0) & 1:
                 await self._gateway.set_contact_favourite(contact)
 
-            node_radio = node_cfg.via
+            node_radio = resolve_via_radio(node_cfg, group_cfg)
             gw_freq = self._gateway.info.get("radio_freq")
             if node_radio is not None and node_radio.freq != gw_freq:
                 log.info(

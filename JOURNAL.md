@@ -52,13 +52,15 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   release-facing history is kept separately from design investigation notes.
 - Confirmed management radio behavior while diagnosing field timeouts: mchd uses the gateway's
   current contact route by default and only changes gateway radio for nodes configured with
-  `via:`. Automatic probing of historical radios is not implemented.
+  `via_radio:`. Automatic probing of historical radios is not implemented.
 - Found a follow-up bug from the same trace: ordinary setting enforcement does not yet consume
   the command registry's slow-write timeout for `set radio`, even though commissioning does.
 - Corrected terminology after operator feedback and review of the upstream MeshCore FAQ:
   MeshCore hops/paths are repeater routing concepts; changing the gateway's radio tuple is a
   temporary radio switch, not a hop. Runtime/log wording and documentation should use that
   distinction. Released this correction as `0.7.2`.
+- Released `0.8.0`: replaced ambiguous `via:` with `via_radio:` and allowed a group's
+  `via_radio:` to supply the reachability radio for member nodes unless overridden per node.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 

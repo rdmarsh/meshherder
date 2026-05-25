@@ -553,7 +553,7 @@ async def test_commission_new_retries_identity_verification(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_commission_new_returns_config_snippet(tmp_path):
-    """'new' mode returns a config.yaml snippet with derived pubkey_prefix, label, group, via."""
+    """'new' mode returns a config.yaml snippet with pubkey_prefix, label, group, and via_radio."""
     from mch.commission import handle_commission
 
     factory_pubkey = "a695e2be" + "0" * 56
@@ -576,7 +576,7 @@ async def test_commission_new_returns_config_snippet(tmp_path):
     assert f"pubkey_prefix: {GENERATED_PUBKEY[:8]}" in snippet
     assert "label: Test-Node" in snippet
     assert "group: testgroup" in snippet
-    assert "via: 915.800,250,10,5" in snippet
+    assert "via_radio: 915.800,250,10,5" in snippet
     assert 'desired: "Test Node"' in snippet
     assert "policy: enforce" in snippet
 
@@ -745,8 +745,8 @@ async def test_commission_replace_sends_password_from_secrets():
 
 
 @pytest.mark.asyncio
-async def test_commission_replace_sends_radio_from_config_via():
-    """'replace' mode sends set radio command from config node's via entry."""
+async def test_commission_replace_sends_radio_from_config_via_radio():
+    """'replace' mode sends set radio command from config node's via_radio entry."""
     from mch.commission import handle_commission
 
     pubkey = "cc" * 32
@@ -756,8 +756,34 @@ async def test_commission_replace_sends_radio_from_config_via():
     cfg = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
-            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+            via_radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
         )],
+        secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
+    )
+
+    await handle_commission({
+        "cmd": "commission", "mode": "replace",
+        "pubkey_prefix": "aabbccdd",
+    }, wq, db, cfg)
+
+    sent = [call.args[1] for call in gw.send_command.call_args_list]
+    assert any("set radio 915.800" in c for c in sent)
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_sends_radio_inherited_from_group_via_radio():
+    from mch.commission import handle_commission
+
+    pubkey = "cc" * 32
+    gw = make_gateway(discovered=[discover_payload(pubkey)])
+    wq = make_wq(gateway=gw)
+    db = make_db()
+    cfg = make_config(
+        groups=[GroupConfig(
+            name="wide",
+            via_radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+        )],
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd", group="wide")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
 
@@ -840,7 +866,7 @@ async def test_commission_replace_waits_for_radio_then_reboots_without_waiting()
     cfg = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
-            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+            via_radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
         )],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
@@ -965,7 +991,7 @@ async def test_commission_scan_returns_group_options():
 
 @pytest.mark.asyncio
 async def test_commission_scan_returns_config_radio_options():
-    """scan mode includes radio choices declared in groups, nodes, and via."""
+    """scan mode includes radio choices declared in groups, nodes, and via_radio."""
     from mch.commission import handle_commission
 
     gw = make_gateway(discovered=[])
@@ -981,6 +1007,7 @@ async def test_commission_scan_returns_config_radio_options():
             GroupConfig(
                 name="repeaters",
                 settings={"radio": SettingConfig(desired="915.500,125,9,5")},
+                via_radio=RadioConfig(freq=915.600, bw=125, sf=9, cr=5),
             )
         ],
         nodes=[
@@ -988,7 +1015,7 @@ async def test_commission_scan_returns_config_radio_options():
                 pubkey_prefix="aabbccdd",
                 label="site-a",
                 settings={"radio": SettingConfig(desired="916.575,62.5,7,8")},
-                via=RadioConfig(freq=917.000, bw=125.0, sf=8, cr=5),
+                via_radio=RadioConfig(freq=917.000, bw=125.0, sf=8, cr=5),
             )
         ],
     )
@@ -1000,6 +1027,7 @@ async def test_commission_scan_returns_config_radio_options():
         {"label": "gateway/home radio", "value": "915.800,250,10,5"},
         {"label": "global", "value": "915.075,125,9,5"},
         {"label": "group repeaters", "value": "915.500,125,9,5"},
+        {"label": "group repeaters reachability", "value": "915.600,125,9,5"},
         {"label": "node site-a", "value": "916.575,62.5,7,8"},
         {"label": "node site-a", "value": "917.000,125,8,5"},
     ]
@@ -1530,7 +1558,7 @@ async def test_commission_replace_command_sequence_unchanged_when_fallback_fires
     cfg_a = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
-            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+            via_radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
         )],
         secrets={
             "aabbccdd": NodeSecrets(
@@ -1552,7 +1580,7 @@ async def test_commission_replace_command_sequence_unchanged_when_fallback_fires
     cfg_b = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
-            via=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
+            via_radio=RadioConfig(freq=915.800, bw=250.0, sf=10, cr=5),
         )],
         secrets={
             "aabbccdd": NodeSecrets(

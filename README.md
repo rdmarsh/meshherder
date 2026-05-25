@@ -28,9 +28,9 @@ Think Ansible for your nodes, running continuously in the background.
   policy.
 - **Read-only facts** — a configurable list of read-only data (firmware version, hardware name,
   role, and more) collected each sync cycle and stored in a local SQLite database.
-- **Multi-frequency support** — nodes on different radio settings? Add `via:` to the node entry;
-  mchd temporarily switches the gateway radio tuple, manages the node, and restores the home
-  radio tuple when done. This is not a MeshCore routing hop.
+- **Multi-frequency support** — nodes on different radio settings? Add `via_radio:` to a node or
+  group entry. mchd temporarily switches the gateway radio tuple, manages the node, and restores
+  the home radio tuple when done. This is not a MeshCore routing hop.
 - **Staggered scheduler** — nodes are spread randomly across the sync window so mchd restarts never
   cause a sync surge.
 - **DM commands** — authorised MeshCore devices can ask mchd for field status over the mesh:
