@@ -554,6 +554,17 @@ def test_status_single_match_shows_settings_drift_flag():
     assert "20" in result.output
 
 
+def test_status_single_match_shows_tries_as_not_applicable_for_audit():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(settings=[{
+        "key": "owner.info", "desired": "Managed by mch",
+        "observed": "wrong", "policy": "audit", "drift": True,
+        "update_attempts": 0,
+    }])
+    result = _run_multi(["status", "aabb"], status, detail)
+    assert re.search(r"audit\s+owner\.info\s+wrong\s+Managed by mch\s+-\s+~~~", result.output)
+
+
 def test_status_single_match_shows_approximate_settings_marker():
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{

@@ -705,6 +705,31 @@ async def test_node_dispatch_resets_displayed_attempts_for_new_desired_value(db,
     assert resp["data"]["settings"][0]["update_attempts"] == 0
 
 
+async def test_node_dispatch_hides_prior_attempts_when_policy_changes_to_audit(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key="owner.info",
+        desired="Managed",
+        observed="wrong",
+        policy=SettingPolicy.ENFORCE,
+        update_attempts=4,
+        drift=True,
+    ))
+    config.nodes = [
+        NodeConfig(
+            pubkey_prefix="aabbccdd",
+            label="site-a",
+            settings={"owner.info": SettingConfig(desired="Managed", policy=SettingPolicy.AUDIT)},
+        )
+    ]
+
+    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+
+    assert resp["data"]["settings"][0]["update_attempts"] == 0
+
+
 async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)

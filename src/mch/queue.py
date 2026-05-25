@@ -855,7 +855,9 @@ class WorkQueue:
                 ),
                 update_attempts=(
                     previous.update_attempts
-                    if previous is not None and previous.desired == desired
+                    if policy == SettingPolicy.ENFORCE
+                    and previous is not None
+                    and previous.desired == desired
                     else 0
                 ),
                 drift=is_drift,
