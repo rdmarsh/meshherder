@@ -462,8 +462,11 @@ Configure authorised sender prefixes under `messenger.allowed_prefixes` in `conf
 ### Read-only fleet API
 
 The optional HTTP API exposes the same normalized report model used by CLI status and plan views.
-It is disabled by default and is intentionally restricted to loopback addresses until an
-authentication design is added.
+Its paths mirror the read-only `mch` commands. It is disabled by default and is intentionally
+restricted to loopback addresses until an authentication design is added.
+
+To use the examples below, add this block to the active `config.yaml` on the host running
+`mchd`, then restart the daemon:
 
 ```yaml
 api:
@@ -472,53 +475,62 @@ api:
   port: 8743
 ```
 
-Changing the API listener configuration requires restarting `mchd`.
+```bash
+sudo systemctl restart mchd
+```
+
+`8743` is the default local API port chosen by Mesh Herder; it can be changed to any available
+loopback TCP port in `config.yaml`. Changing the API listener configuration requires restarting
+`mchd`.
 
 Endpoints:
 
 ```text
-GET /healthz
-GET /api/v1/fleet
-GET /api/v1/nodes/<label-or-pubkey-prefix>
-GET /api/v1/issues
-GET /api/v1/plan
-GET /api/v1/logs?node=<label-or-prefix>&limit=50
+GET /health
+GET /status
+GET /status/<label-or-pubkey-prefix>
+GET /issues
+GET /plan
+GET /logs?node=<label-or-prefix>&limit=50
 ```
 
 Example queries:
 
 ```bash
 # Confirm the local API is responding.
-curl -s http://127.0.0.1:8743/healthz
+curl -fsS http://127.0.0.1:8743/health
 
 # Fetch the fleet report, including summary counts, nodes, issues, and planned work.
-curl -s http://127.0.0.1:8743/api/v1/fleet
+curl -fsS http://127.0.0.1:8743/status
 
 # Fetch one node by label or public-key prefix.
-curl -s http://127.0.0.1:8743/api/v1/nodes/SiteA-Rooftop
-curl -s http://127.0.0.1:8743/api/v1/nodes/aabbccdd
+curl -fsS http://127.0.0.1:8743/status/SiteA-Rooftop
+curl -fsS http://127.0.0.1:8743/status/aabbccdd
 
 # Fetch issue and action views directly.
-curl -s http://127.0.0.1:8743/api/v1/issues
-curl -s http://127.0.0.1:8743/api/v1/plan
+curl -fsS http://127.0.0.1:8743/issues
+curl -fsS http://127.0.0.1:8743/plan
 
 # Fetch the most recent logs, or logs for one node.
-curl -s 'http://127.0.0.1:8743/api/v1/logs?limit=20'
-curl -s 'http://127.0.0.1:8743/api/v1/logs?node=SiteA-Rooftop&limit=20'
+curl -fsS 'http://127.0.0.1:8743/logs?limit=20'
+curl -fsS 'http://127.0.0.1:8743/logs?node=SiteA-Rooftop&limit=20'
 ```
 
 Add `| jq` to any example for readable formatted output when `jq` is installed:
 
 ```bash
-curl -s http://127.0.0.1:8743/api/v1/fleet | jq
-curl -s http://127.0.0.1:8743/api/v1/nodes/SiteA-Rooftop | jq '.health, .facts, .settings'
+curl -fsS http://127.0.0.1:8743/status | jq
+curl -fsS http://127.0.0.1:8743/status/SiteA-Rooftop | jq '.health, .facts, .settings'
 ```
 
-`/api/v1/fleet` returns `schema_version: 1`, a health summary, nodes, unresolved configured
+`/status` returns `schema_version: 1`, a health summary, nodes, unresolved configured
 nodes, issues, and planned work. Each node includes `health`, configured `fact_keys`, collected `facts` such as
 `lat`/`lon`, and settings classified with `status` (`ok`, `nominal`, `drift`, `unknown`,
 `ignored`) and `action` (`none`, `read`, `write`, `report`, `ignore`). This is the contract a
 future green/red map dashboard should consume; the API never contacts nodes or makes changes.
+
+The initial `/api/v1/...` and `/healthz` paths remain accepted as compatibility aliases, but new
+integrations should use the command-shaped paths above.
 
 ### Changing a setting fleet-wide
 

@@ -89,18 +89,27 @@ Only loopback hosts are accepted until API authentication is implemented.
 Available read-only endpoints are:
 .PP
 .nf
-GET /healthz
-GET /api/v1/fleet
-GET /api/v1/nodes/<label-or-pubkey-prefix>
-GET /api/v1/issues
-GET /api/v1/plan
-GET /api/v1/logs?node=<label-or-prefix>&limit=50
+GET /health
+GET /status
+GET /status/<label-or-pubkey-prefix>
+GET /issues
+GET /plan
+GET /logs?node=<label-or-prefix>&limit=50
 .fi
 .PP
-The fleet response includes
+The
+.B /status
+response includes
 .B schema_version: 1
 and normalized node health, facts, setting classifications, planned actions,
 and issues suitable for presentation by a dashboard.
+.PP
+The initial
+.B /api/v1/...
+and
+.B /healthz
+paths remain compatibility aliases; new clients should use the command-shaped
+paths above.
 .SH SYSTEMD
 The packaged service unit is named
 .BR mchd.service .

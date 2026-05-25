@@ -31,7 +31,7 @@ class ReadOnlyApi:
         self._server = await asyncio.start_server(self._handle_client, api.host, api.port)
         sockets: list[Any] = list(self._server.sockets or [])
         bound = sockets[0].getsockname() if sockets else (api.host, api.port)
-        log.info("read-only HTTP API listening at http://%s:%s/api/v1/fleet", bound[0], bound[1])
+        log.info("read-only HTTP API listening at http://%s:%s/status", bound[0], bound[1])
 
     async def close(self) -> None:
         if self._server:
@@ -93,17 +93,17 @@ class ReadOnlyApi:
         parsed = urlsplit(target)
         path = parsed.path.rstrip("/") or "/"
         params = parse_qs(parsed.query)
-        if path == "/healthz":
+        if path in {"/health", "/healthz"}:
             return HTTPStatus.OK, {"ok": True}
-        if path == "/api/v1/fleet":
+        if path in {"/status", "/api/v1/fleet"}:
             return HTTPStatus.OK, await build_fleet_report(self._db, self._config)
-        if path == "/api/v1/issues":
+        if path in {"/issues", "/api/v1/issues"}:
             report = await build_fleet_report(self._db, self._config)
             return HTTPStatus.OK, report["issues"]
-        if path == "/api/v1/plan":
+        if path in {"/plan", "/api/v1/plan"}:
             report = await build_fleet_report(self._db, self._config)
             return HTTPStatus.OK, report["plan"]
-        if path == "/api/v1/logs":
+        if path in {"/logs", "/api/v1/logs"}:
             try:
                 limit = min(max(int(params.get("limit", ["50"])[0]), 1), 500)
             except ValueError:
@@ -125,8 +125,9 @@ class ReadOnlyApi:
                 if entry.get("node_pubkey") else entry
                 for entry in logs
             ]
-        prefix = "/api/v1/nodes/"
-        if path.startswith(prefix):
+        prefixes = ("/status/", "/api/v1/nodes/")
+        prefix = next((candidate for candidate in prefixes if path.startswith(candidate)), None)
+        if prefix:
             query = unquote(path[len(prefix):])
             try:
                 node = await _resolve_node(query, self._db)
