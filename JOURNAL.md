@@ -48,6 +48,13 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   already ignores case, but `acai` is not a contiguous substring of `Acacia`.
 - Kept a full messaging inbox outside project scope; messenger work remains focused on operational
   commands, notifications, and explicit authorization review.
+- Added `CHANGELOG.md`, reconstructed from identifiable version-bump commits back to `0.1.0`, so
+  release-facing history is kept separately from design investigation notes.
+- Confirmed management radio behavior while diagnosing field timeouts: mchd uses the gateway's
+  current contact route by default and only changes gateway radio for nodes configured with
+  `via:`. Automatic probing of historical radios is not implemented.
+- Found a follow-up bug from the same trace: ordinary setting enforcement does not yet consume
+  the command registry's slow-write timeout for `set radio`, even though commissioning does.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 
