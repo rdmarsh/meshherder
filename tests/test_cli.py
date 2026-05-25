@@ -54,6 +54,16 @@ def test_status_lists_relative_last_seen():
     assert "  7m ago" in result.output
 
 
+def test_ago_with_timestamp_is_not_padded_in_prose_output():
+    seen = (datetime.now(UTC) - timedelta(minutes=7)).isoformat()
+    detail = _detail()
+    detail["data"]["last_seen"] = seen
+    result = _run_multi(["status", "site-a"], _status_resp(nodes=[_summary()]), detail)
+
+    assert "(7m ago)" in result.output
+    assert "(  7m ago)" not in result.output
+
+
 def test_filter_contacts_no_query_returns_all():
     assert _filter_contacts(CONTACTS, None) == CONTACTS
 
@@ -832,6 +842,7 @@ def test_logs_shows_entries():
     assert "INFO" in result.output
     assert "[site-a/aabbccddaabb]" in result.output
     assert "ago)" in result.output
+    assert "( " not in result.output
 
 
 def test_logs_newest_at_bottom():
@@ -856,6 +867,7 @@ def test_status_single_match_activity_includes_relative_age():
 
     assert "recent activity:" in result.output
     assert "ago)" in result.output
+    assert "( " not in result.output
 
 
 # ------ contacts ------

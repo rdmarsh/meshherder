@@ -71,11 +71,11 @@ def _ago(iso: str | None) -> str:
 
 
 def _ago_with_ts(iso: str | None) -> str:
-    """Format as 'YYYY-MM-DD HH:MM:SS (  Xm ago)' for detail views."""
+    """Format as 'YYYY-MM-DD HH:MM:SS (Xm ago)' for prose-style detail views."""
     if not iso:
         return "never"
     ts = iso[:19].replace("T", " ")
-    return f"{ts} ({_ago(iso)})"
+    return f"{ts} ({_ago(iso).lstrip()})"
 
 
 async def _request(
@@ -353,7 +353,7 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
 
     for entry in reversed(data):
         ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
-        age = _ago(entry.get("timestamp"))
+        age = _ago(entry.get("timestamp")).lstrip()
         if entry.get("node_pubkey"):
             identity = entry.get("label") or entry["node_pubkey"][:12]
             node_label = f" [{identity}/{entry['node_pubkey'][:12]}]"
@@ -452,7 +452,8 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         for entry in reversed(logs[:10]):
             ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
             level = entry["level"]
-            click.echo(f"  [{level:<5}] {ts} ({_ago(entry.get('timestamp'))})  {entry['message']}")
+            age = _ago(entry.get("timestamp")).lstrip()
+            click.echo(f"  [{level:<5}] {ts} ({age})  {entry['message']}")
 
 
 def _render_issue_sections(
