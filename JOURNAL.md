@@ -19,6 +19,15 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 - Revised the public HTTP route vocabulary to match the existing read-only CLI commands:
   `/health`, `/status`, `/status/<node>`, `/issues`, `/plan`, and `/logs`. Removed the draft
   `/api/v1/...` and `/healthz` paths because the API is still under active development.
+- Field use exposed the next API refinement: `/status` should become a small, pollable
+  dashboard/map summary, including health and coordinates, while `/status/<node>` supplies
+  clickable full details and `/logs` remains separately refreshed.
+- Retained the YAML/secrets/observed-DB ownership boundary for future UI work. API-driven clients
+  do not require storing credentials or private identities in SQLite; future configuration
+  editing must provide authentication, reviewable diffs, auditing, and explicit protected
+  import/export handling.
+- Clarified that collected settings are factual observations but remain distinct from facts in
+  the model because they also carry desired values, policy, drift classification, and actions.
 
 ## 2026-05-24 - Status view improvements and passive last_seen
 
