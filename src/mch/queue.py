@@ -165,6 +165,7 @@ class NodeResult:
     settings_checked: int = 0
     settings_enforced: int = 0
     settings_drifted: int = 0
+    settings_failed: int = 0
     operations_run: int = 0
     operations_failed: int = 0
     error: str | None = None
@@ -229,12 +230,16 @@ class WorkQueue:
         never triggers a sync storm. Then repeatedly finds the next due node, sleeps
         until it's time, processes it, and reschedules it.
         """
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._current_task = current_task
         self._running = True
         log.info("work queue started (interval=%.1fd)", self._config.scheduler.sync_interval_days)
 
         self._contacts = await self._gateway.get_contacts(managed_only=False)
         await self._seed_from_config()
         await self._seed_node_labels()
+        await self._recover_interrupted_nodes()
         await self._reschedule_overdue()
 
         while self._running:
@@ -477,6 +482,20 @@ class WorkQueue:
             if changed:
                 await self._db.upsert_node(node)
 
+    async def _recover_interrupted_nodes(self) -> None:
+        """Mark nodes left mid-sync by an earlier daemon stop as needing attention."""
+        for node in await self._db.get_all_nodes():
+            if node.state != NodeState.CONFIGURING:
+                continue
+            node.state = NodeState.PARTIAL
+            await self._db.upsert_node(node)
+            await self._db.write_log(
+                node.pubkey,
+                "ERROR",
+                "sync interrupted before completion; marked partial on daemon startup",
+            )
+            log.warning("recovered interrupted sync for %r (%s)", node.label, node.pubkey[:12])
+
     async def _reschedule_overdue(self) -> None:
         """
         Spread any nodes with past or missing next_sync_at randomly across the sync
@@ -649,42 +668,41 @@ class WorkQueue:
         node.name = name
         node.label = node_cfg.label
         node.state = NodeState.CONFIGURING
-        await self._db.upsert_node(node)
-
-        result.reachable = True
         now = datetime.now(UTC)
         node.last_seen = now
         node.last_connected = now
+        await self._db.upsert_node(node)
 
-        # ensure this contact is favourited on the gateway so it's protected from
-        # auto-eviction when the 350-contact store fills up
-        if not contact.get("flags", 0) & 1:
-            await self._gateway.set_contact_favourite(contact)
-
-        # hop the gateway radio if this node lives on a different frequency
-        node_radio = node_cfg.via
-        gw_freq = self._gateway.info.get("radio_freq")
+        result.reachable = True
         saved_radio: tuple[float, float, int, int] | None = None
-        if node_radio is not None and node_radio.freq != gw_freq:
-            log.info(
-                "  hopping to %.3f/%d/SF%d for %r",
-                node_radio.freq, node_radio.bw, node_radio.sf, name,
-            )
-            saved_radio = await self._gateway.hop_radio(
-                node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
-            )
 
         try:
+            # Ensure gateway metadata/radio setup failures also terminate this sync state.
+            if not contact.get("flags", 0) & 1:
+                await self._gateway.set_contact_favourite(contact)
+
+            node_radio = node_cfg.via
+            gw_freq = self._gateway.info.get("radio_freq")
+            if node_radio is not None and node_radio.freq != gw_freq:
+                log.info(
+                    "  hopping to %.3f/%d/SF%d for %r",
+                    node_radio.freq, node_radio.bw, node_radio.sf, name,
+                )
+                saved_radio = await self._gateway.hop_radio(
+                    node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
+                )
+
             # collect facts
             result.facts_collected = await self._collect_facts(pubkey, contact, node, node_cfg)
 
             # enforce / audit settings
-            s_checked, s_enforced, s_drifted = await self._process_settings(
+            s_checked, s_enforced, s_drifted, s_failed = await self._process_settings(
                 pubkey, contact, node_cfg, group_cfg, global_cfg, node
             )
             result.settings_checked = s_checked
             result.settings_enforced = s_enforced
             result.settings_drifted = s_drifted
+            result.settings_failed = s_failed
 
             # seed operations from config into DB, then run what's pending
             await self._seed_operations(pubkey, node_cfg)
@@ -700,13 +718,30 @@ class WorkQueue:
             await self._db.write_log(pubkey, "ERROR", f"re-login failed: {exc}")
             result.error = str(exc)
             return result  # finally still runs to restore radio
+        except asyncio.CancelledError:
+            await self._mark_sync_incomplete(node, "sync interrupted before completion")
+            raise
+        except Exception as exc:
+            await self._mark_sync_incomplete(node, f"sync failed before completion: {exc}")
+            raise
 
         finally:
             if saved_radio is not None:
-                await self._gateway.restore_radio(*saved_radio)
+                try:
+                    await self._gateway.restore_radio(*saved_radio)
+                except asyncio.CancelledError:
+                    await self._mark_sync_incomplete(
+                        node, "sync interrupted restoring gateway radio"
+                    )
+                    raise
+                except Exception as exc:
+                    await self._mark_sync_incomplete(
+                        node, f"sync failed restoring gateway radio: {exc}"
+                    )
+                    raise
 
         # mark node state
-        if s_drifted > 0 or op_failed > 0:
+        if s_drifted > 0 or s_failed > 0 or op_failed > 0:
             node.state = NodeState.PARTIAL
         else:
             node.state = NodeState.CONFIGURED
@@ -726,12 +761,18 @@ class WorkQueue:
         await self._db.upsert_node(node)
 
         log.info(
-            "  %r done — facts:%d settings:%d/%d enforced drift:%d ops:%d/%d failed",
+            "  %r done — facts:%d settings:%d/%d enforced drift:%d read-failed:%d ops:%d/%d failed",
             name, result.facts_collected,
-            s_enforced, s_checked, s_drifted,
+            s_enforced, s_checked, s_drifted, s_failed,
             op_run, op_failed,
         )
         return result
+
+    async def _mark_sync_incomplete(self, node: Node, message: str) -> None:
+        """Persist a terminal state if node processing aborts unexpectedly."""
+        node.state = NodeState.PARTIAL
+        await self._db.upsert_node(node)
+        await self._db.write_log(node.pubkey, "ERROR", message)
 
     async def _send_authed(
         self,
@@ -814,9 +855,9 @@ class WorkQueue:
         group_cfg: GroupConfig | None,
         global_cfg: GroupConfig | None,
         node: Node,
-    ) -> tuple[int, int, int]:
-        """Check and optionally enforce all settings. Returns (checked, enforced, drifted)."""
-        checked = enforced = drifted = 0
+    ) -> tuple[int, int, int, int]:
+        """Check settings and return counts for checked, enforced, drifted, and failed reads."""
+        checked = enforced = drifted = read_failed = 0
         keys = all_setting_keys(node_cfg, group_cfg, global_cfg)
         existing = {s.key: s for s in await self._db.get_settings(pubkey)}
 
@@ -831,6 +872,7 @@ class WorkQueue:
             res = await self._send_authed(contact, read_cmd, node, node_cfg)
             if not res.success:
                 log.warning("get %s failed for %s: %s", key, pubkey[:12], res.error)
+                read_failed += 1
                 continue
 
             checked += 1
@@ -901,7 +943,7 @@ class WorkQueue:
 
             await self._db.upsert_setting(setting)
 
-        return checked, enforced, drifted
+        return checked, enforced, drifted, read_failed
 
     async def _seed_operations(self, pubkey: str, node_cfg: NodeConfig) -> None:
         """Queue any config operations that are due (never run, or past every_hours)."""
