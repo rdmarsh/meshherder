@@ -6,6 +6,8 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## 2026-05-25 - Fleet Report API Foundation
 
+- Released as `0.7.0`; exposing a new HTTP API and central reporting contract is a minor-version
+  capability change, not an invisible patch to `0.6.1`.
 - Added a single normalized read-only fleet/node report model with `schema_version: 1`.
 - The model classifies node health, setting status (`ok`, `nominal`, `drift`, `unknown`,
   `ignored`) and next action (`none`, `read`, `write`, `report`, `ignore`), retaining collected
