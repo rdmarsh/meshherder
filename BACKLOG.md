@@ -15,7 +15,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 ### Operation Safety And Reachability
 
 - Avoid polling every fact and setting when a node is plainly unreachable. Add a low-cost
-  reachability probe before a full pass, with controlled stored-path/flood fallback before writes.
+  read-only reachability probe before a full pass, with a small bounded retry because luna
+  testing showed the same node can miss `ver` once and answer on the next sync, then use
+  controlled stored-path/flood fallback before writes.
 - After a successful probe, consider randomizing independent read-only fact/setting reads so
   marginal connections do not repeatedly lose the same trailing observations.
 - Show the effective management radio and path choice during foreground sync, including the

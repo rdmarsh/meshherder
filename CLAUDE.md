@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 mch (Mesh Herder) is a tool for managing fleets of MeshCore repeater nodes — think Ansible/Salt but over the mesh itself. The daemon is `mchd`; the control CLI is `mch`. A locally attached node (USB serial) — called the **gateway** — connects mchd to the mesh. mchd sends remote CLI commands across the mesh to bring administered nodes into a declared desired state, then leaves them alone. ("Companion node" is meshcore_py's internal term for this; mchd calls it the gateway everywhere.)
 
+The mesh is unreliable and bandwidth-constrained; managed nodes may be low-powered solar devices
+with intermittent availability. Design for gradual convergence, cached observations with visible
+staleness, and useful failure-pattern history while minimizing unnecessary radio traffic. Do not
+assume a datacenter-style network where one timeout means a node is down.
+
 Target audience: operators with dozens of nodes who need consistent, verifiable configuration without logging into each one individually.
 
 **Core design constraints:**
@@ -200,6 +205,14 @@ Install the service unit to `/etc/systemd/system/mchd.service`. The `mch start/s
   explicit destination: active backlog, journal/design history, changelog, or deliberate rejection.
   Do not silently compress away distinct future work.
 - When a mistake reveals a missing rule, update this file and the project journal.
+
+## Live testing
+
+- `luna` has a USB-attached MeshCore test node available for live/bench verification. Remember
+  this when a change depends on real firmware timing, serial behavior, radio behavior, or mesh
+  response handling; do not rely only on mocks where the hardware can answer the question.
+- Keep potentially disruptive live writes deliberate: use the attached node for approved testing
+  and record observed behavior in `JOURNAL.md` before turning it into a rule or constant.
 
 ## Code reviews
 
