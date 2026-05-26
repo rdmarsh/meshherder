@@ -6,6 +6,10 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## 2026-05-26 - Luna Manual Sync Activity Testing
 
+- Reconfirmed the original design brief: mch is intended to bring unreliable, low-bandwidth,
+  low-powered MeshCore nodes gradually into desired state, similar to a constrained-network
+  configuration manager. It must preserve stale-but-useful evidence, expose recurring versus
+  intermittent failure patterns, and keep unnecessary mesh traffic low.
 - Luna testing of `0.8.3` confirmed that foreground `mch sync <node>` streams normal slow mesh
   work by default and that Ctrl-C returns control promptly during an in-progress read.
 - The activity history exposed a missing audit boundary: it showed per-command timeouts and
@@ -20,6 +24,14 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   their rationale and supporting evidence in the journal during investigation and in design notes
   once stable. The 180-second timeout is the immediate example: it remains traceable to live
   commissioning evidence rather than becoming an unexplained constant.
+- Luna testing of `0.8.4` confirmed the new activity boundaries: a completed sync with four
+  enforced setting-read failures logged `manual sync completed: partial result`; an interrupted
+  foreground sync logged `sync interrupted before completion` followed by `manual sync aborted`;
+  and `mch sync` logged the fleet-level `manual sync started: full cycle` marker.
+- In consecutive foreground syncs to the same node, `ver` timed out in one run and responded in
+  the next. A future read-only reachability gate must therefore treat one missing reply as
+  inconclusive and use a small bounded retry/fallback strategy before skipping the remainder of a
+  sync.
 
 ## 2026-05-26 - Slow Mesh Operations And Cancellation
 

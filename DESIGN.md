@@ -28,6 +28,24 @@ state into SQLite. If that changes, add explicit import/export/backup commands r
 silently making the DB the only copy. Secrets and private keys need a separate security decision
 before they are included in any ordinary backup/export workflow.
 
+## Convergence Over A Constrained Mesh
+
+mch is a slow-convergence configuration manager for MeshCore nodes over an unreliable,
+low-bandwidth radio network, including low-powered solar nodes that may be intermittently
+available. It is not designed around datacenter-style immediate reachability.
+
+- Desired state should converge over repeated opportunities rather than requiring every command
+  in one sync to succeed.
+- Observed state is cached evidence with age; reports must make staleness and partial observation
+  visible rather than treating cached values as current truth.
+- Failure patterns matter: always failing, intermittently succeeding, first-command-only failure,
+  and key-specific failure are different operational signals.
+- Mesh traffic has a cost. Avoid redundant reads and avoid repeated commands that cannot produce
+  useful new evidence, while still allowing deliberate refresh when an operator needs current
+  observations.
+- Recovery logic must be conservative around writes because a response can be lost after a write
+  has taken effect.
+
 ## API-ready internal model
 
 `mch` should move toward a single daemon-side report/action model that can be rendered by the CLI,
