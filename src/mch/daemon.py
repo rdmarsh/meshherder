@@ -106,7 +106,7 @@ async def _handle_client(
     try:
         raw = await asyncio.wait_for(reader.readline(), timeout=10)
         req = json.loads(raw)
-        resp = await _dispatch(req, wq, db, config, writer)
+        resp = await _dispatch(req, wq, db, config, writer, reader)
     except TimeoutError:
         resp = {"ok": False, "error": "timeout reading command"}
     except json.JSONDecodeError as exc:
@@ -161,6 +161,7 @@ async def _dispatch(
     db: Database,
     config: Config,
     writer: asyncio.StreamWriter | None = None,
+    reader: asyncio.StreamReader | None = None,
 ) -> dict[str, Any]:
     cmd = req.get("cmd", "")
 
@@ -203,7 +204,7 @@ async def _dispatch(
             if node is None:
                 return {"ok": False, "error": f"no node found matching {prefix!r}"}
             sync_progress_cb = None
-            if writer is not None and req.get("verbose"):
+            if writer is not None:
                 async def sync_progress_cb(msg: str) -> None:
                     try:
                         writer.write(
@@ -213,10 +214,31 @@ async def _dispatch(
                     except (ConnectionResetError, BrokenPipeError):
                         raise ClientDisconnected("sync client disconnected") from None
             try:
-                if sync_progress_cb is None:
-                    result = await wq.run_node(node.pubkey)
+                sync_awaitable = (
+                    wq.run_node(node.pubkey, progress=sync_progress_cb)
+                    if sync_progress_cb is not None
+                    else wq.run_node(node.pubkey)
+                )
+                if reader is None:
+                    result = await sync_awaitable
                 else:
-                    result = await wq.run_node(node.pubkey, progress=sync_progress_cb)
+                    sync_task = asyncio.create_task(sync_awaitable)
+                    disconnect_task = asyncio.create_task(reader.read())
+                    done, _ = await asyncio.wait(
+                        {sync_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if sync_task in done:
+                        disconnect_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await disconnect_task
+                        result = await sync_task
+                    else:
+                        with suppress(ConnectionResetError, BrokenPipeError):
+                            await disconnect_task
+                        sync_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await sync_task
+                        raise ClientDisconnected("sync client disconnected")
                 return _sync_result_response(result)
             except OperationBusyError as exc:
                 return {"ok": False, "error": str(exc)}

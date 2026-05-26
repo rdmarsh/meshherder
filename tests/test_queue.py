@@ -307,6 +307,25 @@ async def test_start_cycle_rejects_duplicate_manual_cycle(db):
     await wq._manual_cycle_task
 
 
+async def test_stop_cancels_manual_cycle_and_releases_operation_lock(db):
+    wq = WorkQueue(_make_config(), _make_gateway(), db)
+    started = asyncio.Event()
+
+    async def blocked_cycle():
+        started.set()
+        await asyncio.Event().wait()
+
+    wq._run_cycle_body = blocked_cycle  # type: ignore[method-assign]
+
+    assert await wq.start_cycle() == "sync started"
+    await started.wait()
+    await wq.stop()
+
+    assert wq._manual_cycle_task is not None
+    assert wq._manual_cycle_task.cancelled()
+    assert not wq._operation_lock.locked()
+
+
 # ------------------------------------------------------------------
 # node not in contacts → skipped
 # ------------------------------------------------------------------
@@ -896,7 +915,7 @@ async def test_run_node_forces_immediate_sync(db):
     assert result.reachable is True
 
 
-async def test_run_node_verbose_reports_fact_and_setting_progress(db):
+async def test_run_node_reports_fact_and_setting_progress(db):
     node_cfg = _node(
         pubkey="aabbcc",
         label="TestNode",
@@ -923,7 +942,7 @@ async def test_run_node_verbose_reports_fact_and_setting_progress(db):
     assert "setting powersaving read failed: timeout" in messages
 
 
-async def test_run_node_verbose_describes_radio_switch_without_mesh_hop_wording(db):
+async def test_run_node_progress_describes_radio_switch_without_mesh_hop_wording(db):
     from mch.config import RadioConfig
 
     node_cfg = _node(
@@ -1170,6 +1189,41 @@ async def test_cycle_state_partial_when_node_processing_is_cancelled(db):
     assert node.state == NodeState.PARTIAL
     logs = await db.get_logs(node.pubkey)
     assert logs[0]["message"] == "sync interrupted before completion"
+
+
+async def test_stop_cancels_forced_sync_and_restores_temporary_radio(db):
+    from mch.config import RadioConfig
+
+    node_cfg = _node(
+        pubkey="aabbcc", label="TestNode",
+        via_radio=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8),
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    started = asyncio.Event()
+
+    async def blocked_send(*args, **kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
+    gw.switch_radio_temporarily = AsyncMock(return_value=(869.618, 62.5, 8, 5))
+    gw.send_command = AsyncMock(side_effect=blocked_send)
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    task = asyncio.create_task(wq.run_node("aabbcc"))
+    await started.wait()
+    await wq.stop()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    gw.restore_radio.assert_awaited_once_with(869.618, 62.5, 8, 5)
+    assert not wq._operation_lock.locked()
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.PARTIAL
 
 
 async def test_cycle_observed_updated_after_set(db):

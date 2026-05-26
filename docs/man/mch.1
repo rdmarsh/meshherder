@@ -1,4 +1,4 @@
-.TH MCH 1 "2026-05-26" "meshherder 0.8.2" "User Commands"
+.TH MCH 1 "2026-05-26" "meshherder 0.8.3" "User Commands"
 .SH NAME
 mch \- manage MeshCore repeater nodes through the mchd daemon
 .SH SYNOPSIS
@@ -104,9 +104,6 @@ Start an immediate full sync cycle in the background. Rate limiting still
 applies.
 .TP
 .B sync \fILABEL_OR_PREFIX\fR
-Sync one node immediately and wait for the result.
-.TP
-.B sync \fILABEL_OR_PREFIX\fR \-\-verbose
 Sync one node immediately while streaming fact reads, setting checks, enforcement
 actions, operations, and timeout failures as they occur.
 .TP
@@ -157,10 +154,7 @@ Validate both production config and mode-600 secrets.
 Show nodes matching
 .IR qh .
 .TP
-.B mch sync aabbccdd
-Sync one node immediately.
-.TP
-.B mch sync --verbose qh-wold
+.B mch sync qh-wold
 Sync one node immediately and show live progress while waiting for mesh replies.
 .TP
 .B mch remove old-site --yes

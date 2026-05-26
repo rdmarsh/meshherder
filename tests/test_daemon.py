@@ -569,7 +569,7 @@ async def test_sync_dispatch_with_prefix_runs_node(db, wq, config):
     wq.run_node.assert_awaited_once_with("aabbccdd" * 8)
 
 
-async def test_sync_dispatch_verbose_streams_node_progress(db, wq, config):
+async def test_sync_dispatch_streams_node_progress_by_default(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
 
@@ -584,7 +584,7 @@ async def test_sync_dispatch_verbose_streams_node_progress(db, wq, config):
     writer.drain = AsyncMock()
 
     resp = await _dispatch(
-        {"cmd": "sync", "prefix": "aabbcc", "verbose": True},
+        {"cmd": "sync", "prefix": "aabbcc"},
         wq,
         db,
         config,
@@ -595,6 +595,38 @@ async def test_sync_dispatch_verbose_streams_node_progress(db, wq, config):
     writer.write.assert_called_once_with(
         b'{"type": "progress", "msg": "reading fact: ver"}\n'
     )
+
+
+async def test_sync_dispatch_disconnect_cancels_blocked_node_sync(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def run_node(pubkey, *, progress=None):
+        assert progress is not None
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    wq.run_node = AsyncMock(side_effect=run_node)
+    writer = MagicMock()
+    writer.drain = AsyncMock()
+    reader = MagicMock()
+
+    async def disconnect_after_start():
+        await started.wait()
+        return b""
+
+    reader.read = AsyncMock(side_effect=disconnect_after_start)
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config, writer, reader)
+
+    assert resp == {"ok": False, "error": "sync client disconnected"}
+    assert cancelled.is_set()
 
 
 async def test_sync_dispatch_reports_partial_result(db, wq, config):

@@ -440,13 +440,13 @@ mch contacts                # nodes visible to the gateway but not yet in config
 ### Forcing a sync
 
 ```
-mch sync <prefix>            # sync one node right now (CLI waits for the result)
-mch sync --verbose <prefix>  # sync one node and print each read/write wait as it runs
+mch sync <prefix>            # sync one node and print progress while waiting for the result
 mch sync                     # sweep all nodes in the background
 ```
 
 Use `mch sync <prefix>` after editing a node's desired settings in config — it applies the changes
-immediately rather than waiting for the next scheduled cycle.
+immediately rather than waiting for the next scheduled cycle. MeshCore replies can be slow during
+normal operation, so foreground node sync always prints each read/write wait as it runs.
 
 ### Checking status in the field
 
@@ -567,8 +567,7 @@ mch prune                     List DB nodes no longer present in config.yaml
 mch prune --yes               Delete listed local DB state for retired nodes
 mch remove <label|prefix>     Delete one node's local DB state
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
-mch sync <prefix>             Sync one node immediately; CLI waits for the result
-mch sync --verbose <prefix>   Sync one node and stream live mesh-operation progress
+mch sync <prefix>             Sync one node; stream progress while waiting for the result
 mch exec <label|prefix> <command>  Run a raw MeshCore CLI command (e.g. ver, stats-radio)
 mch commission                Commission a fresh or replacement MeshCore node (interactive wizard)
 mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
@@ -588,13 +587,13 @@ are allowed; operators may keep passwords or private keys there for replacement 
 Use `mch remove <label|prefix>` to delete one retired node's local DB state. It refuses nodes still
 present in `config.yaml` unless `--force` is supplied.
 
-`mch sync <prefix>` runs that node immediately and waits — the CLI returns once the sync is
-complete. It collects facts, checks and enforces settings, runs any due operations, then
-reschedules the node back into normal rotation. Use this when you need a result right now:
+`mch sync <prefix>` runs that node immediately and waits, streaming progress because slow command
+replies are normal on a mesh network. It collects facts, checks and enforces settings, runs any
+due operations, then reschedules the node back into normal rotation. Use this when you need a
+result right now:
 
 ```
-mch sync aabbccdd    # sync the node whose pubkey starts with aabbccdd; CLI waits for the result
-mch sync --verbose qh-wold   # print reads, timeouts, writes, and operations while waiting
+mch sync aabbccdd    # print reads, timeouts, writes, and operations while waiting
 ```
 
 `mch sync` (no argument) starts a full sweep of every node in the background — the CLI returns

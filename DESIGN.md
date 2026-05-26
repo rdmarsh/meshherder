@@ -163,12 +163,16 @@ Between nodes, mchd waits `inter_node_delay_seconds` (configurable; default 30s)
 is visited at most once per `sync_interval_days`, scheduled at a random offset within the window
 so daemon restarts never cause a sync storm.
 
-The `mch sync <prefix>` command bypasses the schedule for an immediate operator-triggered sync.
-`mch sync` (no arg) runs a full pass through all config nodes immediately.
+The `mch sync <prefix>` command bypasses the schedule for an immediate operator-triggered sync
+and always streams progress because slow mesh replies are a normal operating condition. If its
+client disconnects, the daemon cancels that forced sync and unwinds gateway state. `mch sync`
+(no arg) runs a full pass through all config nodes immediately.
 
 Gateway-owning operations are serialized by a high-level WorkQueue operation lock. Scheduled sync,
 manual full sync, forced node sync, raw `mch exec`, and commissioning cannot overlap; manual CLI
 operations return `busy: <operation>` if another workflow owns the gateway/radio.
+Shutdown cancels and awaits active gateway-owning operations before disconnecting the gateway, so
+a temporary management-radio switch can be restored during cancellation cleanup.
 
 ### MeshCore hop/path terminology
 
