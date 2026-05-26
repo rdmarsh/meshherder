@@ -1637,6 +1637,7 @@ def start() -> None:
 @cli.command()
 def stop() -> None:
     """Stop the mchd daemon via systemd."""
+    click.echo("stopping current sync, this may take some time...")
     result = subprocess.run(["systemctl", "stop", "mchd"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl stop failed", err=True)
@@ -1647,6 +1648,7 @@ def stop() -> None:
 @cli.command()
 def restart() -> None:
     """Restart the mchd daemon via systemd."""
+    click.echo("stopping current sync, this may take some time...")
     result = subprocess.run(["systemctl", "restart", "mchd"], capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl restart failed", err=True)

@@ -4,6 +4,39 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-26 - Backlog Triage And Coding Rate Semantics
+
+- Cleaned the backlog so it contains unfinished work and open decisions rather than repeating
+  release history or retaining raw terminal transcripts. Shipped behavior remains recorded in
+  `CHANGELOG.md`; stable radio semantics are recorded in `DESIGN.md`.
+- Added a project workflow rule: do not delete or over-compress untriaged backlog material until
+  each distinct item has been classified and preserved in backlog, journal/design, changelog, or
+  an explicit rejection.
+- Corrected an implementation overreach found during review: coding rate must be shown when a
+  complete radio configuration is transmitted or restored, but a CR-only difference is not a
+  reason to switch the gateway for reachability. Frequency, bandwidth, and spreading factor
+  determine whether the switch is needed.
+- Kept `via_radio.cr` required for now because replacement commissioning currently consumes
+  `via_radio` as a complete `set radio freq,bw,sf,cr` value. Making CR optional requires a clear
+  source for replacement transmit configuration.
+
+## Preserved Hardware-Test Notes
+
+- Heltec V3 on v1.15-era firmware returned `OK - reboot to apply` for `set radio`, including
+  after a temporary-radio command targeting the same values. `get radio` continued to report the
+  persistent value with its firmware float representation. This confirms the documented reply,
+  but does not resolve whether over-mesh communications can continue without reboot while runtime
+  temporary settings match the newly persisted target.
+- Reports that `tempradio` followed by `set radio` persists without immediate reboot remain
+  unresolved until tested by observing over-mesh active-radio behavior.
+- Bench tests found hardware-dependent clock behavior: plain reboot preserved a synced clock on
+  Heltec V3, while `clkreboot` reset it; on a tested Seeed/nRF-style repeater, reboot paths did
+  not preserve a corrected clock. This is why normal commissioning should not switch from
+  `reboot` to `clkreboot` without device-specific evidence.
+- Region command behavior remains version-specific: newer v1.15-era testing indicated explicit
+  `region allowf` should not be assumed necessary. Any region automation still requires testing
+  against supported firmware variants.
+
 ## 2026-05-25 - Fleet Report API Foundation
 
 - Released as `0.7.0`; exposing a new HTTP API and central reporting contract is a minor-version

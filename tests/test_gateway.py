@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from meshcore.events import Event, EventType
 
-from mch.config import GatewayConfig
+from mch.config import GatewayConfig, RadioConfig
 from mch.gateway import Gateway, GatewayError
 
 
@@ -75,6 +75,29 @@ async def test_connect_sets_name_when_configured():
 
     try:
         fake_mc.commands.set_name.assert_awaited_once_with("MyGateway")
+    finally:
+        await gw.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_connect_does_not_reset_gateway_radio_when_only_cr_differs():
+    cfg = make_config(radio=RadioConfig(freq=915.0, bw=125.0, sf=9, cr=8))
+    gw = Gateway(cfg)
+
+    fake_mc = MagicMock()
+    fake_mc.commands.send_appstart = AsyncMock(return_value=make_event(
+        EventType.SELF_INFO,
+        {"name": "TestGW", "radio_freq": 915.0, "radio_bw": 125.0, "radio_sf": 9, "radio_cr": 5},
+    ))
+    fake_mc.commands.set_radio = AsyncMock(return_value=make_event(EventType.OK, {}))
+    fake_mc.dispatcher.wait_for_event = AsyncMock(side_effect=asyncio.CancelledError)
+
+    with patch("mch.gateway.MeshCore.create_serial", AsyncMock(return_value=fake_mc)):
+        await gw.connect()
+
+    try:
+        fake_mc.commands.set_radio.assert_not_awaited()
+        assert gw.info["radio_cr"] == 5
     finally:
         await gw.disconnect()
 

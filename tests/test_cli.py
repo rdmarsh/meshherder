@@ -242,8 +242,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_global_via_radio_release_version_is_0_8_1():
-    assert __version__ == "0.8.1"
+def test_current_release_version_is_0_8_2():
+    assert __version__ == "0.8.2"
 
 
 def _run(args, rpc_response):
@@ -1005,6 +1005,22 @@ def test_sync_single_node_verbose_prints_daemon_progress():
     assert "reading fact: ver" in result.output
     assert "fact ver failed: timeout" in result.output
     assert "synced" in result.output
+
+
+@pytest.mark.parametrize(("command", "complete"), [("stop", "stopped"), ("restart", "restarted")])
+def test_lifecycle_stop_paths_warn_while_current_sync_is_finishing(command: str, complete: str):
+    runner = CliRunner()
+    result_obj = SimpleNamespace(returncode=0, stderr="")
+
+    with patch("mch.cli.subprocess.run", return_value=result_obj) as systemctl:
+        result = runner.invoke(cli, [command])
+
+    assert result.exit_code == 0
+    assert "stopping current sync, this may take some time" in result.output
+    assert f"mchd {complete}" in result.output
+    systemctl.assert_called_once_with(
+        ["systemctl", command, "mchd"], capture_output=True, text=True
+    )
 
 
 # ------ suggest ------

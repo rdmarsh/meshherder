@@ -100,8 +100,8 @@ class Gateway:
                     or r.bw != self.info.get("radio_bw")
                     or r.sf != self.info.get("radio_sf")):
                 log.info(
-                    "changing gateway to home freq: %.3f/%d/SF%d",
-                    r.freq, r.bw, r.sf,
+                    "changing gateway to home freq: %.3f/%g/SF%d/CR%d",
+                    r.freq, r.bw, r.sf, r.cr,
                 )
                 await self._mc.commands.set_radio(r.freq, r.bw, r.sf, r.cr)
                 self.info["radio_freq"] = r.freq
@@ -262,8 +262,8 @@ class Gateway:
         saved_sf: int = int(self.info.get("radio_sf") or 0)
         saved_cr: int = int(self.info.get("radio_cr") or 0)
         log.info(
-            "switching gateway radio: %.3f/%g/SF%d -> %.3f/%g/SF%d",
-            saved_freq, saved_bw, saved_sf, freq, bw, sf,
+            "switching gateway radio: %.3f/%g/SF%d/CR%d -> %.3f/%g/SF%d/CR%d",
+            saved_freq, saved_bw, saved_sf, saved_cr, freq, bw, sf, cr,
         )
         log.debug("set_radio: %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
         await mc.commands.set_radio(freq, bw, sf, cr)
@@ -285,7 +285,7 @@ class Gateway:
         self.info["radio_bw"] = bw
         self.info["radio_sf"] = sf
         self.info["radio_cr"] = cr
-        log.info("radio restored: %.3f/%.0f/SF%d", freq, bw, sf)
+        log.info("radio restored: %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
 
     async def login(self, contact: dict[str, Any], password: str) -> bool:
         """
@@ -437,7 +437,7 @@ class Gateway:
         result = await mc.commands.set_radio(freq, bw, sf, cr)
         if result.type == EventType.ERROR:
             raise GatewayError(f"set_radio failed: {result.payload}")
-        log.info("gateway radio changed to %.3f/%.0f/%d/%d", freq, bw, sf, cr)
+        log.info("gateway radio changed to %.3f/%g/SF%d/CR%d", freq, bw, sf, cr)
 
     async def current_radio(self) -> tuple[float, float, int, int]:
         """Return (freq, bw, sf, cr) from a fresh send_appstart."""
