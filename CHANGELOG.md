@@ -3,6 +3,14 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.8.3 - 2026-05-26
+
+- Make foreground `mch sync <node>` always stream progress and remove its optional verbose flag.
+- Cancel active gateway-owning work during daemon shutdown, restoring a temporary radio before
+  disconnecting the gateway.
+- Cancel a foreground node sync when its CLI client disconnects instead of leaving it holding the
+  operation lock through slow mesh timeouts.
+
 ## 0.8.2 - 2026-05-26
 
 - Show coding rate in human-facing radio switch/restore output without treating a CR-only

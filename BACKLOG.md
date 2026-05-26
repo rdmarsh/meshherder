@@ -14,11 +14,6 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Operation Safety And Reachability
 
-- Cancel an in-flight sync promptly during daemon shutdown and restore the gateway home radio
-  before exiting. A `2026-05-25` restart reached systemd's stop deadline while a sync held the
-  switched radio.
-- Handle foreground sync client cancellation safely: after `Ctrl-C` aborts `mch sync <node>`,
-  daemon work can continue to own the operation lock and immediate retries report `busy`.
 - Avoid polling every fact and setting when a node is plainly unreachable. Add a low-cost
   reachability probe before a full pass, with controlled stored-path/flood fallback before writes.
 - After a successful probe, consider randomizing independent read-only fact/setting reads so
@@ -48,8 +43,8 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### CLI And Reporting
 
-- Remove `-v`/`--verbose` from `mch sync <node>` and always stream progress as its only
-  foreground behavior; decide separately whether live progress should include timestamps.
+- Decide whether live sync progress should include timestamps now that it is always displayed for
+  foreground node sync.
 - Explain partial status more directly when enforced reads timed out after other reads succeeded;
   `TRIES` counts writes, so a failed read correctly does not increment it.
 - Consider an opt-in Markdown/clipboard-friendly rendering mode for sharing reports, while
@@ -137,6 +132,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-05-26: Made foreground node sync progress unconditional and cancelled active
+  gateway-owning work during shutdown or foreground client disconnect, so slow mesh waits no
+  longer conceal work or strand a temporary gateway radio.
 - 2026-05-26: Cleaned this backlog down to active work and open decisions; release history and
   lengthy field observations remain available in `CHANGELOG.md`, `JOURNAL.md`, and git history.
 - 2026-05-26: Documented Node > Group > Global shared-setting precedence for ungrouped nodes in

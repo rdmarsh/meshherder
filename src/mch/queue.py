@@ -226,6 +226,7 @@ class WorkQueue:
         self._manual_cycle_task: asyncio.Task[list[NodeResult]] | None = None
         self._operation_lock = asyncio.Lock()
         self._operation_name: str | None = None
+        self._operation_tasks: set[asyncio.Task[Any]] = set()
         self._contacts: list[dict[str, Any]] = []  # cached at startup; refreshed by run_cycle
         self._paused: asyncio.Event = asyncio.Event()
         self._paused.set()  # starts unpaused — event set means "OK to proceed"
@@ -261,8 +262,21 @@ class WorkQueue:
 
     async def stop(self) -> None:
         self._running = False
-        if self._current_task:
-            self._current_task.cancel()
+        current = asyncio.current_task()
+        tasks = {
+            task
+            for task in (
+                self._current_task,
+                self._manual_cycle_task,
+                *self._operation_tasks,
+            )
+            if task is not None and task is not current and not task.done()
+        }
+        for task in tasks:
+            if not task.cancelling():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def pause(self) -> None:
         """Signal the queue not to start new node operations (e.g. during commissioning)."""
@@ -289,9 +303,14 @@ class WorkQueue:
             raise OperationBusyError(f"busy: {current}")
         await self._operation_lock.acquire()
         self._operation_name = name
+        owner = asyncio.current_task()
+        if owner is not None:
+            self._operation_tasks.add(owner)
         try:
             yield
         finally:
+            if owner is not None:
+                self._operation_tasks.discard(owner)
             self._operation_name = None
             self._operation_lock.release()
 
@@ -307,10 +326,12 @@ class WorkQueue:
 
         task = asyncio.create_task(self._run_cycle_locked())
         self._manual_cycle_task = task
+        self._operation_tasks.add(task)
         task.add_done_callback(self._manual_cycle_done)
         return "sync started"
 
     def _manual_cycle_done(self, task: asyncio.Task[list[NodeResult]]) -> None:
+        self._operation_tasks.discard(task)
         try:
             results = task.result()
         except asyncio.CancelledError:

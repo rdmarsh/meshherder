@@ -4,6 +4,18 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-26 - Slow Mesh Operations And Cancellation
+
+- Treat slow MeshCore command replies as ordinary operating conditions, not an exceptional verbose
+  diagnostic case. A foreground `mch sync <node>` now always streams per-step progress; the
+  optional `--verbose` mode is removed.
+- Client disconnect during a foreground sync must cancel the daemon-side sync even while it is
+  awaiting a slow mesh reply. This releases the gateway operation lock and runs cleanup rather
+  than allowing an invisible sync to continue after Ctrl-C.
+- Daemon shutdown now cancels and awaits all active gateway-owning operations, including manual
+  and foreground work as well as scheduled work, before the gateway is disconnected. A sync that
+  temporarily changed radio settings unwinds through radio restoration first.
+
 ## 2026-05-26 - Backlog Triage And Coding Rate Semantics
 
 - Cleaned the backlog so it contains unfinished work and open decisions rather than repeating
