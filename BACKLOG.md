@@ -49,6 +49,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   foreground node sync.
 - Explain partial status more directly when enforced reads timed out after other reads succeeded;
   `TRIES` counts writes, so a failed read correctly does not increment it.
+- Add an operator-controlled cleanup for stale cached facts that are no longer configured, such
+  as a misspelled `facts:` key (`powersavings`) that remains visible in node status after it is
+  removed from configuration. Preserve observation history by default; make deletion explicit.
 - Consider an opt-in Markdown/clipboard-friendly rendering mode for sharing reports, while
   retaining aligned terminal tables as the default.
 - Persist "configured node not visible to gateway" warnings in `mch logs`, not only the journal.
@@ -134,6 +137,8 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-05-26: Added non-fatal `mch validate` warnings and close-match suggestions for unknown
+  `facts:` entries while keeping unregistered firmware reads available for deliberate use.
 - 2026-05-26: Added foreground sync visibility for effective management radio and cached
   direct/flood/stored contact route, using already available gateway state without sending an
   extra mesh command.

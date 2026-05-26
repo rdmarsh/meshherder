@@ -1,6 +1,7 @@
 from mch.command_registry import (
     command_timeout,
     get_spec,
+    readable_observation_keys,
     read_command_for_key,
     validate_value,
     write_command_for_key,
@@ -27,6 +28,14 @@ def test_fact_command_shapes_are_registered():
     assert read_command_for_key("clock") == "clock"
     assert read_command_for_key("neighbors") == "neighbors"
     assert read_command_for_key("role") == "get role"
+    assert read_command_for_key("owner.name") == "get owner.name"
+
+
+def test_readable_observation_keys_include_facts_and_readable_settings():
+    keys = readable_observation_keys()
+
+    assert {"board", "clock", "lat", "lon", "neighbors", "powersaving", "ver"} <= keys
+    assert "reboot" not in keys
 
 
 def test_clock_sync_behavior_is_recorded():

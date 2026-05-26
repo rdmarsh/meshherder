@@ -18,6 +18,7 @@ Think Ansible for your nodes, running continuously in the background.
 | [`CHANGELOG.md`](CHANGELOG.md) | Released version history and operator-visible changes. |
 | [`DESIGN.md`](DESIGN.md) | Stable architecture notes and design rationale. |
 | [`DEVELOP.md`](DEVELOP.md) | Repeatable bench and development procedures. |
+| [`MANUAL_TESTS.md`](MANUAL_TESTS.md) | Luna live-test worksheet with commands and result fields. |
 | [`JOURNAL.md`](JOURNAL.md) | Dated implementation decisions and lessons learned. |
 | [`SUGGEST.md`](SUGGEST.md) | Historical codebase review notes; move active items to `BACKLOG.md`. |
 
@@ -436,6 +437,10 @@ mch suggest                    # suggested txdelay for every node based on neigh
 mch suggest <label|prefix>     # full suggestions + paste-ready config block
 mch contacts                # nodes visible to the gateway but not yet in config
 ```
+
+`mch validate` also warns about unrecognised names in `facts:` and suggests close known
+readable values, for example `powersavings` to `powersaving`. Unknown fact keys are still allowed
+so newly added firmware reads can be evaluated before mch metadata catches up.
 
 ### Forcing a sync
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from difflib import get_close_matches
 from collections.abc import Hashable
 from dataclasses import dataclass, field
 from ipaddress import ip_address
@@ -13,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from mch.command_registry import validate_value
+from mch.command_registry import readable_observation_keys, validate_value
 from mch.meshkey import derive_public_key
 from mch.models import SettingPolicy
 
@@ -365,6 +366,25 @@ def secrets_identity_warnings(cfg: Config) -> list[str]:
                 f"expected prefix would start with {suggested!r}"
             )
 
+    return warnings
+
+
+def fact_name_warnings(cfg: Config) -> list[str]:
+    """Return warnings for fact reads not represented in command metadata."""
+    known = readable_observation_keys()
+    allowed = ", ".join(sorted(known))
+    warnings: list[str] = []
+
+    for key in getattr(cfg, "facts", []):
+        if key in known:
+            continue
+        suggestion = get_close_matches(key, known, n=1, cutoff=0.6)
+        hint = f"; did you mean {suggestion[0]!r}?" if suggestion else ""
+        warnings.append(
+            f"facts contains unrecognised key {key!r}{hint} "
+            f"Known readable facts/settings: {allowed}. "
+            f"Unknown keys remain permitted and will be read as 'get {key}'."
+        )
     return warnings
 
 

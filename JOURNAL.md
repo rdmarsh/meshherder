@@ -4,6 +4,16 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-26 - Fact Name Validation
+
+- Field status output exposed a typo configured as a fact: `powersavings` repeatedly returned
+  `??: powersavings`, while the intended readable setting is `powersaving`.
+- `mch validate` now warns for fact names that are not registered readable facts/settings and
+  suggests a close match where available. The check is intentionally non-fatal: MeshCore
+  firmware may add useful read keys before mch metadata is updated.
+- Registered readable settings such as `powersaving`, `lat`, and `lon` remain valid facts when an
+  operator wants observation without desired-state enforcement.
+
 ## 2026-05-26 - Management Route Visibility Without More Mesh Traffic
 
 - After luna showed intermittent command success across consecutive foreground syncs, the next

@@ -19,7 +19,7 @@ import click
 from mch import __version__
 from mch.command_registry import parse_radio_tuple, validate_radio_tuple
 from mch.command_safety import blocked_exec_command, confirm_exec_command
-from mch.config import load as load_config
+from mch.config import fact_name_warnings, load as load_config
 from mch.config import sanitize_node_label, secrets_identity_warnings
 from mch.meshkey import derive_public_key, generate_private_key
 from mch.recommend import load_radio_presets
@@ -205,6 +205,8 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
 
         click.echo(f"config ok: {cfg.config_path}")
         click.echo(f"nodes: {len(cfg.nodes)}  groups: {len(cfg.groups)}  secrets: not checked")
+        for warning in fact_name_warnings(cfg):
+            click.echo(f"warning: {warning}", err=True)
         click.echo(
             f"warning: cannot read secrets file: {exc.filename or cfg.secrets_path or exc}",
             err=True,
@@ -221,6 +223,8 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
         click.echo(f"secrets ok: {cfg.secrets_path}")
     else:
         click.echo("secrets: none found")
+    for warning in fact_name_warnings(cfg):
+        click.echo(f"warning: {warning}", err=True)
     for warning in secrets_identity_warnings(cfg):
         click.echo(f"warning: {warning}", err=True)
 

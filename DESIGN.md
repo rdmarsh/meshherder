@@ -279,6 +279,11 @@ should not become the same data type in the management model.
 write-back action, such as firmware version, hardware board, neighbours, or a value selected for
 visibility only.
 
+Configured fact keys are checked by `mch validate` against the command registry's known readable
+facts and settings. Unknown keys remain legal and retain the ordinary `get <key>` fallback so a
+new firmware value can be investigated before the registry is updated, but validation warns and
+suggests close registered names to prevent silent repeated reads of a typo.
+
 **Settings** are managed values with additional meaning: desired value, inheritance from
 global/group/node configuration, enforcement or audit policy, comparison status, write attempts,
 and a planned action. Even when the current setting is only being observed, retaining that

@@ -408,6 +408,32 @@ def test_secrets_identity_warnings_ignores_orphaned_secret(tmp_path):
     assert secrets_identity_warnings(cfg) == []
 
 
+def test_fact_name_warnings_suggests_known_readable_setting_for_typo(tmp_path):
+    from mch.config import fact_name_warnings
+
+    p = _write_config(tmp_path, "facts:\n  - powersavings\n")
+    cfg = load(p, load_secrets=False)
+
+    warnings = fact_name_warnings(cfg)
+
+    assert len(warnings) == 1
+    assert "powersavings" in warnings[0]
+    assert "did you mean 'powersaving'?" in warnings[0]
+    assert "Unknown keys remain permitted" in warnings[0]
+
+
+def test_fact_name_warnings_accepts_registered_readable_settings(tmp_path):
+    from mch.config import fact_name_warnings
+
+    p = _write_config(
+        tmp_path,
+        "facts:\n  - ver\n  - board\n  - clock\n  - lat\n  - lon\n  - neighbors\n  - powersaving\n",
+    )
+    cfg = load(p, load_secrets=False)
+
+    assert fact_name_warnings(cfg) == []
+
+
 def test_secrets_new_format_guest_password(tmp_path):
     """guest_password field is loaded from new per-node dict format."""
     p = _write_config(tmp_path, "gateway: {}")
