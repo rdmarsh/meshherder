@@ -945,7 +945,7 @@ async def test_run_node_verbose_describes_radio_switch_without_mesh_hop_wording(
 
     await wq.run_node("aabbcc", progress=progress)
 
-    assert "switching gateway radio to 916.575/62.5/SF7" in messages
+    assert "switching gateway radio to 916.575/62.5/SF7/CR8" in messages
     assert not any("hop" in message for message in messages)
 
 
@@ -1229,6 +1229,46 @@ async def test_node_on_different_freq_switches_radio(db):
     await wq.run_cycle()
     gw.switch_radio_temporarily.assert_awaited_once_with(916.575, 62.5, 7, 8)
     gw.restore_radio.assert_awaited_once_with(869.618, 62.5, 8, 5)
+
+
+async def test_node_on_same_channel_with_different_cr_does_not_switch_radio(db):
+    """CR is a sender preference; a receiver remains reachable with another CR."""
+    from mch.config import RadioConfig
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        via_radio=RadioConfig(freq=915.800, bw=250, sf=10, cr=8),
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    gw.switch_radio_temporarily.assert_not_awaited()
+
+
+async def test_node_on_same_freq_with_different_sf_switches_radio(db):
+    """Frequency, bandwidth, and SF must match to contact a node."""
+    from mch.config import RadioConfig
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        via_radio=RadioConfig(freq=915.800, bw=250, sf=9, cr=8),
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    gw.switch_radio_temporarily.assert_awaited_once_with(915.800, 250, 9, 8)
 
 
 async def test_node_inherits_group_via_radio(db):

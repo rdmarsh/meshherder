@@ -133,12 +133,15 @@ messenger:
 # default. Prefer per-setting policy while introducing a node or mixed group.
 # Use default_policy: enforce only where most declared settings should be written.
 
-# Global: shared defaults for every configured node. Groups override global
-# settings; nodes override groups. This is optional.
+# Global: shared defaults for every configured node, including nodes that do not
+# belong to a group. Settings and reachability resolve Node > Group > Global;
+# using groups is optional. This block supports the same shared setting and
+# policy fields as a group, except for a group name.
 global:
   default_policy: audit
   # Optional fleet-wide reachability radio. Use only when most managed nodes are contacted
-  # on this tuple; group and node via_radio values override it.
+  # on this channel; group and node via_radio values override it. Coding rate is printed
+  # as part of a complete radio config, but CR differences alone do not prevent reception.
   # via_radio: "916.575,62.5,7,8"
   settings:
     # Visible to guest logins and remote operators. Keep it operator-friendly.
@@ -147,11 +150,15 @@ global:
     #   owner.info: "Managed with https://meshherder.com"
     owner.info: "Managed with Mesh Herder"
     radio: "915.075,125,9,5"
+  # Optional fleet-wide policy overrides, identical to group setting_overrides:
+  # setting_overrides:
+  #   powersaving:
+  #     policy: skip
 
 # Groups: shared settings and policies applied to all nodes in the group.
 # A node inherits global settings, then its group settings, then applies its
-# own per-node overrides on top. Groups are optional - nodes can also be
-# configured fully standalone.
+# own per-node overrides on top. Groups are optional - ungrouped nodes still
+# inherit global settings and can apply per-node overrides.
 groups:
   - name: default
     default_policy: audit
@@ -165,6 +172,7 @@ groups:
     default_policy: enforce
     # Optional reachability radio inherited by group members unless overridden on a node.
     # This is not the desired `settings.radio` value and not a MeshCore routing path.
+    # A different freq, bw, or sf selects another channel; CR alone does not.
     # via_radio: "916.575,62.5,7,8"
     settings:
       # Two ways to configure a setting key:
@@ -206,6 +214,10 @@ nodes:
     label: SiteA-Rooftop
     group: repeaters
 
+  # Minimal ungrouped entry: inherits global settings and policy directly.
+  - pubkey_prefix: bbccddee
+    label: SiteA-Ungrouped
+
   # Per-node setting overrides layered on top of group settings.
   # Settings defined here are merged with the group settings; the node entry
   # wins on any key that appears in both.
@@ -225,6 +237,7 @@ nodes:
   # 'via_radio:' tells mchd to temporarily switch the gateway to this radio tuple to reach
   # the node, run the full sync, then restore the gateway's home frequency.
   # The node is otherwise managed identically to any other node.
+  # CR is included in the transmitted tuple but a CR-only difference does not trigger a switch.
   #
   # Short form (comma-separated: freq,bw,sf,cr) - same format as settings.radio.desired:
   - pubkey_prefix: 2fd9c7bb

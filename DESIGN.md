@@ -178,13 +178,15 @@ zero-hop versus flooded adverts, a firmware hop limit, and packet paths represen
 path hashes:
 <https://github.com/meshcore-dev/MeshCore/blob/main/docs/faq.md>.
 
-For normal management traffic, a node is contacted on the gateway's current radio tuple using its
-stored MeshCore contact path. If effective `via_radio` is set to a different radio tuple, mchd
-temporarily switches the gateway radio tuple before contacting the node and restores the home
-tuple afterward. `via_radio` can be declared globally, on a group, or on a node; precedence is
-node, then group, then global fallback. A global value should only be used when it applies to
-most managed devices because otherwise it moves home-radio devices unnecessarily. It is
-reachability-radio configuration, not a MeshCore path. Nodes
+For normal management traffic, a node is contacted on the gateway's current radio settings using
+its stored MeshCore contact path. If effective `via_radio` specifies a different frequency,
+bandwidth, or spreading factor, mchd temporarily switches the gateway before contacting the node
+and restores the home settings afterward. Coding rate is included when reporting/sending a radio
+configuration, but does not by itself require a switch: it controls the sender's redundancy and
+can differ while radios still communicate. `via_radio` can be declared globally, on a group, or
+on a node; precedence is node, then group, then global fallback. A global value should only be
+used when it applies to most managed devices because otherwise it moves home-radio devices
+unnecessarily. It is reachability-radio configuration, not a MeshCore path. Nodes
 that have moved radio without an
 updated management-radio value can repeatedly time out even though their desired settings are
 otherwise valid; recovery path inspection and historical-radio fallback remain future work.

@@ -3,6 +3,13 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.8.2 - 2026-05-26
+
+- Show coding rate in human-facing radio switch/restore output without treating a CR-only
+  difference as a different reachability channel.
+- Document global/group/node setting precedence for ungrouped nodes in the example config.
+- Print a wait notice before `mch stop` or `mch restart` blocks while current sync work exits.
+
 ## 0.8.1 - 2026-05-25
 
 - Added `global.via_radio` as an optional fleet-wide reachability-radio fallback beneath node and

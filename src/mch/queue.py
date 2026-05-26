@@ -392,10 +392,11 @@ class WorkQueue:
         )
 
         log.debug(
-            "gateway radio: %.3f/%.0f/SF%d",
+            "gateway radio: %.3f/%.0f/SF%d/CR%d",
             self._gateway.info.get("radio_freq", 0),
             self._gateway.info.get("radio_bw", 0),
             self._gateway.info.get("radio_sf", 0),
+            self._gateway.info.get("radio_cr", 0),
         )
 
         # block here if commission (or any other operation) has paused the queue
@@ -695,17 +696,27 @@ class WorkQueue:
                 await self._gateway.set_contact_favourite(contact)
 
             node_radio = resolve_via_radio(node_cfg, group_cfg, global_cfg)
-            gw_freq = self._gateway.info.get("radio_freq")
-            if node_radio is not None and node_radio.freq != gw_freq:
+            # CR controls the sender's redundancy and need not match for reception.
+            gateway_channel = (
+                round(float(self._gateway.info.get("radio_freq") or 0), 3),
+                float(self._gateway.info.get("radio_bw") or 0),
+                int(self._gateway.info.get("radio_sf") or 0),
+            )
+            required_channel = (
+                (node_radio.freq, node_radio.bw, node_radio.sf)
+                if node_radio is not None else None
+            )
+            if node_radio is not None and required_channel != gateway_channel:
                 log.info(
-                    "  switching gateway radio to %.3f/%d/SF%d for %r",
-                    node_radio.freq, node_radio.bw, node_radio.sf, name,
+                    "  switching gateway radio to %.3f/%g/SF%d/CR%d for %r",
+                    node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr, name,
                 )
                 await _progress(
                     progress,
                     (
                         f"switching gateway radio to "
-                        f"{node_radio.freq:.3f}/{node_radio.bw:g}/SF{node_radio.sf}"
+                        f"{node_radio.freq:.3f}/{node_radio.bw:g}/"
+                        f"SF{node_radio.sf}/CR{node_radio.cr}"
                     ),
                 )
                 saved_radio = await self._gateway.switch_radio_temporarily(

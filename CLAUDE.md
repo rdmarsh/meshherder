@@ -192,6 +192,9 @@ Install the service unit to `/etc/systemd/system/mchd.service`. The `mch start/s
 - Leave concise comments explaining why something non-obvious is done, especially when the reason
   comes from live MeshCore behavior, safety constraints, or a decision not to take an obvious path.
 - Preserve all debug logging and comments — they are intentional.
+- Preserve untriaged notes, backlog items, and investigation evidence until each item has an
+  explicit destination: active backlog, journal/design history, changelog, or deliberate rejection.
+  Do not silently compress away distinct future work.
 - When a mistake reveals a missing rule, update this file and the project journal.
 
 ## Code reviews
