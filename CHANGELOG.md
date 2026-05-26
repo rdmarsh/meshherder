@@ -3,6 +3,13 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.8.6 - 2026-05-26
+
+- Warn in `mch validate` when `facts:` contains an unrecognised read key, with spelling
+  suggestions such as `powersavings` to `powersaving`, while still permitting new firmware keys.
+- Add a luna manual QA worksheet covering no-traffic smoke checks, service lifecycle, test-radio
+  sync evidence, cancellation, stale facts, and optional commissioning.
+
 ## 0.8.5 - 2026-05-26
 
 - Show the effective management radio and cached direct/flood/stored contact route during a

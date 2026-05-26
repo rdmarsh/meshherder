@@ -77,7 +77,9 @@ secrets_file: /etc/meshherder/secrets.yaml   # optional; defaults to secrets.yam
 # Facts collected from every node each sync cycle (read-only CMDB data).
 # All fact commands run within a single node session; inter_node_delay_seconds
 # sits between nodes, not between individual fact commands. 'ver' and 'board'
-# use the bare command; everything else uses 'get <key>'.
+# use the bare command; most other keys use 'get <key>'. `mch validate` warns
+# about unregistered fact keys and suggests close known names, but permits them
+# so newly introduced firmware reads can still be investigated deliberately.
 facts:
   - ver          # firmware version, e.g. "v1.14.1-467959c (Build: 20-Mar-2026)"
   - board        # hardware name, e.g. "T-Beam Supreme"

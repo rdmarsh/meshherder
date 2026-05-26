@@ -1,4 +1,4 @@
-.TH MCH 1 "2026-05-26" "meshherder 0.8.5" "User Commands"
+.TH MCH 1 "2026-05-26" "meshherder 0.8.6" "User Commands"
 .SH NAME
 mch \- manage MeshCore repeater nodes through the mchd daemon
 .SH SYNOPSIS
@@ -51,6 +51,9 @@ This command does not contact
 .BR mchd .
 If the secrets file is not readable, the readable config is still checked and
 secrets are reported as not checked.
+Unrecognised names in the configured facts list are reported as warnings with
+close registered-name suggestions where possible; they remain permitted for
+new firmware reads that are not yet represented in mch metadata.
 .TP
 .B validate \-\-config \fIPATH\fR
 Validate an explicit config file.

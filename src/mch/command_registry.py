@@ -190,6 +190,7 @@ _SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("ver", "fact", read="ver"),
     CommandSpec("board", "fact", read="board"),
     CommandSpec("role", "fact", read="get role"),
+    CommandSpec("owner.name", "fact", read="get owner.name"),
     CommandSpec("clock", "fact", read="clock"),
     CommandSpec(
         "clock sync",
@@ -262,6 +263,15 @@ SPECS: dict[str, CommandSpec] = {spec.key: spec for spec in _SPECS}
 
 def get_spec(key: str) -> CommandSpec | None:
     return SPECS.get(key)
+
+
+def readable_observation_keys() -> frozenset[str]:
+    """Return registry keys that may be deliberately collected as read-only facts."""
+    return frozenset(
+        spec.key
+        for spec in _SPECS
+        if spec.kind in ("fact", "setting") and spec.read_command() is not None
+    )
 
 
 def read_command_for_key(key: str) -> str:

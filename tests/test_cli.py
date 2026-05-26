@@ -242,8 +242,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_8_5():
-    assert __version__ == "0.8.5"
+def test_current_release_version_is_0_8_6():
+    assert __version__ == "0.8.6"
 
 
 def _run(args, rpc_response):
@@ -369,12 +369,13 @@ def test_validate_explicit_missing_secrets_exits_nonzero(tmp_path):
 
 def test_validate_permission_denied_suggests_sudo(tmp_path):
     config = tmp_path / "config.yaml"
-    config.write_text("gateway: {}\n")
+    config.write_text("gateway: {}\nfacts:\n  - powersavings\n")
     denied = PermissionError(13, "Permission denied", "/etc/meshherder/secrets.yaml")
     config_only = SimpleNamespace(
         config_path=str(config.resolve()),
         nodes=[],
         groups=[],
+        facts=["powersavings"],
         secrets={},
         secrets_path="/etc/meshherder/secrets.yaml",
     )
@@ -388,6 +389,7 @@ def test_validate_permission_denied_suggests_sudo(tmp_path):
     assert result.exit_code != 0
     assert "config ok:" in result.output
     assert "secrets: not checked" in result.output
+    assert "did you mean 'powersaving'?" in result.output
     assert "cannot read secrets file" in result.output
     assert "sudo mch validate" in result.output
 
@@ -413,6 +415,18 @@ nodes:
     assert result.exit_code == 0
     assert "warning:" in result.output
     assert "does not match config pubkey_prefix" in result.output
+
+
+def test_validate_warns_for_unknown_fact_and_suggests_typo(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("facts:\n  - powersavings\n")
+
+    result = CliRunner().invoke(cli, ["validate", "--config", str(config)])
+
+    assert result.exit_code == 0
+    assert "warning: facts contains unrecognised key 'powersavings'" in result.output
+    assert "did you mean 'powersaving'?" in result.output
+    assert "Unknown keys remain permitted" in result.output
 
 
 # ------ status ------
