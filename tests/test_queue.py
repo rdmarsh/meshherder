@@ -994,6 +994,8 @@ async def test_run_node_reports_fact_and_setting_progress(db):
 async def test_run_node_progress_describes_radio_switch_without_mesh_hop_wording(db):
     from mch.config import RadioConfig
 
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
     node_cfg = _node(
         pubkey="aabbcc",
         label="TestNode",
@@ -1002,10 +1004,10 @@ async def test_run_node_progress_describes_radio_switch_without_mesh_hop_wording
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
-    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
-    wq._contacts = [_contact("aabbccdd1122")]
+    wq._contacts = [contact]
     messages: list[str] = []
 
     async def progress(message: str) -> None:
@@ -1013,8 +1015,59 @@ async def test_run_node_progress_describes_radio_switch_without_mesh_hop_wording
 
     await wq.run_node("aabbcc", progress=progress)
 
+    assert "management radio: 916.575/62.5/SF7/CR8 (via_radio temporary switch)" in messages
+    assert "cached management path: flood" in messages
     assert "switching gateway radio to 916.575/62.5/SF7/CR8" in messages
     assert not any("hop" in message for message in messages)
+
+
+async def test_run_node_progress_describes_gateway_radio_and_direct_cached_path(db):
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    messages: list[str] = []
+
+    async def progress(message: str) -> None:
+        messages.append(message)
+
+    await wq.run_node("aabbcc", progress=progress)
+
+    assert "management radio: 915.800/250/SF10/CR5 (gateway current radio; no switch)" in messages
+    assert "cached management path: direct" in messages
+    gw.switch_radio_temporarily.assert_not_awaited()
+
+
+async def test_run_node_progress_shows_stored_cached_path_metadata(db):
+    contact = _contact("aabbccdd1122")
+    contact.update({
+        "out_path": "e260,5f6c,68be",
+        "out_path_len": 3,
+        "out_path_hash_mode": 0,
+    })
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    messages: list[str] = []
+
+    async def progress(message: str) -> None:
+        messages.append(message)
+
+    await wq.run_node("aabbcc", progress=progress)
+
+    assert (
+        "cached management path: stored "
+        "(out_path=e260,5f6c,68be; out_path_len=3; hash-mode=0)"
+    ) in messages
 
 
 async def test_run_node_odd_prefix_rejected(db):

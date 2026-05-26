@@ -446,8 +446,10 @@ mch sync                     # sweep all nodes in the background
 
 Use `mch sync <prefix>` after editing a node's desired settings in config — it applies the changes
 immediately rather than waiting for the next scheduled cycle. MeshCore replies can be slow during
-normal operation, so foreground node sync always prints each read/write wait as it runs. Manual
-sync start, completion, failure, and abort are also retained in `mch logs`.
+normal operation, so foreground node sync always prints the effective management radio, cached
+contact path, and each read/write wait as it runs. The path line is cached gateway information,
+not a fresh reachability test. Manual sync start, completion, failure, and abort are also retained
+in `mch logs`.
 
 ### Checking status in the field
 
@@ -594,7 +596,7 @@ due operations, then reschedules the node back into normal rotation. Use this wh
 result right now:
 
 ```
-mch sync aabbccdd    # print reads, timeouts, writes, and operations while waiting
+mch sync aabbccdd    # print radio/path context, reads, timeouts, writes, and operations
 ```
 
 `mch sync` (no argument) starts a full sweep of every node in the background — the CLI returns
@@ -616,6 +618,8 @@ A normal startup and sync looks like this:
 mchd: gateway connected: name='🤖 mch-gw' freq=915.075 bw=125 sf=9 cr=5
 mchd: work queue started (interval=1.0d)
 mchd: processing node '📡 Millbrook' (aabbccdd...)
+mchd: management radio: 916.575/62.5/SF7/CR8 (via_radio temporary switch)
+mchd: cached management path: flood
 mchd: switching gateway radio to 916.575/62.5/SF7/CR8 for '📡 Millbrook'
 mchd: switching gateway radio: 915.075/125/SF9/CR5 -> 916.575/62.5/SF7/CR8
 mchd: radio restored: 915.075/125/SF9/CR5

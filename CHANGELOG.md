@@ -3,6 +3,11 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.8.5 - 2026-05-26
+
+- Show the effective management radio and cached direct/flood/stored contact route during a
+  foreground node sync without adding mesh traffic.
+
 ## 0.8.4 - 2026-05-26
 
 - Record operator-triggered full-cycle and single-node sync starts, completions, failures, and

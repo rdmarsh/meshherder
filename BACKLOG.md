@@ -18,10 +18,12 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   read-only reachability probe before a full pass, with a small bounded retry because luna
   testing showed the same node can miss `ver` once and answer on the next sync, then use
   controlled stored-path/flood fallback before writes.
+- Build a per-node reliability/fragility view from collected sync evidence: rolling command
+  success/failure and timeout rates first, then assess path length/history and optional physical
+  distance as explanatory signals. Use it to inform scheduling/backoff only after the evidence
+  model is visible and reviewable.
 - After a successful probe, consider randomizing independent read-only fact/setting reads so
   marginal connections do not repeatedly lose the same trailing observations.
-- Show the effective management radio and path choice during foreground sync, including the
-  gateway-home-radio case where no `via_radio` switch occurs.
 - Allow an operator-requested `commission` or `exec` to preempt scheduled sync at a safe
   between-command boundary rather than repeatedly returning `busy`.
 
@@ -132,6 +134,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-05-26: Added foreground sync visibility for effective management radio and cached
+  direct/flood/stored contact route, using already available gateway state without sending an
+  extra mesh command.
 - 2026-05-26: Applied command-registry write timeout metadata during ordinary enforcement, so
   slow `set radio` desired-state writes use the calibrated extended timeout already used during
   commissioning.
