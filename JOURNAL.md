@@ -4,6 +4,25 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-26 - Management Route Visibility Without More Mesh Traffic
+
+- After luna showed intermittent command success across consecutive foreground syncs, the next
+  step is observation rather than an automatic unreachable-node shortcut.
+- Foreground node sync now prints the effective management radio and the cached gateway contact
+  route mode (`direct`, `flood`, or stored path metadata) before reading from the node. The daemon
+  log records the same context.
+- This uses the contact and active radio information already held by the gateway. It sends no
+  added mesh traffic and does not claim that a cached route currently reaches the node.
+- Clarified the testing boundary: the USB-attached node on luna is a same-room bench target, so
+  deliberate verification traffic is expected there. Conserving radio traffic applies to
+  unattended syncs against remote, low-powered field nodes.
+- The safe testing distinction is also frequency-specific: current luna configuration has
+  test-labelled nodes on `via_radio: 915.800,...`; avoid discretionary test traffic on the
+  `915.075` field mesh channel.
+- Captured a future design direction: accumulate per-node reliability evidence from command
+  success/timeouts and partial runs, with path length/history and optional `lat`/`lon` distance as
+  contextual factors. Distance alone must not be treated as proof of fragility.
+
 ## 2026-05-26 - Luna Manual Sync Activity Testing
 
 - Reconfirmed the original design brief: mch is intended to bring unreliable, low-bandwidth,

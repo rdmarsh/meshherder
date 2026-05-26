@@ -211,6 +211,11 @@ Install the service unit to `/etc/systemd/system/mchd.service`. The `mch start/s
 - `luna` has a USB-attached MeshCore test node available for live/bench verification. Remember
   this when a change depends on real firmware timing, serial behavior, radio behavior, or mesh
   response handling; do not rely only on mocks where the hardware can answer the question.
+- The attached luna node is a same-room bench target: deliberate verification traffic to it is
+  appropriate. Traffic-minimisation constraints apply primarily to unattended management of
+  remote field and solar-powered nodes.
+- Keep deliberate bench/test traffic on the configured test frequency (`915.800` in the current
+  luna setup). Avoid unnecessary testing traffic on the field mesh frequency `915.075`.
 - Keep potentially disruptive live writes deliberate: use the attached node for approved testing
   and record observed behavior in `JOURNAL.md` before turning it into a rule or constant.
 

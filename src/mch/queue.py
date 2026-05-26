@@ -54,6 +54,28 @@ async def _progress(callback: ProgressCallback, message: str) -> None:
         await callback(message)
 
 
+def _format_radio(freq: Any, bw: Any, sf: Any, cr: Any) -> str:
+    return f"{float(freq):.3f}/{float(bw):g}/SF{int(sf)}/CR{int(cr)}"
+
+
+def _describe_cached_management_path(contact: dict[str, Any]) -> str:
+    path_len = contact.get("out_path_len")
+    if path_len == -1:
+        return "flood"
+    if path_len == 0:
+        return "direct"
+    if isinstance(path_len, int) and path_len > 0:
+        details = [f"out_path_len={path_len}"]
+        out_path = contact.get("out_path")
+        if out_path:
+            details.insert(0, f"out_path={out_path}")
+        hash_mode = contact.get("out_path_hash_mode")
+        if hash_mode is not None:
+            details.append(f"hash-mode={hash_mode}")
+        return f"stored ({'; '.join(details)})"
+    return "unknown (no route metadata in cached contact)"
+
+
 # ---------------------------------------------------------------------------
 # policy resolution
 # ---------------------------------------------------------------------------
@@ -747,10 +769,6 @@ class WorkQueue:
         saved_radio: tuple[float, float, int, int] | None = None
 
         try:
-            # Ensure gateway metadata/radio setup failures also terminate this sync state.
-            if not contact.get("flags", 0) & 1:
-                await self._gateway.set_contact_favourite(contact)
-
             node_radio = resolve_via_radio(node_cfg, group_cfg, global_cfg)
             # CR controls the sender's redundancy and need not match for reception.
             gateway_channel = (
@@ -762,7 +780,31 @@ class WorkQueue:
                 (node_radio.freq, node_radio.bw, node_radio.sf)
                 if node_radio is not None else None
             )
-            if node_radio is not None and required_channel != gateway_channel:
+            switch_required = node_radio is not None and required_channel != gateway_channel
+            if switch_required:
+                management_radio = _format_radio(
+                    node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
+                )
+                radio_source = "via_radio temporary switch"
+            else:
+                management_radio = _format_radio(
+                    self._gateway.info.get("radio_freq") or 0,
+                    self._gateway.info.get("radio_bw") or 0,
+                    self._gateway.info.get("radio_sf") or 0,
+                    self._gateway.info.get("radio_cr") or 0,
+                )
+                radio_source = "gateway current radio; no switch"
+            management_path = _describe_cached_management_path(contact)
+            log.info("  management radio: %s (%s)", management_radio, radio_source)
+            log.info("  cached management path: %s", management_path)
+            await _progress(progress, f"management radio: {management_radio} ({radio_source})")
+            await _progress(progress, f"cached management path: {management_path}")
+
+            # Ensure gateway metadata/radio setup failures also terminate this sync state.
+            if not contact.get("flags", 0) & 1:
+                await self._gateway.set_contact_favourite(contact)
+
+            if switch_required:
                 log.info(
                     "  switching gateway radio to %.3f/%g/SF%d/CR%d for %r",
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr, name,

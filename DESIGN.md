@@ -216,17 +216,19 @@ updated management-radio value can repeatedly time out even though their desired
 otherwise valid; recovery path inspection and historical-radio fallback remain future work.
 
 The current command flow is path-capable but not path-managing: `send_command()` sends through the
-gateway's stored MeshCore contact, whose `out_path` may already contain repeater hops. It does not
-display that path, force a chosen path, or fall back from a failed stored path to flood routing.
+gateway's stored MeshCore contact, whose `out_path` may already contain repeater hops. Foreground
+node sync displays the effective management radio and cached contact routing mode/path metadata
+before reads start; this provides diagnostic context without additional mesh traffic. It does not
+force a chosen path or fall back from a failed stored path to flood routing.
 By contrast, the dependency's direct-message retry helper can reset a broken path to flood after
 failed attempts. Management path inspection and controlled recovery need an explicit operator
 workflow before mchd can safely retry configuration writes over an alternative route.
 
 A future reachability check should be conservative: attempt a read-only probe on the stored
-contact path, reset to flood routing and retry the probe once if that path times out, then stop
-processing the node for that sync if flood also fails. Repeated failed scheduled probes should
-back off across cycles; delaying every read command within an already failing pass would only
-increase mesh load and operator wait time.
+contact path with a small bounded retry because one missing reply is inconclusive, then reset to
+flood routing and retry the probe before stopping processing for that sync. Repeated failed
+scheduled probes should back off across cycles; delaying every read command within an already
+failing pass would only increase mesh load and operator wait time.
 
 Successful routing paths should also be retained as bounded observed history. This is useful when
 the gateway has fallen back to flood routing but a recently working repeater path is known, as
@@ -234,6 +236,17 @@ observed for the Acacia Gardens and QH Paterson labels in field operation. Store
 number of successful candidate paths with last-success time and hop count, prefer short recent
 paths, and try at most a tightly limited number before a single flood probe. Long paths impose
 greater latency and failure probability, so status should surface path length.
+
+Reliability assessment should be learned primarily from observed management outcomes: rolling
+successful replies, timeouts, partial syncs, command-specific failures, and path changes. Route
+length and physical distance inferred from configured `lat`/`lon` may help explain fragile nodes,
+but neither proves unreliability: terrain, radio settings, power budget, and repeater availability
+also matter. Any eventual adaptive polling/backoff policy should first expose the underlying
+score/evidence to the operator and should not increase field-node traffic merely to calculate it.
+
+Live bench testing may deliberately exercise the same-room test node on its test radio. For the
+current luna deployment that means `915.800`; avoid generating discretionary test traffic on the
+`915.075` field mesh channel.
 
 In operator-facing views, `LABEL` means mch's local identifier and `MESH NAME` means the name
 advertised by the MeshCore device. Avoid using a `NODE` column heading where a local label is
