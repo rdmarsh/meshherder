@@ -20,8 +20,6 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   marginal connections do not repeatedly lose the same trailing observations.
 - Show the effective management radio and path choice during foreground sync, including the
   gateway-home-radio case where no `via_radio` switch occurs.
-- Apply command-registry timeout metadata during ordinary enforcement. In particular, `set radio`
-  can require longer than the default command timeout.
 - Allow an operator-requested `commission` or `exec` to preempt scheduled sync at a safe
   between-command boundary rather than repeatedly returning `busy`.
 
@@ -132,6 +130,12 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-05-26: Applied command-registry write timeout metadata during ordinary enforcement, so
+  slow `set radio` desired-state writes use the calibrated extended timeout already used during
+  commissioning.
+- 2026-05-26: Added activity boundaries for operator-triggered syncs: manual full cycles and
+  single-node syncs record start, completion, failure, or abort so command results can be grouped
+  with the manual run that caused them.
 - 2026-05-26: Made foreground node sync progress unconditional and cancelled active
   gateway-owning work during shutdown or foreground client disconnect, so slow mesh waits no
   longer conceal work or strand a temporary gateway radio.

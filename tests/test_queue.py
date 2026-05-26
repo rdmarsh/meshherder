@@ -305,6 +305,10 @@ async def test_start_cycle_rejects_duplicate_manual_cycle(db):
 
     release.set()
     await wq._manual_cycle_task
+    logs = await db.get_logs()
+    messages = [entry["message"] for entry in logs]
+    assert "manual sync started: full cycle" in messages
+    assert "manual sync completed: full cycle (0 nodes processed)" in messages
 
 
 async def test_stop_cancels_manual_cycle_and_releases_operation_lock(db):
@@ -324,6 +328,8 @@ async def test_stop_cancels_manual_cycle_and_releases_operation_lock(db):
     assert wq._manual_cycle_task is not None
     assert wq._manual_cycle_task.cancelled()
     assert not wq._operation_lock.locked()
+    logs = await db.get_logs()
+    assert any(entry["message"] == "manual sync aborted: full cycle" for entry in logs)
 
 
 # ------------------------------------------------------------------
@@ -476,6 +482,33 @@ async def test_cycle_does_not_enforce_close_enough_radio_roundoff(db):
     assert results[0].settings_drifted == 0
     sent = [c.args[1] for c in gw.send_command.await_args_list]
     assert sent == ["get radio"]
+
+
+async def test_cycle_enforced_radio_write_uses_registered_slow_timeout(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"radio": SettingConfig(
+            desired="915.075,125,9,5",
+            policy=SettingPolicy.ENFORCE,
+        )},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="915.800,250,10,5"),
+        CommandResult(success=True, text="ok"),
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    assert gw.send_command.await_args_list[0].args[1] == "get radio"
+    assert "timeout" not in gw.send_command.await_args_list[0].kwargs
+    assert gw.send_command.await_args_list[1].args[1] == "set radio 915.075,125,9,5"
+    assert gw.send_command.await_args_list[1].kwargs["timeout"] == 180.0
 
 
 async def test_bare_command_key_uses_bare_read_and_write(db):
@@ -915,6 +948,22 @@ async def test_run_node_forces_immediate_sync(db):
     assert result.reachable is True
 
 
+async def test_run_node_logs_manual_sync_start_and_completion(db):
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122")
+    wq = WorkQueue(cfg, _make_gateway(contacts=[contact]), db)
+    wq._contacts = [contact]
+
+    await wq.run_node("aabbcc")
+
+    logs = await db.get_logs("aabbccdd1122")
+    messages = [entry["message"] for entry in logs]
+    assert "manual sync started" in messages
+    assert "manual sync completed" in messages
+
+
 async def test_run_node_reports_fact_and_setting_progress(db):
     node_cfg = _node(
         pubkey="aabbcc",
@@ -1224,6 +1273,8 @@ async def test_stop_cancels_forced_sync_and_restores_temporary_radio(db):
     assert not wq._operation_lock.locked()
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.PARTIAL
+    logs = await db.get_logs(node.pubkey)
+    assert any(entry["message"] == "manual sync aborted" for entry in logs)
 
 
 async def test_cycle_observed_updated_after_set(db):

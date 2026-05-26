@@ -3,6 +3,13 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.8.4 - 2026-05-26
+
+- Record operator-triggered full-cycle and single-node sync starts, completions, failures, and
+  aborts in recent activity logs.
+- Apply command-registry timeouts to ordinary enforced writes, including the extended timeout for
+  slow `set radio` updates over the mesh.
+
 ## 0.8.3 - 2026-05-26
 
 - Make foreground `mch sync <node>` always stream progress and remove its optional verbose flag.

@@ -191,6 +191,10 @@ Install the service unit to `/etc/systemd/system/mchd.service`. The `mch start/s
   remember hidden context, ordering assumptions, or bench-specific behavior.
 - Leave concise comments explaining why something non-obvious is done, especially when the reason
   comes from live MeshCore behavior, safety constraints, or a decision not to take an obvious path.
+- Preserve the rationale and supporting evidence for operational constants and safety decisions
+  (for example calibrated timeouts, retry limits, radio behavior, or reboot choices) in
+  `JOURNAL.md` while investigating and in `DESIGN.md` once it is stable. Do not leave a magic
+  value in code without a traceable reason.
 - Preserve all debug logging and comments — they are intentional.
 - Preserve untriaged notes, backlog items, and investigation evidence until each item has an
   explicit destination: active backlog, journal/design history, changelog, or deliberate rejection.
