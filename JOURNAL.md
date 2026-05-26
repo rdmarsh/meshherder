@@ -4,6 +4,23 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-26 - Luna Manual Sync Activity Testing
+
+- Luna testing of `0.8.3` confirmed that foreground `mch sync <node>` streams normal slow mesh
+  work by default and that Ctrl-C returns control promptly during an in-progress read.
+- The activity history exposed a missing audit boundary: it showed per-command timeouts and
+  successful writes, but did not show which entries belonged to an operator-triggered sync or
+  that a later foreground sync was deliberately aborted.
+- Manual full-cycle and single-node syncs now record start, completion, failure, and abort entries
+  in activity history. Scheduled cycles remain distinguishable by not emitting manual-run markers.
+- The same slow-network assumption applies to writes: ordinary desired-state enforcement now
+  consumes command-registry timeout metadata, so `set radio` receives the calibrated 180-second
+  timeout previously applied only during commissioning.
+- Added a project workflow rule requiring operational constants and safety decisions to retain
+  their rationale and supporting evidence in the journal during investigation and in design notes
+  once stable. The 180-second timeout is the immediate example: it remains traceable to live
+  commissioning evidence rather than becoming an unexplained constant.
+
 ## 2026-05-26 - Slow Mesh Operations And Cancellation
 
 - Treat slow MeshCore command replies as ordinary operating conditions, not an exceptional verbose

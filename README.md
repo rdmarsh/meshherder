@@ -446,7 +446,8 @@ mch sync                     # sweep all nodes in the background
 
 Use `mch sync <prefix>` after editing a node's desired settings in config — it applies the changes
 immediately rather than waiting for the next scheduled cycle. MeshCore replies can be slow during
-normal operation, so foreground node sync always prints each read/write wait as it runs.
+normal operation, so foreground node sync always prints each read/write wait as it runs. Manual
+sync start, completion, failure, and abort are also retained in `mch logs`.
 
 ### Checking status in the field
 
@@ -649,6 +650,10 @@ If a node shows as `partial`, `mch logs <prefix>` will show what failed:
 `TRIES` in status/issue output is write-attempt count, not read-timeout count. A timed-out
 enforced setting read cannot be compared or written and therefore does not increment `TRIES`;
 it appears in `mch logs` and in the final partial-sync result instead.
+
+Operator-triggered syncs add activity markers around this output: `mch sync <prefix>` records
+start and completion, failure, or abort on the node, while `mch sync` records equivalent
+fleet-level markers. This distinguishes manual investigation from scheduled sync history.
 
 The systemd journal remains the daemon/service diagnostic log, including startup, service
 failure, and radio/session debugging. `mch logs` is the node activity history; `mch status`

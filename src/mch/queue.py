@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from mch.command_registry import read_command_for_key, write_command_for_key
+from mch.command_registry import command_timeout, read_command_for_key, write_command_for_key
 from mch.command_safety import fire_and_forget_command
 from mch.config import Config, GroupConfig, NodeConfig, OperationConfig, resolve_via_radio
 from mch.db import Database
@@ -323,6 +323,12 @@ class WorkQueue:
             raise OperationBusyError(f"busy: {current}")
         await self._operation_lock.acquire()
         self._operation_name = "sync cycle"
+        try:
+            await self._db.write_log(None, "INFO", "manual sync started: full cycle")
+        except Exception:
+            self._operation_name = None
+            self._operation_lock.release()
+            raise
 
         task = asyncio.create_task(self._run_cycle_locked())
         self._manual_cycle_task = task
@@ -588,15 +594,33 @@ class WorkQueue:
                 node_cfg = _NC(pubkey_prefix=pubkey[:8])
                 global_cfg = None
 
-            result = await self._process_node(
-                node_cfg, group_cfg, global_cfg, contact, progress=progress
-            )
+            await self._db.write_log(pubkey, "INFO", "manual sync started")
+            try:
+                result = await self._process_node(
+                    node_cfg, group_cfg, global_cfg, contact, progress=progress
+                )
+            except asyncio.CancelledError:
+                await self._db.write_log(pubkey, "WARNING", "manual sync aborted")
+                raise
+            except Exception as exc:
+                await self._db.write_log(pubkey, "ERROR", f"manual sync failed: {exc}")
+                raise
 
             interval_s = self._config.scheduler.sync_interval_days * 86400
             jitter = random.uniform(-interval_s * 0.1, interval_s * 0.1)
             next_sync = datetime.now(UTC) + timedelta(seconds=interval_s + jitter)
             await self._db.set_next_sync(pubkey, next_sync)
 
+            if result.error:
+                await self._db.write_log(pubkey, "ERROR", f"manual sync failed: {result.error}")
+            elif (
+                result.enforced_settings_drifted
+                or result.enforced_settings_failed
+                or result.operations_failed
+            ):
+                await self._db.write_log(pubkey, "INFO", "manual sync completed: partial result")
+            else:
+                await self._db.write_log(pubkey, "INFO", "manual sync completed")
             return result
 
     async def run_cycle(self) -> list[NodeResult]:
@@ -609,7 +633,18 @@ class WorkQueue:
 
     async def _run_cycle_locked(self) -> list[NodeResult]:
         try:
-            return await self._run_cycle_body()
+            results = await self._run_cycle_body()
+        except asyncio.CancelledError:
+            await self._db.write_log(None, "WARNING", "manual sync aborted: full cycle")
+            raise
+        except Exception as exc:
+            await self._db.write_log(None, "ERROR", f"manual sync failed: full cycle: {exc}")
+            raise
+        else:
+            await self._db.write_log(
+                None, "INFO", f"manual sync completed: full cycle ({len(results)} nodes processed)"
+            )
+            return results
         finally:
             self._operation_name = None
             self._operation_lock.release()
@@ -851,6 +886,8 @@ class WorkQueue:
         command: str,
         node: Node,
         node_cfg: NodeConfig,
+        *,
+        timeout: float | None = None,
     ) -> CommandResult:
         """
         Send a command; detect permission errors and re-authenticate + retry once.
@@ -862,7 +899,10 @@ class WorkQueue:
           3. If login succeeds, sets auth_cached=True and retries the command.
           4. If login fails or no password is configured, returns a failure result.
         """
-        result = await self._gateway.send_command(contact, command)
+        if timeout is None:
+            result = await self._gateway.send_command(contact, command)
+        else:
+            result = await self._gateway.send_command(contact, command, timeout=timeout)
 
         if result.success and _is_permission_error(result.text or ""):
             log.warning(
@@ -888,7 +928,10 @@ class WorkQueue:
             node.auth_cached = True
             await self._db.upsert_node(node)
             # retry the command now that we're authenticated
-            result = await self._gateway.send_command(contact, command)
+            if timeout is None:
+                result = await self._gateway.send_command(contact, command)
+            else:
+                result = await self._gateway.send_command(contact, command, timeout=timeout)
 
         return result
 
@@ -1005,7 +1048,11 @@ class WorkQueue:
                     write_cmd = write_command_for_key(key, desired)
                     setting.update_attempts += 1
                     set_res = await self._send_authed(
-                        contact, write_cmd, node, node_cfg
+                        contact,
+                        write_cmd,
+                        node,
+                        node_cfg,
+                        timeout=command_timeout(write_cmd),
                     )
                     if set_res.success:
                         enforced += 1

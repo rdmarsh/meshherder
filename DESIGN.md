@@ -173,6 +173,8 @@ manual full sync, forced node sync, raw `mch exec`, and commissioning cannot ove
 operations return `busy: <operation>` if another workflow owns the gateway/radio.
 Shutdown cancels and awaits active gateway-owning operations before disconnecting the gateway, so
 a temporary management-radio switch can be restored during cancellation cleanup.
+Operator-triggered single-node and full-cycle syncs write activity boundary records for start and
+terminal outcome; scheduled cycles do not use these manual-run markers.
 
 ### MeshCore hop/path terminology
 
