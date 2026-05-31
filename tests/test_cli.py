@@ -1317,6 +1317,28 @@ def _commission_input(*lines: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def test_new_command_is_visible_and_commission_command_is_removed():
+    result = CliRunner().invoke(cli, ["--help"])
+
+    assert result.exit_code == 0
+    assert "new" in result.output
+    assert "commission" not in result.output
+
+    old_result = CliRunner().invoke(cli, ["commission"])
+    assert old_result.exit_code != 0
+    assert "No such command 'commission'" in old_result.output
+
+
+def test_new_command_runs_commissioning_wizard():
+    runner = CliRunner()
+    with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input="q\n")
+
+    assert mock_rpc.call_count == 1
+    assert result.exit_code == 0
+    assert "Add a MeshCore Node" in result.output
+
+
 def test_commission_new_happy_path():
     """Happy path: scan finds node, 'new' mode, confirms, daemon returns success."""
     runner = CliRunner()
@@ -1338,7 +1360,7 @@ def test_commission_new_happy_path():
         "y",          # confirm
     )
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert result.exit_code == 0, result.output
     assert "a695e2be" in result.output  # pubkey_prefix shown
     assert "Restart or reload mchd" in result.output
@@ -1364,7 +1386,7 @@ def test_commission_new_cancel_aborts():
         "q",          # cancel at confirm
     )
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert mock_rpc.call_count == 1  # only the scan call, no commission call
     assert result.exit_code == 0
     assert "cancelled" in result.output.lower()
@@ -1385,7 +1407,7 @@ def test_commission_new_no_at_confirm_aborts():
     )
     with patch("mch.cli._profile_radio_options", return_value=[]), \
          patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
 
     assert mock_rpc.call_count == 1
     assert result.exit_code == 0
@@ -1406,7 +1428,7 @@ def test_commission_new_quit_at_radio_prompt_aborts():
     )
     with patch("mch.cli._profile_radio_options", return_value=[]), \
          patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
 
     assert mock_rpc.call_count == 1
     assert result.exit_code == 0
@@ -1426,7 +1448,7 @@ def test_commission_new_admin_password_defaults_to_password():
     presets = [("Australia Mid", "915.075,125,9,5")]
     with patch("mch.cli._profile_radio_options", return_value=presets), \
          patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
-        runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=_commission_input(
+        runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=_commission_input(
             "n", "Test Site", "", "", "", "", "", "y",
             # label, name, group, admin_pw, guest_pw, radio, confirm
         ))
@@ -1458,7 +1480,7 @@ def test_commission_new_can_choose_config_group():
          patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "Test Site", "", "2", "", "", "", "y",
                 # mode, label, name, group choice, admin_pw, guest_pw, radio, confirm
@@ -1493,7 +1515,7 @@ def test_commission_new_leaves_group_unset_when_no_config_groups():
          patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "Test Site", "", "", "", "", "", "y",
                 # mode, label, name, group default, admin_pw, guest_pw, radio, confirm
@@ -1525,7 +1547,7 @@ def test_commission_new_group_defaults_to_first_config_group():
          patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "Test Site", "", "", "", "", "", "y",
                 # mode, label, name, group default, admin_pw, guest_pw, radio, confirm
@@ -1552,7 +1574,7 @@ def test_commission_new_can_choose_profile_radio_option():
          patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "Test Site", "", "", "", "", "2", "y",
                 # mode, label, name, group, admin_pw, guest_pw, radio choice, confirm
@@ -1588,7 +1610,7 @@ def test_commission_new_can_choose_config_radio_option():
          patch("mch.cli._rpc", side_effect=[scan_resp, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "Test Site", "", "", "", "", "2", "y",
                 # mode, label, name, group, admin_pw, guest_pw, radio choice, confirm
@@ -1616,7 +1638,7 @@ def test_commission_new_can_paste_radio_tuple():
          patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "Test Site", "", "", "", "", "p", "916.575,62.5,7,8", "y",
                 # mode, label, name, group, admin_pw, guest_pw, paste, tuple, confirm
@@ -1642,7 +1664,7 @@ def test_commission_new_blank_paste_returns_to_radio_menu():
          patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "Test Site", "", "", "", "", "p", "", "1", "y",
                 # mode, label, name, group, admin_pw, guest_pw, paste, blank, radio, confirm
@@ -1676,7 +1698,7 @@ def test_commission_new_defaults_label_from_generated_identity():
          patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "commission"],
+            ["--socket", "/fake.sock", "new"],
             input=_commission_input(
                 "n", "", "", "", "", "", "", "y",
                 # mode, label, name, group, admin_pw, guest_pw, radio, confirm
@@ -1690,7 +1712,7 @@ def test_commission_new_defaults_label_from_generated_identity():
 
 
 def test_commission_new_daemon_error_shows_retry_prompt():
-    """When commission RPC fails, error is shown and [e]dit/[q]uit options are offered."""
+    """When commission RPC fails, error is shown and [e]dit/[q]cancel options are offered."""
     runner = CliRunner()
     error_resp = {"ok": False, "error": "commission failed at 'password x': ERR_CODE_NOT_FOUND"}
     inp = _commission_input(
@@ -1705,7 +1727,7 @@ def test_commission_new_daemon_error_shows_retry_prompt():
         "q",          # quit at retry prompt
     )
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, error_resp]):
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert "ERR_CODE_NOT_FOUND" in result.output
     assert result.exit_code == 0  # graceful exit via retry prompt
 
@@ -1738,16 +1760,54 @@ def test_commission_new_edit_at_summary_re_enters_values():
         "y",          # confirm (second pass)
     )
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, success_resp]) as mock_rpc:
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert result.exit_code == 0, result.output
     assert mock_rpc.call_count == 2  # scan + commission (only one commission attempt)
+
+
+def test_commission_new_edit_shows_selected_group_and_radio_first():
+    """After edit, previously chosen group/radio are item 1 and visibly selected."""
+    runner = CliRunner()
+    scan_resp = {"ok": True, "data": {
+        "nodes": [{"pubkey": "a695e2be" + "0" * 52, "node_type": 2, "SNR_in": 5.0}],
+        "gateway_radio": "915.075,125,9,5",
+        "radio_options": [
+            {"label": "gateway/home radio", "value": "915.075,125,9,5"},
+            {"label": "group dave_test", "value": "915.800,250,10,5"},
+        ],
+        "group_options": ["default", "narrow", "wide", "dave_test"],
+    }}
+    inp = _commission_input(
+        "n",              # mode: new
+        "Test Site",      # label
+        "",               # name
+        "4",              # group dave_test
+        "",               # admin password
+        "",               # guest password
+        "2",              # radio group dave_test
+        "e",              # edit
+        "",               # label
+        "",               # name
+        "",               # group default is now selected dave_test
+        "",               # admin password
+        "",               # guest password
+        "q",              # cancel at radio menu
+    )
+    with patch("mch.cli._profile_radio_options", return_value=[]), \
+         patch("mch.cli._rpc", side_effect=[scan_resp]) as mock_rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
+
+    assert result.exit_code == 0, result.output
+    assert mock_rpc.call_count == 1
+    assert "  1. dave_test (selected)" in result.output
+    assert "  1. 915.800,250,10,5   group dave_test (selected)" in result.output
 
 
 def test_commission_quit_at_mode_prompt():
     """Entering 'q' at the mode prompt (after scan) exits cleanly."""
     runner = CliRunner()
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE]) as mock_rpc:
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input="q\n")
     assert mock_rpc.call_count == 1  # scan was called, but nothing else
     assert result.exit_code == 0
 
@@ -1756,7 +1816,7 @@ def test_commission_scan_no_nodes_retry_then_quit():
     """When no unmanaged nodes found, retry prompt is offered; user can quit."""
     runner = CliRunner()
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_NONE]):
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input="q\n")
     assert "no unmanaged nodes" in result.output.lower()
     assert result.exit_code == 0
 
@@ -1766,7 +1826,7 @@ def test_commission_scan_busy_explains_wait_and_recovery():
     runner = CliRunner()
     busy = {"ok": False, "error": "busy: commission"}
     with patch("mch.cli._rpc", side_effect=[busy]):
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input="q\n")
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input="q\n")
     assert result.exit_code == 0
     assert "still finishing or cancelling" in result.output
     assert "Wait about 10-30 seconds" in result.output
@@ -1779,7 +1839,7 @@ def test_commission_replace_no_replaceable_nodes():
     list_resp = {"ok": True, "data": {"replaceable": []}}
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, list_resp]):
         result = runner.invoke(
-            cli, ["--socket", "/fake.sock", "commission"], input=_commission_input("r")
+            cli, ["--socket", "/fake.sock", "new"], input=_commission_input("r")
         )
     assert result.exit_code != 0
     assert "prv_key" in result.output or "no node" in result.output.lower()
@@ -1798,6 +1858,6 @@ def test_commission_replace_happy_path():
     }}
     inp = _commission_input("r", "1", "y")
     with patch("mch.cli._rpc", side_effect=[_SCAN_RESP_ONE, list_resp, commission_resp]):
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "commission"], input=inp)
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert result.exit_code == 0
     assert "Site A" in result.output or "aabbccdd" in result.output

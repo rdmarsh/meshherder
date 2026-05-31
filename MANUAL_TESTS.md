@@ -589,7 +589,7 @@ Preparation:
 - Keep the target radio choice on `915.800,...`, never `915.075`.
 
 ```bash
-mch commission
+mch new
 # Select new-node mode.
 # Choose or paste target radio: 915.800,250,10,5
 # After success, add the printed node and secret snippets to the appropriate config files.
