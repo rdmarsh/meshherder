@@ -333,6 +333,24 @@ timing out on every fact and setting. When the node answers, that `ver` reply is
 `ver` fact. Independent fact and setting reads are then issued in a randomized order each cycle, so
 a marginal link does not keep losing the same trailing observations.
 
+Reachability and path behavior is deliberately conservative:
+
+- mch uses the gateway's cached MeshCore contact path for normal management. If that contact has a
+  stored repeater path, reads and writes use that path; if the contact is flood-routed, mch does
+  not invent a path by itself.
+- On a stored path, isolated fact/setting read misses get a small retry budget for that node pass.
+  This helps lossy links without retrying every command or increasing traffic without bound.
+- Enforced writes are not retried over flood after a stored-path failure. A missed write remains a
+  failed write for that cycle so the operator can see it and avoid duplicate side effects.
+- If both initial `ver` probes fail on a stored path, mch sends one flood-routed `ver` probe as a
+  recovery signal. If flood reaches the node, mch logs that the stored path needs repair, but it
+  does not continue the full sync over flood.
+- Scheduled syncs use the same rules as manual syncs. A node due once per `sync_interval_days`
+  can therefore get one flood `ver` recovery probe per scheduled attempt when its stored path is
+  failing, plus any manual syncs the operator explicitly requests.
+- Path repair is still explicit: use MeshCore path tools or future mch path controls to learn and
+  persist a better stored path, then rerun `mch sync <node>`.
+
 ### Checking status in the field
 
 Authorised MeshCore devices can send a DM to the gateway for lightweight status while away from the

@@ -501,7 +501,7 @@ async def test_cycle_enforces_drifted_setting(db):
     assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
 
 
-async def test_enforced_write_retries_via_flood_after_cached_route_failure(db):
+async def test_enforced_write_does_not_fallback_to_flood_after_cached_route_failure(db):
     node_cfg = _node(
         pubkey="aabbcc",
         label="TestNode",
@@ -516,31 +516,25 @@ async def test_enforced_write_retries_via_flood_after_cached_route_failure(db):
         CommandResult(success=True, text="v1.14.1"),  # reachability probe, cached route
         CommandResult(success=True, text="off"),       # powersaving read, cached route
         CommandResult(success=False, error="timeout"), # write fails on cached route
-        CommandResult(success=True, text="v1.14.1"),   # flood fallback probe
-        CommandResult(success=True, text="ok"),        # flood fallback write
     ])
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
 
-    assert results[0].settings_enforced == 1
-    assert results[0].settings_drifted == 0
+    assert results[0].settings_enforced == 0
+    assert results[0].settings_drifted == 1
     calls = gw.send_command.await_args_list
-    assert [c.args[1] for c in calls] == [
-        "ver", "powersaving", "powersaving on", "ver", "powersaving on",
-    ]
+    assert [c.args[1] for c in calls] == ["ver", "powersaving", "powersaving on"]
     assert calls[2].args[0]["out_path_len"] == 1
-    assert calls[3].args[0]["out_path_len"] == -1
-    assert calls[4].args[0]["out_path_len"] == -1
     settings = await db.get_settings("aabbccdd1122")
-    assert settings[0].update_attempts == 2
+    assert settings[0].update_attempts == 1
 
 
-async def test_enforced_write_not_retried_when_flood_probe_fails(db):
+async def test_stored_path_setting_read_retries_one_miss(db):
     node_cfg = _node(
         pubkey="aabbcc",
         label="TestNode",
-        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.AUDIT)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
@@ -549,23 +543,117 @@ async def test_enforced_write_not_retried_when_flood_probe_fails(db):
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(side_effect=[
         CommandResult(success=True, text="v1.14.1"),   # reachability probe
-        CommandResult(success=True, text="off"),       # powersaving read
-        CommandResult(success=False, error="timeout"), # write fails on cached route
-        CommandResult(success=False, error="timeout"), # flood fallback probe fails
+        CommandResult(success=False, error="timeout"), # read miss on stored path
+        CommandResult(success=True, text="on"),        # retry succeeds
     ])
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
 
-    assert results[0].settings_enforced == 0
-    assert results[0].settings_drifted == 1
+    assert results[0].settings_checked == 1
+    assert results[0].settings_failed == 0
     assert [c.args[1] for c in gw.send_command.await_args_list] == [
-        "ver", "powersaving", "powersaving on", "ver",
+        "ver", "powersaving", "powersaving",
     ]
+    assert all(c.args[0]["out_path_len"] == 1 for c in gw.send_command.await_args_list)
     settings = await db.get_settings("aabbccdd1122")
-    assert settings[0].update_attempts == 1
+    assert settings[0].observed == "on"
     logs = await db.get_logs("aabbccdd1122")
-    assert any("write not retried" in entry["message"] for entry in logs)
+    assert any("succeeded on stored-path retry" in entry["message"] for entry in logs)
+
+
+async def test_stored_path_read_retry_budget_is_capped_per_node(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={
+            "powersaving": SettingConfig(desired="on", policy=SettingPolicy.AUDIT),
+            "owner.info": SettingConfig(desired="rdm", policy=SettingPolicy.AUDIT),
+            "txdelay": SettingConfig(desired="1.0", policy=SettingPolicy.AUDIT),
+            "direct.txdelay": SettingConfig(desired="0.5", policy=SettingPolicy.AUDIT),
+        },
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "e260", "out_path_len": 1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    # Two failed stored-path probes get one flood reachability check, but no
+    # full pass or per-read retry budget is used.
+    assert results[0].reachable is False
+    assert len(gw.send_command.await_args_list) == 3
+    assert gw.send_command.await_args_list[0].args[0]["out_path_len"] == 1
+    assert gw.send_command.await_args_list[1].args[0]["out_path_len"] == 1
+    assert gw.send_command.await_args_list[2].args[0]["out_path_len"] == -1
+
+
+async def test_stored_path_failure_flood_probe_does_not_run_full_sync(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver", "board"]
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "e260", "out_path_len": 1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=False, error="timeout"), # stored path probe 1
+        CommandResult(success=False, error="timeout"), # stored path probe 2
+        CommandResult(success=True, text="v1.14.1"),   # flood probe reaches node
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].reachable is False
+    assert [c.args[1] for c in gw.send_command.await_args_list] == ["ver", "ver", "ver"]
+    assert gw.send_command.await_args_list[2].args[0]["out_path_len"] == -1
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.OFFLINE
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("path repair needed" in entry["message"] for entry in logs)
+
+
+async def test_stored_path_read_retry_budget_applies_after_successful_probe(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={
+            "powersaving": SettingConfig(desired="on", policy=SettingPolicy.AUDIT),
+            "owner.info": SettingConfig(desired="rdm", policy=SettingPolicy.AUDIT),
+            "txdelay": SettingConfig(desired="1.0", policy=SettingPolicy.AUDIT),
+            "direct.txdelay": SettingConfig(desired="0.5", policy=SettingPolicy.AUDIT),
+        },
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "e260", "out_path_len": 1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),   # reachability probe
+        CommandResult(success=False, error="timeout"), # read 1
+        CommandResult(success=False, error="timeout"), # retry 1
+        CommandResult(success=False, error="timeout"), # read 2
+        CommandResult(success=False, error="timeout"), # retry 2
+        CommandResult(success=False, error="timeout"), # read 3
+        CommandResult(success=False, error="timeout"), # retry 3
+        CommandResult(success=False, error="timeout"), # read 4, budget exhausted
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].reachable is True
+    assert results[0].settings_failed == 4
+    assert len(gw.send_command.await_args_list) == 8
 
 
 async def test_failed_enforcement_counts_attempts_for_current_desired_value(db):

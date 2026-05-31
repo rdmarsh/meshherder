@@ -4,6 +4,26 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - qh-corbin Route Recovery And Flood Boundary
+
+- qh-corbin (`e2601d591517`) was not dead: `last_seen` continued to update from adverts, traces
+  to `e260` and via `2fd9,e260` returned good SNR, and cached facts/settings showed the repeater
+  was otherwise healthy. The failure was management reachability.
+- Luna's gateway had qh-corbin stored as flood-routed (`out_path_len=-1`, empty `out_path`).
+  `disc_path e2601d591517` timed out and left the contact on flood. Manual path testing showed
+  qh-woldhuis's two-byte path hash `2fd9` was a viable first hop: after
+  `change_path e2601d591517 2fd9:1`, a non-secret test using the configured password logged in
+  and `ver` succeeded.
+- Subsequent `mch sync qh-corbin` runs over `out_path=2fd9` confirmed the mesh is lossy but
+  manageable: two passes dropped one read each, and a final pass completed with `facts=2`,
+  `settings=12`, `drift=0`, and `read-failed=0`. qh-corbin ended `configured` with a fresh
+  `last_connected`.
+- Design rule from this incident: flood is useful for controlled path recovery/diagnosis, not as
+  ordinary management transport. Once a useful stored path is known, mch should prefer that path,
+  tolerate isolated command loss with bounded retries, and avoid full-sync or write retries over
+  flood. A failed stored path should trigger a small recovery signal, then an explicit
+  path-learning workflow rather than hammering the mesh.
+
 ## 2026-05-31 - Luna `/opt/meshherder` Checkout Restored
 
 - Incident: `mchd` on luna was restart-looping with `error loading config: unknown config key
