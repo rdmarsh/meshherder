@@ -76,6 +76,15 @@ def _describe_cached_management_path(contact: dict[str, Any]) -> str:
     return "unknown (no route metadata in cached contact)"
 
 
+def _flood_route_contact(contact: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of a contact that sends via MeshCore flood routing."""
+    routed = dict(contact)
+    routed["out_path"] = ""
+    routed["out_path_len"] = -1
+    routed["out_path_hash_mode"] = 0
+    return routed
+
+
 # ---------------------------------------------------------------------------
 # policy resolution
 # ---------------------------------------------------------------------------
@@ -1047,6 +1056,65 @@ class WorkQueue:
             )
         return None
 
+    async def _send_enforced_write(
+        self,
+        pubkey: str,
+        contact: dict[str, Any],
+        command: str,
+        node: Node,
+        node_cfg: NodeConfig,
+        *,
+        timeout: float | None,
+        progress: ProgressCallback = None,
+    ) -> tuple[CommandResult, int]:
+        """Send an idempotent desired-state write with bounded flood-route fallback.
+
+        The normal cached route is tried first. If that route is a stored path
+        and the write fails, send one cheap `ver` over a flood-routed contact
+        before retrying the write over flood. The probe prevents a failed stored
+        path from turning into an unbounded duplicate write attempt on a node
+        that is not answering at all.
+        """
+        result = await self._send_authed(contact, command, node, node_cfg, timeout=timeout)
+        attempts = 1
+        path_len = contact.get("out_path_len")
+        if result.success or not (isinstance(path_len, int) and path_len > 0):
+            return result, attempts
+
+        flood_contact = _flood_route_contact(contact)
+        error = result.error or "no response"
+        log.warning(
+            "write %r failed for %s on cached route (%s); probing flood fallback",
+            command, pubkey[:12], error,
+        )
+        await self._db.write_log(
+            pubkey,
+            "WARNING",
+            f"write {command!r} failed on cached route: {error}; probing flood fallback",
+        )
+        await _progress(progress, "write failed on cached route; probing flood fallback")
+
+        probe = await self._send_authed(flood_contact, _PROBE_COMMAND, node, node_cfg)
+        if not probe.success:
+            probe_error = probe.error or "no response"
+            log.warning("flood fallback probe failed for %s: %s", pubkey[:12], probe_error)
+            await self._db.write_log(
+                pubkey,
+                "WARNING",
+                f"flood fallback probe failed: {probe_error}; write not retried",
+            )
+            await _progress(progress, f"flood fallback probe failed: {probe_error}")
+            return result, attempts
+
+        await _progress(progress, "flood fallback reachable; retrying write")
+        retry = await self._send_authed(
+            flood_contact, command, node, node_cfg, timeout=timeout
+        )
+        attempts += 1
+        if retry.success:
+            await self._db.write_log(pubkey, "INFO", f"write {command!r} succeeded via flood")
+        return retry, attempts
+
     async def _collect_facts(
         self,
         pubkey: str,
@@ -1174,14 +1242,16 @@ class WorkQueue:
                     await _progress(progress, f"enforcing setting: {key}")
                     assert desired is not None
                     write_cmd = write_command_for_key(key, desired)
-                    setting.update_attempts += 1
-                    set_res = await self._send_authed(
+                    set_res, write_attempts = await self._send_enforced_write(
+                        pubkey,
                         contact,
                         write_cmd,
                         node,
                         node_cfg,
                         timeout=command_timeout(write_cmd),
+                        progress=progress,
                     )
+                    setting.update_attempts += write_attempts
                     if set_res.success:
                         enforced += 1
                         drifted -= 1  # enforcement fixed it — don't count as residual drift
