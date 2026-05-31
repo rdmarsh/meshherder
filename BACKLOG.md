@@ -21,8 +21,6 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   success/failure and timeout rates first, then assess path length/history and optional physical
   distance as explanatory signals. Use it to inform scheduling/backoff only after the evidence
   model is visible and reviewable.
-- After a successful probe, consider randomizing independent read-only fact/setting reads so
-  marginal connections do not repeatedly lose the same trailing observations.
 - Allow an operator-requested `commission` or `exec` to preempt scheduled sync at a safe
   between-command boundary rather than repeatedly returning `busy`.
 

@@ -19,8 +19,8 @@ import click
 from mch import __version__
 from mch.command_registry import parse_radio_tuple, validate_radio_tuple
 from mch.command_safety import blocked_exec_command, confirm_exec_command
-from mch.config import fact_name_warnings, load as load_config
-from mch.config import sanitize_node_label, secrets_identity_warnings
+from mch.config import fact_name_warnings, sanitize_node_label, secrets_identity_warnings
+from mch.config import load as load_config
 from mch.meshkey import derive_public_key, generate_private_key
 from mch.recommend import load_radio_presets
 

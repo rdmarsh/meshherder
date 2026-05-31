@@ -791,6 +791,7 @@ class WorkQueue:
             )
             switch_required = node_radio is not None and required_channel != gateway_channel
             if switch_required:
+                assert node_radio is not None
                 management_radio = _format_radio(
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
                 )
@@ -814,6 +815,7 @@ class WorkQueue:
                 await self._gateway.set_contact_favourite(contact)
 
             if switch_required:
+                assert node_radio is not None
                 log.info(
                     "  switching gateway radio to %.3f/%g/SF%d/CR%d for %r",
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr, name,
