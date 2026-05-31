@@ -209,6 +209,16 @@ class NodeResult:
 # insufficient permissions (node ACL not yet authorised for this gateway).
 _PERMISSION_ERROR_MARKERS = ("no permission",)
 
+# Reachability probe: a cheap read sent before a full fact/setting pass so a
+# node that simply is not answering this cycle does not cost a timeout on every
+# fact and every setting. A single miss is inconclusive on a marginal mesh link
+# (observed on luna: a node timed out on `ver` in one sync and replied in the
+# next), so the probe retries before giving up; two consecutive misses skip the
+# rest of this node's pass. `ver` is a cheap bare read already collected as a
+# fact, so its reply is reused rather than read twice.
+_PROBE_COMMAND = "ver"
+_PROBE_ATTEMPTS = 2
+
 
 def _is_permission_error(text: str) -> bool:
     """Return True if the node response indicates insufficient permissions."""
@@ -760,12 +770,11 @@ class WorkQueue:
         node.name = name
         node.label = node_cfg.label
         node.state = NodeState.CONFIGURING
-        now = datetime.now(UTC)
-        node.last_seen = now
-        node.last_connected = now
+        node.last_seen = datetime.now(UTC)
         await self._db.upsert_node(node)
 
-        result.reachable = True
+        # result.reachable and last_connected are set only after the reachability
+        # probe below confirms the node is actually answering this cycle.
         saved_radio: tuple[float, float, int, int] | None = None
 
         try:
@@ -821,9 +830,33 @@ class WorkQueue:
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
                 )
 
-            # collect facts
+            # reachability probe — skip the full pass on a node that is not
+            # answering this cycle rather than timing out on every read.
+            probe_result = await self._probe_reachable(
+                contact, node, node_cfg, progress=progress
+            )
+            if probe_result is None:
+                node.state = NodeState.OFFLINE
+                await self._db.upsert_node(node)
+                log.warning(
+                    "node %r (%s) did not answer %d reachability probes - "
+                    "skipping sync this cycle", name, pubkey[:12], _PROBE_ATTEMPTS,
+                )
+                await self._db.write_log(
+                    pubkey, "WARNING",
+                    f"node unreachable: no reply to {_PROBE_ATTEMPTS} reachability "
+                    "probes - skipped sync this cycle",
+                )
+                await _progress(progress, "node unreachable - skipping sync this cycle")
+                return result  # finally still runs to restore the gateway radio
+            result.reachable = True
+            node.last_connected = datetime.now(UTC)
+            await self._db.upsert_node(node)
+
+            # collect facts (reusing the probe's `ver` reply where applicable)
             result.facts_collected = await self._collect_facts(
-                pubkey, contact, node, node_cfg, progress=progress
+                pubkey, contact, node, node_cfg, progress=progress,
+                probe_result=probe_result,
             )
 
             # enforce / audit settings
@@ -977,6 +1010,37 @@ class WorkQueue:
 
         return result
 
+    async def _probe_reachable(
+        self,
+        contact: dict[str, Any],
+        node: Node,
+        node_cfg: NodeConfig,
+        *,
+        progress: ProgressCallback = None,
+    ) -> CommandResult | None:
+        """Confirm the node is answering before spending a full fact/setting pass.
+
+        Sends a cheap bare `ver` up to _PROBE_ATTEMPTS times. Returns the first
+        successful CommandResult (so the caller can reuse it as the `ver` fact and
+        avoid a second read over the mesh), or None if every attempt failed.
+
+        Uses _send_authed, so a node that needs re-authentication is handled here;
+        a re-login failure raises _ReloginFailed, which the caller treats as
+        offline (we cannot manage a node we cannot authenticate to).
+        """
+        for attempt in range(1, _PROBE_ATTEMPTS + 1):
+            await _progress(
+                progress, f"checking reachability ({attempt}/{_PROBE_ATTEMPTS})"
+            )
+            res = await self._send_authed(contact, _PROBE_COMMAND, node, node_cfg)
+            if res.success:
+                return res
+            log.debug(
+                "reachability probe %d/%d failed for %s: %s",
+                attempt, _PROBE_ATTEMPTS, node.pubkey[:12], res.error or "no response",
+            )
+        return None
+
     async def _collect_facts(
         self,
         pubkey: str,
@@ -985,14 +1049,27 @@ class WorkQueue:
         node_cfg: NodeConfig,
         *,
         progress: ProgressCallback = None,
+        probe_result: CommandResult | None = None,
     ) -> int:
-        """Run all declared fact commands and store results."""
+        """Run all declared fact commands and store results.
+
+        Fact order is randomised each cycle so a marginal link does not keep
+        losing the same trailing observations. If the reachability probe already
+        read a value (it sends bare `ver`), that reply is reused instead of
+        reading the same value again over the mesh.
+        """
         collected = 0
-        for key in self._config.facts:
+        keys = list(self._config.facts)
+        random.shuffle(keys)
+        for key in keys:
             # neighbors, ver/board, and clock are bare commands; everything else is `get <key>`
             cmd = read_command_for_key(key)
-            await _progress(progress, f"reading fact: {key}")
-            res = await self._send_authed(contact, cmd, node, node_cfg)
+            if probe_result is not None and cmd == _PROBE_COMMAND:
+                # reuse the reachability probe's reply — no second read over the mesh
+                res = probe_result
+            else:
+                await _progress(progress, f"reading fact: {key}")
+                res = await self._send_authed(contact, cmd, node, node_cfg)
             if res.success and res.text:
                 if key == "neighbors":
                     # store the count, not the raw multi-line list
@@ -1027,10 +1104,13 @@ class WorkQueue:
         """Check settings, including reportable drift and enforce-blocking failures."""
         checked = enforced = drifted = read_failed = 0
         enforced_drifted = enforced_read_failed = 0
-        keys = all_setting_keys(node_cfg, group_cfg, global_cfg)
+        keys = list(all_setting_keys(node_cfg, group_cfg, global_cfg))
+        # Randomise read order each cycle so a marginal link does not keep losing
+        # the same trailing settings (mirrors the fact-collection shuffle).
+        random.shuffle(keys)
         existing = {s.key: s for s in await self._db.get_settings(pubkey)}
 
-        for key in sorted(keys):
+        for key in keys:
             policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
             desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
 

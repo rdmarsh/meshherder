@@ -14,10 +14,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Operation Safety And Reachability
 
-- Avoid polling every fact and setting when a node is plainly unreachable. Add a low-cost
-  read-only reachability probe before a full pass, with a small bounded retry because luna
-  testing showed the same node can miss `ver` once and answer on the next sync, then use
-  controlled stored-path/flood fallback before writes.
+- Extend the reachability probe (shipped 0.9.0) with controlled stored-path/flood fallback before
+  writes when the probe succeeds but the node is on a marginal route. The probe currently only
+  gates the full pass; it does not yet try alternate routing.
 - Build a per-node reliability/fragility view from collected sync evidence: rolling command
   success/failure and timeout rates first, then assess path length/history and optional physical
   distance as explanatory signals. Use it to inform scheduling/backoff only after the evidence
@@ -137,6 +136,10 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-05-31: Released `0.9.0`. Added a reachability probe (bare `ver`, two attempts) before each
+  node's full fact/setting pass: two misses skip the pass and mark the node offline rather than
+  timing out on every read, while a single miss is retried. The probe reply is reused as the
+  `ver` fact, and independent fact/setting reads are now issued in randomized order each cycle.
 - 2026-05-26: Added non-fatal `mch validate` warnings and close-match suggestions for unknown
   `facts:` entries while keeping unregistered firmware reads available for deliberate use.
 - 2026-05-26: Added foreground sync visibility for effective management radio and cached

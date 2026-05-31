@@ -3,6 +3,21 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## 0.9.0 - 2026-05-31
+
+- Added a low-cost reachability probe before each node's full sync pass: a bare `ver` read is
+  sent first (up to two attempts), and if the node does not answer, the rest of the fact and
+  setting pass is skipped instead of timing out on every read. A single missed probe is retried
+  because a marginal mesh link can drop one reply and answer the next, so two consecutive misses
+  are required before the node is marked offline and the cycle skipped. The skip is recorded in
+  node activity (`mch logs`) and the daemon journal.
+- The probe's `ver` reply is reused as the `ver` fact, so the reachability check costs no extra
+  mesh traffic when `ver` is already a collected fact.
+- `last_connected` now advances only after the probe confirms the node is answering this cycle,
+  rather than optimistically at the start of processing.
+- Independent read-only fact and setting reads are now issued in a randomized order each cycle, so
+  a marginal connection does not repeatedly lose the same trailing observations.
+
 ## 0.8.6 - 2026-05-26
 
 - Warn in `mch validate` when `facts:` contains an unrecognised read key, with spelling

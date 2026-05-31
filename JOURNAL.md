@@ -4,6 +4,33 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-31 - Reachability Probe Before Full Sync (0.9.0)
+
+- Problem: an unreachable node still cost a timeout on every declared fact and every enforced
+  setting, multiplying slow mesh waits across a node that simply was not answering this cycle.
+- Fix: `_process_node` now runs `_probe_reachable()` (bare `ver`, up to `_PROBE_ATTEMPTS=2`)
+  before collecting facts/settings. Two consecutive misses mark the node `OFFLINE` and skip the
+  rest of the pass; the skip is written to node activity and the journal. The radio-restore
+  `finally` still runs, so a temporary `via_radio` switch is always unwound.
+- Single-miss retry rationale: luna `0.8.4` testing showed a node time out on `ver` in one sync
+  and answer in the next, so one missing reply must be treated as inconclusive. This is the
+  bounded retry called for in the backlog "operation safety and reachability" item.
+- The probe reuses its `ver` reply as the `ver` fact (matched via `read_command_for_key`), so when
+  `ver` is already a configured fact the probe adds no extra mesh traffic. If `ver` is not a
+  configured fact, the probe is one extra cheap read - an acceptable cost for skipping a full
+  dead-node pass.
+- `last_connected` moved to after a successful probe (was set optimistically at processing start),
+  so it now reflects an actual exchange this cycle. `last_seen` still updates at the start since it
+  means "we attempted/observed it" and is also driven passively by adverts.
+- Randomized read order: both `_collect_facts` and `_process_settings` now `random.shuffle` their
+  read keys each cycle so a marginal link does not keep losing the same trailing observations.
+  Writes remain ordered; only independent reads are shuffled.
+- Process note: implementation was written before the tests this time (not TDD). The existing
+  cycle tests needed updating anyway because the probe prepends one `ver` send to every sync;
+  three new probe tests were added (skip+offline, single-miss retry, ver-reuse). 568 tests pass.
+- Open decision recorded for the user: skipped nodes are marked `OFFLINE`. If a skip should
+  instead preserve the prior state, that is a one-line change.
+
 ## 2026-05-26 - Fact Name Validation
 
 - Field status output exposed a typo configured as a fact: `powersavings` repeatedly returned

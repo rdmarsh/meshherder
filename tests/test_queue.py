@@ -216,6 +216,14 @@ def _contact(pubkey="aabbccdd1122", name="TestNode", type_=2, flags=0):
     return {"public_key": pubkey, "adv_name": name, "type": type_, "flags": flags}
 
 
+async def _probe_ok_else_timeout(contact, command, **kwargs):
+    """send_command side effect: the reachability probe ('ver') succeeds, every
+    other read times out. Lets a test exercise read failures past the probe."""
+    if command == "ver":
+        return CommandResult(success=True, text="v1.14.1")
+    return CommandResult(success=False, error="timeout")
+
+
 async def test_exec_command_returns_gateway_text(db):
     contact = _contact("aabbccdd11223344")
     gw = _make_gateway()
@@ -401,6 +409,72 @@ async def test_cycle_collects_facts(db):
 
 
 # ------------------------------------------------------------------
+# reachability probe
+# ------------------------------------------------------------------
+
+async def test_probe_failure_skips_sync_and_marks_offline(db):
+    """Two failed reachability probes skip the pass and mark the node offline."""
+    node_cfg = _node(
+        pubkey="aabbcc", label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver", "board"]
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    # only the two probe attempts were sent — no fact or setting reads
+    sent = [c.args[1] for c in gw.send_command.await_args_list]
+    assert sent == ["ver", "ver"]
+    assert results[0].reachable is False
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.OFFLINE
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("node unreachable" in entry["message"] for entry in logs)
+
+
+async def test_probe_retries_once_before_giving_up(db):
+    """A node that misses the first probe but answers the second is still synced."""
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=False, error="timeout"),  # probe attempt 1 — miss
+        CommandResult(success=True, text="v1.14.1"),     # probe attempt 2 — hit
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].reachable is True
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.CONFIGURED
+
+
+async def test_probe_ver_reply_reused_as_fact_no_second_read(db):
+    """The probe's ver reply is stored as the ver fact without a second read."""
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    # ver is the only fact and it is also the probe — exactly one send total
+    sent = [c.args[1] for c in gw.send_command.await_args_list]
+    assert sent == ["ver"]
+    assert results[0].facts_collected == 1
+    facts = await db.get_facts("aabbccdd1122")
+    assert facts.get("ver") == "v1.14.1"
+
+
+# ------------------------------------------------------------------
 # drift detection and enforcement
 # ------------------------------------------------------------------
 
@@ -414,8 +488,9 @@ async def test_cycle_enforces_drifted_setting(db):
     cfg.facts = []  # skip facts for this test
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    # powersaving (bare read) → "off" (drift); powersaving on (bare write) → "ok"
+    # probe ver → ok; powersaving (bare read) → "off" (drift); powersaving on (write) → "ok"
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
         CommandResult(success=True, text="off"),   # powersaving
         CommandResult(success=True, text="ok"),    # powersaving on
     ])
@@ -436,11 +511,15 @@ async def test_failed_enforcement_counts_attempts_for_current_desired_value(db):
     cfg.facts = []
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    # each cycle starts with a reachability probe (ver), then read + write powersaving
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # probe (cycle 1)
         CommandResult(success=True, text="off"),
         CommandResult(success=False, error="timeout"),
+        CommandResult(success=True, text="v1.14.1"),  # probe (cycle 2)
         CommandResult(success=True, text="off"),
         CommandResult(success=False, error="timeout"),
+        CommandResult(success=True, text="v1.14.1"),  # probe (cycle 3)
         CommandResult(success=True, text="on"),
         CommandResult(success=False, error="timeout"),
     ])
@@ -481,7 +560,7 @@ async def test_cycle_does_not_enforce_close_enough_radio_roundoff(db):
     assert results[0].settings_enforced == 0
     assert results[0].settings_drifted == 0
     sent = [c.args[1] for c in gw.send_command.await_args_list]
-    assert sent == ["get radio"]
+    assert sent == ["ver", "get radio"]  # reachability probe, then the setting read
 
 
 async def test_cycle_enforced_radio_write_uses_registered_slow_timeout(db):
@@ -498,6 +577,7 @@ async def test_cycle_enforced_radio_write_uses_registered_slow_timeout(db):
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
         CommandResult(success=True, text="915.800,250,10,5"),
         CommandResult(success=True, text="ok"),
     ])
@@ -505,10 +585,11 @@ async def test_cycle_enforced_radio_write_uses_registered_slow_timeout(db):
 
     await wq.run_cycle()
 
-    assert gw.send_command.await_args_list[0].args[1] == "get radio"
-    assert "timeout" not in gw.send_command.await_args_list[0].kwargs
-    assert gw.send_command.await_args_list[1].args[1] == "set radio 915.075,125,9,5"
-    assert gw.send_command.await_args_list[1].kwargs["timeout"] == 180.0
+    # index 0 is the probe (ver); the radio read/write follow
+    assert gw.send_command.await_args_list[1].args[1] == "get radio"
+    assert "timeout" not in gw.send_command.await_args_list[1].kwargs
+    assert gw.send_command.await_args_list[2].args[1] == "set radio 915.075,125,9,5"
+    assert gw.send_command.await_args_list[2].kwargs["timeout"] == 180.0
 
 
 async def test_bare_command_key_uses_bare_read_and_write(db):
@@ -525,6 +606,7 @@ async def test_bare_command_key_uses_bare_read_and_write(db):
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
         CommandResult(success=True, text="off"),  # read: powersaving
         CommandResult(success=True, text="ok"),   # write: powersaving on
     ])
@@ -550,6 +632,7 @@ async def test_cycle_updates_db_name_when_name_is_enforced(db):
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122", name="Old Advert")])
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),   # reachability probe
         CommandResult(success=True, text="Old Name"),  # get name
         CommandResult(success=True, text="ok"),        # set name New Name
     ])
@@ -593,9 +676,12 @@ async def test_changing_enforced_setting_to_audit_clears_update_attempts(db):
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    # each cycle: reachability probe (ver), then read + (cycle 1) write powersaving
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # probe (cycle 1)
         CommandResult(success=True, text="off"),
         CommandResult(success=False, error="timeout"),
+        CommandResult(success=True, text="v1.14.1"),  # probe (cycle 2)
         CommandResult(success=True, text="off"),
     ])
     wq = WorkQueue(cfg, gw, db)
@@ -688,11 +774,12 @@ async def test_permission_error_triggers_relogin_and_retry(db):
     gw = _make_gateway(contacts=[contact])
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.login = AsyncMock(return_value=True)
-    # first get name → permission error; after re-login, get name → ok; set name → ok
+    # the reachability probe (ver) hits the permission error first, triggering
+    # the re-login + retry; then get name matches desired so no write is needed
     gw.send_command = AsyncMock(side_effect=[
-        CommandResult(success=True, text="no permission"),  # get name — permission denied
-        CommandResult(success=True, text="TestNode"),       # get name — retry after re-login
-        CommandResult(success=True, text="ok"),             # set name (if needed)
+        CommandResult(success=True, text="no permission"),  # probe ver — permission denied
+        CommandResult(success=True, text="v1.14.1"),        # probe ver — retry after re-login
+        CommandResult(success=True, text="TestNode"),       # get name — matches desired
     ])
     wq = WorkQueue(cfg, gw, db)
 
@@ -824,8 +911,12 @@ async def test_fire_and_forget_op_marked_success_on_timeout(db):
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    # node reboots before responding — gateway returns a failure/timeout
-    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    # probe ver succeeds (node reachable); the reboot op then times out (node
+    # reboots before responding) but is fire-and-forget so it counts as success
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),       # reachability probe
+        CommandResult(success=False, error="timeout"),     # reboot — faf
+    ])
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
@@ -846,7 +937,12 @@ async def test_fire_and_forget_false_still_fails_on_timeout(db):
     await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
 
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    # probe ver succeeds (node reachable); the clock sync op then times out and,
+    # not being fire-and-forget, is recorded as a failure
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),       # reachability probe
+        CommandResult(success=False, error="timeout"),     # clock sync — fails
+    ])
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
@@ -971,11 +1067,20 @@ async def test_run_node_reports_fact_and_setting_progress(db):
         settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
     )
     cfg = _make_config(node_cfgs=[node_cfg])
-    cfg.facts = ["ver"]
+    # 'board' (not 'ver') so the reachability probe succeeds but the fact read
+    # still fails — the probe reuses its reply only for the 'ver' fact
+    cfg.facts = ["board"]
     node = Node(pubkey="aabbccdd1122", name="TestNode")
     await db.upsert_node(node)
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+
+    # probe ver succeeds; every other read times out
+    async def _send(contact, command, **kwargs):
+        if command == "ver":
+            return CommandResult(success=True, text="v1.14.1")
+        return CommandResult(success=False, error="timeout")
+
+    gw.send_command = AsyncMock(side_effect=_send)
     wq = WorkQueue(cfg, gw, db)
     wq._contacts = [_contact("aabbccdd1122")]
     messages: list[str] = []
@@ -985,8 +1090,8 @@ async def test_run_node_reports_fact_and_setting_progress(db):
 
     await wq.run_node("aabbcc", progress=progress)
 
-    assert "reading fact: ver" in messages
-    assert "fact ver failed: timeout" in messages
+    assert "reading fact: board" in messages
+    assert "fact board failed: timeout" in messages
     assert "reading setting: powersaving" in messages
     assert "setting powersaving read failed: timeout" in messages
 
@@ -1173,6 +1278,7 @@ async def test_cycle_state_configured_after_successful_enforcement(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
         CommandResult(success=True, text="off"),   # get powersaving — drift
         CommandResult(success=True, text="ok"),    # set powersaving on — success
     ])
@@ -1190,7 +1296,8 @@ async def test_cycle_state_partial_when_setting_cannot_be_read(db):
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    # probe succeeds so the node is reachable; the setting read then times out
+    gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
@@ -1208,7 +1315,8 @@ async def test_setting_read_timeout_is_retained_in_activity_log(db):
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    # probe succeeds so the node is reachable; the setting read then times out
+    gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
 
     await wq.run_cycle()
@@ -1220,15 +1328,16 @@ async def test_setting_read_timeout_is_retained_in_activity_log(db):
 async def test_fact_read_timeout_is_retained_in_activity_log(db):
     node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
-    cfg.facts = ["ver"]
+    # 'board' so the probe ('ver') succeeds but the fact read still times out
+    cfg.facts = ["board"]
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
 
     await wq.run_cycle()
 
     logs = await db.get_logs("aabbccdd1122")
-    assert any("fact ver failed: timeout" in entry["message"] for entry in logs)
+    assert any("fact board failed: timeout" in entry["message"] for entry in logs)
 
 
 async def test_cycle_state_configured_when_audit_setting_cannot_be_read(db):
@@ -1239,7 +1348,8 @@ async def test_cycle_state_configured_when_audit_setting_cannot_be_read(db):
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    # probe succeeds so the node is reachable; the audit setting read then times out
+    gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
 
     results = await wq.run_cycle()
@@ -1341,6 +1451,7 @@ async def test_cycle_observed_updated_after_set(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
         CommandResult(success=True, text="off"),   # get powersaving — drift
         CommandResult(success=True, text="ok"),    # set powersaving on — success
     ])
@@ -1864,10 +1975,11 @@ async def test_relogin_uses_default_password_when_no_per_node_entry(db):
     gw = _make_gateway(contacts=[contact])
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.login = AsyncMock(return_value=True)
+    # the reachability probe (ver) hits the permission error and drives re-login
     gw.send_command = AsyncMock(side_effect=[
-        CommandResult(success=True, text="no permission"),  # permission error
-        CommandResult(success=True, text="FleetNode"),      # retry get name
-        CommandResult(success=True, text="ok"),             # set name
+        CommandResult(success=True, text="no permission"),  # probe ver — denied
+        CommandResult(success=True, text="v1.14.1"),        # probe ver — after re-login
+        CommandResult(success=True, text="FleetNode"),      # get name — matches desired
     ])
     wq = WorkQueue(cfg, gw, db)
 
@@ -1896,10 +2008,11 @@ async def test_relogin_prefers_per_node_password_over_default(db):
     gw = _make_gateway(contacts=[contact])
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.login = AsyncMock(return_value=True)
+    # the reachability probe (ver) hits the permission error and drives re-login
     gw.send_command = AsyncMock(side_effect=[
-        CommandResult(success=True, text="no permission"),
-        CommandResult(success=True, text="SpecialNode"),
-        CommandResult(success=True, text="ok"),
+        CommandResult(success=True, text="no permission"),  # probe ver — denied
+        CommandResult(success=True, text="v1.14.1"),        # probe ver — after re-login
+        CommandResult(success=True, text="SpecialNode"),    # get name — matches desired
     ])
     wq = WorkQueue(cfg, gw, db)
 
@@ -1930,10 +2043,11 @@ async def test_relogin_matches_secret_longer_than_config_prefix(db):
     gw = _make_gateway(contacts=[contact])
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.login = AsyncMock(return_value=True)
+    # the reachability probe (ver) hits the permission error and drives re-login
     gw.send_command = AsyncMock(side_effect=[
-        CommandResult(success=True, text="no permission"),  # permission error
-        CommandResult(success=True, text="ShortPrefix"),    # retry get name
-        CommandResult(success=True, text="ok"),             # set name
+        CommandResult(success=True, text="no permission"),  # probe ver — denied
+        CommandResult(success=True, text="v1.14.1"),        # probe ver — after re-login
+        CommandResult(success=True, text="ShortPrefix"),    # get name — matches desired
     ])
     wq = WorkQueue(cfg, gw, db)
 
