@@ -31,6 +31,36 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 - Open decision recorded for the user: skipped nodes are marked `OFFLINE`. If a skip should
   instead preserve the prior state, that is a one-line change.
 
+### Luna live verification (0.9.0)
+
+- OFFLINE-skip path confirmed on real hardware, both ways:
+  - Forced: `mch sync qh-test` (bench node, `via_radio` 915.800/250/SF11) ran the two probes and
+    printed `node unreachable - skipping sync this cycle` instead of timing out on every fact and
+    setting. Reproduced across ~6 forced runs over qh-test and qhtest02 (SF10).
+  - Scheduled: the daemon's own cycle logged `node ... did not answer 2 reachability probes -
+    skipping sync this cycle` for qh-test and qhtest01a with no action from me - normal operation.
+- Probe limitation observed and worth keeping: `🦷 QH Paterson` (field node, gateway home freq,
+  cached path `flood`) did NOT skip. It answered the probe, then the full settings pass logged
+  `read-failed:10` (`no_event_received`) and finished `facts:0 ... read-failed:10`. The probe is a
+  single point-in-time check: a node that answers `ver` once and then goes silent still incurs the
+  per-read timeouts. The probe reduces the dead-node case, it does not eliminate the
+  flaky-mid-pass case. The backlog stored-path/flood-fallback and per-node reliability items are
+  the deeper fix.
+- SUCCESS path (probe answers, `ver` reply reused, shuffled reads) was NOT cleanly observed live:
+  no node both answered the probe and completed a read this session (bench nodes down/out of
+  range; field nodes flood-routed and dropping directed reads). It stays covered by unit tests
+  (`test_probe_ver_reply_reused_as_fact_no_second_read` + shuffle assertions). Do not claim the
+  reuse/shuffle path is live-verified until a node actually completes a probed sync.
+- Unrelated pre-existing issue seen during the restart: config-reload-during-shutdown raised
+  `GatewayError: get_contacts failed: timeout waiting for contacts` from `_watch_config_files` ->
+  `_reload_config` -> `refresh_config_state`. Not caused by the probe; noting it as a separate
+  shutdown-race cleanup candidate.
+- Process honesty note: an earlier attempt to record live evidence (commit message "Record 0.9.0
+  luna live verification") was cancelled mid-batch by an unrelated ssh failure, so no wrong entry
+  ever landed; a follow-up "correction" commit referenced a prior wrong entry that did not exist.
+  This block is the single accurate record. Lesson: do not write live-evidence notes before the
+  live run actually completes.
+
 ## 2026-05-26 - Fact Name Validation
 
 - Field status output exposed a typo configured as a fact: `powersavings` repeatedly returned
