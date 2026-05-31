@@ -14,9 +14,6 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Operation Safety And Reachability
 
-- Extend the reachability probe (shipped 0.9.0) with controlled stored-path/flood fallback before
-  writes when the probe succeeds but the node is on a marginal route. The probe currently only
-  gates the full pass; it does not yet try alternate routing.
 - Build a per-node reliability/fragility view from collected sync evidence: rolling command
   success/failure and timeout rates first, then assess path length/history and optional physical
   distance as explanatory signals. Use it to inform scheduling/backoff only after the evidence
@@ -133,6 +130,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-05-31: Added controlled flood-route fallback for enforced setting writes after a cached
+  stored-path write failure: mch now probes with flood-routed `ver` before retrying the write via
+  flood, and skips the retry if the fallback probe also fails.
 - 2026-05-31: Released `0.9.0`. Added a reachability probe (bare `ver`, two attempts) before each
   node's full fact/setting pass: two misses skip the pass and mark the node offline rather than
   timing out on every read, while a single miss is retried. The probe reply is reused as the

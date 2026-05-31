@@ -5,6 +5,9 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Enforced setting writes that fail over a cached stored path now perform one cheap flood-routed
+  `ver` probe before retrying the write via flood. If the fallback probe also fails, the write is
+  not retried, avoiding duplicate writes to a node that is not answering.
 - Split development, production, service, udev, and upgrade instructions into `INSTALL.md`, leaving
   the README focused on overview, configuration, and command reference.
 - Renamed the commissioning wizard command from `mch commission` to `mch new`. The wizard now uses

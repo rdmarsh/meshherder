@@ -501,6 +501,73 @@ async def test_cycle_enforces_drifted_setting(db):
     assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
 
 
+async def test_enforced_write_retries_via_flood_after_cached_route_failure(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "e260", "out_path_len": 1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe, cached route
+        CommandResult(success=True, text="off"),       # powersaving read, cached route
+        CommandResult(success=False, error="timeout"), # write fails on cached route
+        CommandResult(success=True, text="v1.14.1"),   # flood fallback probe
+        CommandResult(success=True, text="ok"),        # flood fallback write
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_enforced == 1
+    assert results[0].settings_drifted == 0
+    calls = gw.send_command.await_args_list
+    assert [c.args[1] for c in calls] == [
+        "ver", "powersaving", "powersaving on", "ver", "powersaving on",
+    ]
+    assert calls[2].args[0]["out_path_len"] == 1
+    assert calls[3].args[0]["out_path_len"] == -1
+    assert calls[4].args[0]["out_path_len"] == -1
+    settings = await db.get_settings("aabbccdd1122")
+    assert settings[0].update_attempts == 2
+
+
+async def test_enforced_write_not_retried_when_flood_probe_fails(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "e260", "out_path_len": 1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),   # reachability probe
+        CommandResult(success=True, text="off"),       # powersaving read
+        CommandResult(success=False, error="timeout"), # write fails on cached route
+        CommandResult(success=False, error="timeout"), # flood fallback probe fails
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_enforced == 0
+    assert results[0].settings_drifted == 1
+    assert [c.args[1] for c in gw.send_command.await_args_list] == [
+        "ver", "powersaving", "powersaving on", "ver",
+    ]
+    settings = await db.get_settings("aabbccdd1122")
+    assert settings[0].update_attempts == 1
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("write not retried" in entry["message"] for entry in logs)
+
+
 async def test_failed_enforcement_counts_attempts_for_current_desired_value(db):
     node_cfg = _node(
         pubkey="aabbcc",
