@@ -12,6 +12,18 @@ gateway node, reads desired fleet state from
 .IR config.yaml ,
 stores observed state in SQLite, and processes managed nodes one at a time.
 .PP
+Each node sync begins with a low-cost reachability probe (a bare
+.B ver
+read, retried once). If the node answers neither attempt it is marked offline
+and the rest of the pass is skipped, rather than timing out on every fact and
+setting; the skip is recorded in the node activity log. When the node answers,
+that
+.B ver
+reply is reused as the
+.B ver
+fact. Independent fact and setting reads are issued in a randomized order each
+cycle so a marginal link does not repeatedly lose the same trailing observations.
+.PP
 When enabled in configuration, mchd also serves a read-only HTTP JSON API on a
 loopback address for local integrations and future user interfaces. It does
 not expose sync, command execution, commissioning, or other mutating actions.
