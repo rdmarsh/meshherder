@@ -456,6 +456,12 @@ contact path, and each read/write wait as it runs. The path line is cached gatew
 not a fresh reachability test. Manual sync start, completion, failure, and abort are also retained
 in `mch logs`.
 
+Each sync starts with a cheap reachability probe (a bare `ver` read, retried once). If the node
+answers neither attempt it is marked offline and the rest of the pass is skipped, rather than
+timing out on every fact and setting. When the node answers, that `ver` reply is reused as the
+`ver` fact. Independent fact and setting reads are then issued in a randomized order each cycle, so
+a marginal link does not keep losing the same trailing observations.
+
 ### Checking status in the field
 
 Authorised MeshCore devices can send a DM to the gateway for lightweight status while away from the
