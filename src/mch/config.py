@@ -83,12 +83,17 @@ class _NoDuplicateKeysLoader(yaml.SafeLoader):
     """
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Hashable, Any]:
         if isinstance(node, yaml.MappingNode):
-            seen: set[str] = set()
+            seen: dict[str, int] = {}
             for key_node, _ in node.value:
                 key = key_node.value  # raw string before type coercion
                 if key in seen:
-                    raise ValueError(f"duplicate YAML key {key!r}")
-                seen.add(key)
+                    first_line = seen[key]
+                    duplicate_line = key_node.start_mark.line + 1
+                    raise ValueError(
+                        f"duplicate YAML key {key!r} at line {duplicate_line} "
+                        f"(first defined at line {first_line})"
+                    )
+                seen[key] = key_node.start_mark.line + 1
         return super().construct_mapping(node, deep=deep)
 
 
@@ -322,12 +327,20 @@ def load(
         )
 
     group_names = {g.name for g in cfg.groups}
+    unknown_group_errors: list[str] = []
     for n in cfg.nodes:
         if n.group and n.group not in group_names:
-            raise ValueError(
-                f"node {n.pubkey_prefix!r} references unknown group {n.group!r}"
-                f" - defined groups: {sorted(group_names) or '(none)'}"
+            suggestion = get_close_matches(n.group, group_names, n=1, cutoff=0.45)
+            hint = f" (did you mean {suggestion[0]!r}?)" if suggestion else ""
+            unknown_group_errors.append(
+                f"node {n.pubkey_prefix!r} references unknown group {n.group!r}{hint}"
             )
+    if unknown_group_errors:
+        defined = sorted(group_names) or "(none)"
+        raise ValueError(
+            "; ".join(unknown_group_errors)
+            + f" - defined groups: {defined}"
+        )
 
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
     if secrets_path is None:

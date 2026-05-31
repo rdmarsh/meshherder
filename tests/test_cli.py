@@ -274,6 +274,44 @@ def test_rpc_timeout_shows_clean_error():
     assert "Traceback" not in combined
 
 
+def test_daemon_connection_failure_checks_default_config(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("typo: true\n")
+
+    async def fake_open_conn(*a, **kw):
+        raise FileNotFoundError
+
+    runner = CliRunner()
+    with patch("asyncio.open_unix_connection", fake_open_conn), \
+         patch("mch.cli.DEFAULT_CONFIG", config):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "status"])
+
+    assert result.exit_code != 0
+    assert "cannot connect to daemon" in result.output
+    assert f"checking config: {config}" in result.output
+    assert "config check failed:" in result.output
+    assert "unknown config key 'typo'" in result.output
+    assert "run: mch validate" in result.output
+
+
+def test_daemon_connection_failure_reports_config_ok(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("nodes: []\n")
+
+    async def fake_open_conn(*a, **kw):
+        raise ConnectionRefusedError
+
+    runner = CliRunner()
+    with patch("asyncio.open_unix_connection", fake_open_conn), \
+         patch("mch.cli.DEFAULT_CONFIG", config):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "status"])
+
+    assert result.exit_code != 0
+    assert "cannot connect to daemon" in result.output
+    assert f"checking config: {config}" in result.output
+    assert "config ok:" in result.output
+
+
 # ------ validate ------
 
 def test_validate_valid_config(tmp_path):
@@ -349,6 +387,45 @@ def test_validate_tab_indentation_explains_fix(tmp_path):
     assert result.exit_code != 0
     assert "tab character in YAML indentation" in result.output
     assert "replace tabs with spaces" in result.output
+
+
+def test_validate_duplicate_key_reports_lines(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("""\
+groups:
+  - name: dave_test
+    settings:
+      owner.info: Managed by rdm
+    settings:
+      radio: 915.800,250,10,5
+""")
+
+    result = CliRunner().invoke(cli, ["validate", "--config", str(config)])
+
+    assert result.exit_code != 0
+    assert "duplicate YAML key 'settings' at line 5" in result.output
+    assert "first defined at line 3" in result.output
+
+
+def test_validate_reports_all_unknown_group_references_with_hint(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("""\
+groups:
+  - name: dave_test
+nodes:
+  - pubkey_prefix: 3134bf10
+    group: test
+  - pubkey_prefix: c041a906
+    group: test
+""")
+
+    result = CliRunner().invoke(cli, ["validate", "--config", str(config)])
+
+    assert result.exit_code != 0
+    assert "node '3134bf10' references unknown group 'test'" in result.output
+    assert "node 'c041a906' references unknown group 'test'" in result.output
+    assert "did you mean 'dave_test'?" in result.output
+    assert "defined groups: ['dave_test']" in result.output
 
 
 def test_validate_explicit_missing_secrets_exits_nonzero(tmp_path):
