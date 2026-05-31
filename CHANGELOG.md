@@ -17,6 +17,8 @@ and backlog history. Dates use the project repository's commit dates.
   rather than optimistically at the start of processing.
 - Independent read-only fact and setting reads are now issued in a randomized order each cycle, so
   a marginal connection does not repeatedly lose the same trailing observations.
+- Live-verified on luna: both forced and scheduled syncs of unresponsive nodes now skip after two
+  probes instead of timing out on every read.
 
 ## 0.8.6 - 2026-05-26
 
