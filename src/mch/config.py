@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import os
 import re
-from difflib import get_close_matches
 from collections.abc import Hashable
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any

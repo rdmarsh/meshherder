@@ -1,8 +1,8 @@
 from mch.command_registry import (
     command_timeout,
     get_spec,
-    readable_observation_keys,
     read_command_for_key,
+    readable_observation_keys,
     validate_value,
     write_command_for_key,
 )
