@@ -90,6 +90,7 @@ async def _request(
     except (FileNotFoundError, ConnectionRefusedError):
         click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
         click.echo("  is mchd running?  try: mchd --help", err=True)
+        _check_default_config_when_daemon_unavailable()
         raise SystemExit(1) from None
 
     writer.write((json.dumps(cmd) + "\n").encode())
@@ -114,6 +115,22 @@ def _rpc(
     socket_path: str, cmd: dict[str, Any], timeout: float = 30, on_progress: Any = None
 ) -> dict[str, Any]:
     return asyncio.run(_request(socket_path, cmd, timeout=timeout, on_progress=on_progress))
+
+
+def _check_default_config_when_daemon_unavailable() -> None:
+    """Show config health when daemon commands fail before reaching mchd."""
+    config_path = _default_config_path()
+    if not config_path.exists():
+        click.echo(f"  default config not found: {config_path}", err=True)
+        return
+    click.echo(f"  checking config: {config_path}", err=True)
+    try:
+        cfg = load_config(config_path, load_secrets=False)
+    except (PermissionError, ValueError, OSError) as exc:
+        click.echo(f"  config check failed: {exc}", err=True)
+        click.echo("  run: mch validate", err=True)
+        return
+    click.echo(f"  config ok: {cfg.config_path}", err=True)
 
 
 def _check(resp: dict[str, Any]) -> Any:

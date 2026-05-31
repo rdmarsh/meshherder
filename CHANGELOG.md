@@ -3,6 +3,14 @@
 This changelog was reconstructed on 2026-05-25 from the version-bump commits, project journal,
 and backlog history. Dates use the project repository's commit dates.
 
+## Unreleased
+
+- Improved `mch validate` diagnostics for operator config mistakes: duplicate YAML keys now
+  report line numbers, and unknown node-group references are reported together with close-match
+  hints.
+- When daemon-backed CLI commands cannot connect to `mchd`, `mch` now checks the default config
+  file and reports whether config validation is blocking daemon startup.
+
 ## 0.9.0 - 2026-05-31
 
 - Added a low-cost reachability probe before each node's full sync pass: a bare `ver` read is
