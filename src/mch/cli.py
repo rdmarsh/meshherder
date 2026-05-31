@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import unicodedata
 from datetime import UTC, datetime
@@ -26,6 +27,15 @@ from mch.recommend import load_radio_presets
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
 DEFAULT_CONFIG = Path("/etc/meshherder/config.yaml")
+
+STATE_COLORS = {
+    "configured": "green",
+    "online": "green",
+    "partial": "yellow",
+    "configuring": "yellow",
+    "unknown": "yellow",
+    "offline": "red",
+}
 
 
 def _wlen(s: str) -> int:
@@ -46,6 +56,19 @@ def _pk(pubkey: str | None, length: int = 12) -> str:
 def _sv(v: object) -> str:
     """Stringify a setting value for display — config values can be int/bool/float."""
     return str(v) if v is not None else "-"
+
+
+def _state_text(state: str | None) -> str:
+    text = state or "-"
+    color = STATE_COLORS.get(text)
+    return click.style(text, fg=color) if color else text
+
+
+def _state_cell(state: str | None, width: int) -> str:
+    text = state or "-"
+    padded = f"{text:<{width}}"
+    color = STATE_COLORS.get(text)
+    return click.style(padded, fg=color) if color else padded
 
 
 def _ago(iso: str | None) -> str:
@@ -167,11 +190,19 @@ def _default_config_path() -> Path:
     help="Path to daemon Unix socket",
     show_default=True,
 )
+@click.option(
+    "--color/--no-color",
+    default=None,
+    help="Control ANSI color output. Honors NO_COLOR when unset.",
+)
 @click.pass_context
-def cli(ctx: click.Context, socket: str) -> None:
+def cli(ctx: click.Context, socket: str, color: bool | None) -> None:
     """mch — MeshCore node management CLI"""
     ctx.ensure_object(dict)
     ctx.obj["socket"] = socket
+    if color is None and "NO_COLOR" in os.environ:
+        color = False
+    ctx.color = color
 
 
 # ---------------------------------------------------------------------------
@@ -357,16 +388,16 @@ def status(ctx: click.Context, query: str | None) -> None:
         nbrs_w = max(len("NBRS"), max((len(n.get("neighbors") or "-") for n in nodes), default=0))
         ver_w = max(len("VER"), max((len(_short_ver(n.get("ver"))) for n in nodes), default=0))
 
-        row = "  {:<12}  {:<{sw}}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {}"
+        row = "  {:<12}  {}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {}"
         click.echo(row.format(
-            "PUBKEY", "STATE", _wpad("LABEL", label_w), "GROUP", _wpad("MESH NAME", name_w),
+            "PUBKEY", f"{'STATE':<{state_w}}", _wpad("LABEL", label_w), "GROUP", _wpad("MESH NAME", name_w),
             "NBRS", "VER", "LAST SEEN",
-            sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
+            gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
         click.echo(row.format(
-            "------", "-----", _wpad("-----", label_w), "-----", _wpad("---------", name_w),
+            "------", f"{'-----':<{state_w}}", _wpad("-----", label_w), "-----", _wpad("---------", name_w),
             "----", "---", "---------",
-            sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
+            gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
         for n in nodes:
             last  = _ago(n.get("last_seen"))
@@ -375,13 +406,13 @@ def status(ctx: click.Context, query: str | None) -> None:
             ver   = _short_ver(n.get("ver"))
             click.echo(row.format(
                 _pk(n["pubkey"]),
-                n["state"],
+                _state_cell(n.get("state"), state_w),
                 _wpad(n.get("label") or "-", label_w),
                 group,
                 _wpad(n["name"], name_w),
                 nbrs, ver,
                 last,
-                sw=state_w, gw=group_w, nw=nbrs_w, vw=ver_w,
+                gw=group_w, nw=nbrs_w, vw=ver_w,
             ))
     else:
         click.echo("  no nodes in database")
@@ -460,7 +491,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     click.echo(f"label:       {data.get('label') or '-'}")
     click.echo(f"group:       {data.get('group') or '-'}")
     click.echo(f"mesh name:   {data['name']}")
-    click.echo(f"state:       {data['state']}")
+    click.echo(f"state:       {_state_text(data.get('state'))}")
     click.echo(f"last seen:   {_ago_with_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ago_with_ts(data.get('last_connected'))}")
     click.echo(f"pubkey:      {_pk(data.get('pubkey'))}")
@@ -597,13 +628,18 @@ def _render_issue_sections(
             _wlen("LABEL"),
             max((_wlen(n.get("label") or "-") for n in bad_state), default=0),
         )
-        fmt = "  {:<12}  {}  {:<12}  {:<16}"
-        click.echo(fmt.format("PUBKEY", _wpad("LABEL", name_w), "STATE", "LAST SEEN"))
-        click.echo(fmt.format("------", _wpad("-----", name_w), "-----", "---------"))
+        fmt = "  {:<12}  {}  {}  {:<16}"
+        click.echo(fmt.format("PUBKEY", _wpad("LABEL", name_w), f"{'STATE':<12}", "LAST SEEN"))
+        click.echo(fmt.format("------", _wpad("-----", name_w), f"{'-----':<12}", "---------"))
         for n in bad_state:
             label = n.get("label") or "-"
             last = _ago(n.get("last_seen"))
-            click.echo(fmt.format(_pk(n.get("pubkey")), _wpad(label, name_w), n["state"], last))
+            click.echo(fmt.format(
+                _pk(n.get("pubkey")),
+                _wpad(label, name_w),
+                _state_cell(n.get("state"), 12),
+                last,
+            ))
         click.echo("")
 
     if ghosts:

@@ -616,6 +616,53 @@ def test_status_lists_nodes():
     assert "Tower" in result.output
 
 
+def test_status_colors_state_when_color_enabled():
+    runner = CliRunner()
+    with patch("mch.cli._rpc", return_value=_status_resp(nodes=[
+        _summary(state="configured"),
+        _summary("11223344" * 8, name="Partial", label="partial", state="partial"),
+        _summary("55667788" * 8, name="Offline", label="offline", state="offline"),
+    ])):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "--color", "status"],
+            color=True,
+        )
+
+    assert result.exit_code == 0
+    assert "\x1b[32mconfigured" in result.output
+    assert "\x1b[33mpartial" in result.output
+    assert "\x1b[31moffline" in result.output
+
+
+def test_status_no_color_flag_disables_state_color():
+    runner = CliRunner()
+    with patch("mch.cli._rpc", return_value=_status_resp(nodes=[_summary()])):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "--no-color", "status"],
+            color=True,
+        )
+
+    assert result.exit_code == 0
+    assert "\x1b[" not in result.output
+    assert "configured" in result.output
+
+
+def test_status_honors_no_color_environment_variable():
+    runner = CliRunner()
+    with patch("mch.cli._rpc", return_value=_status_resp(nodes=[_summary()])):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "status"],
+            color=True,
+            env={"NO_COLOR": "1"},
+        )
+
+    assert result.exit_code == 0
+    assert "\x1b[" not in result.output
+
+
 def test_status_shows_label_and_group_columns():
     result = _run(["status"], _status_resp(nodes=[
         _summary(group="repeaters", ver="v1.14.1", neighbors="5")
