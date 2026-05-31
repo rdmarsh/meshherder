@@ -1867,6 +1867,13 @@ async def test_seed_from_config_not_in_contacts_logs_warning(db, caplog):
     assert len(await db.get_all_nodes()) == 0
     assert "deadbeef" in caplog.text
 
+    logs = await db.get_logs()
+    assert len(logs) == 1
+    assert logs[0]["node_pubkey"] is None
+    assert logs[0]["level"] == "WARNING"
+    assert "Ghost Node" in logs[0]["message"]
+    assert "deadbeef" in logs[0]["message"]
+
 
 async def test_seed_from_config_non_rep_contact_ignored(db):
     """Non-REP contacts (CLI, ROOM) are not matched even if pubkey prefix matches."""
