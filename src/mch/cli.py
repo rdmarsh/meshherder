@@ -1124,13 +1124,13 @@ def plan(ctx: click.Context, query: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# commission
+# new
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@cli.command(name="new")
 @click.pass_context
-def commission(ctx: click.Context) -> None:
-    """Interactively commission a new or replacement MeshCore node.
+def new(ctx: click.Context) -> None:
+    """Interactively add a fresh or replacement MeshCore node.
 
     The gateway will switch to the factory frequency (869.618 MHz) and search
     for unmanaged nodes. Make sure only one new or replacement node is powered
@@ -1143,8 +1143,8 @@ def commission(ctx: click.Context) -> None:
 def _run_commission_wizard(socket: str) -> None:
     """Interactive wizard: scans for nodes, asks mode, collects params, sends RPC, prints result."""
     click.echo("")
-    click.echo("Commission a MeshCore Node")
-    click.echo("=" * 26)
+    click.echo("Add a MeshCore Node")
+    click.echo("===================")
     click.echo("")
 
     # Search first — no point asking questions if there's no node to commission.
@@ -1166,7 +1166,7 @@ def _run_commission_wizard(socket: str) -> None:
             choice = click.prompt(
                 "Press Enter to retry or q to cancel", default="", show_default=False
             ).strip().lower()
-            if choice == "q":
+            if choice in ("q", "quit", "cancel"):
                 return
             continue
 
@@ -1181,7 +1181,7 @@ def _run_commission_wizard(socket: str) -> None:
             choice = click.prompt(
                 "Press Enter to retry or q to cancel", default="", show_default=False
             ).strip().lower()
-            if choice == "q":
+            if choice in ("q", "quit", "cancel"):
                 return
             continue
 
@@ -1195,7 +1195,7 @@ def _run_commission_wizard(socket: str) -> None:
                 default="",
                 show_default=False,
             ).strip().lower()
-            if choice == "q":
+            if choice in ("q", "quit", "cancel"):
                 return
             continue
 
@@ -1204,9 +1204,9 @@ def _run_commission_wizard(socket: str) -> None:
         break
 
     click.echo("")
-    click.echo("  (n) New node     - brand new hardware, generate fresh identity")
-    click.echo("  (r) Replace node - restore a known node's identity from secrets.yaml")
-    click.echo("  (q) Cancel")
+    click.echo("  n. new node       brand new hardware, generate fresh identity")
+    click.echo("  r. replace node   restore a known node's identity from secrets.yaml")
+    click.echo("  q. cancel")
     click.echo("")
 
     while True:
@@ -1217,7 +1217,7 @@ def _run_commission_wizard(socket: str) -> None:
         if mode_raw in ("r", "replace"):
             _commission_replace_wizard(socket)
             return
-        if mode_raw in ("q", "quit", ""):
+        if mode_raw in ("q", "quit", "cancel", ""):
             click.echo("cancelled")
             return
         click.echo("  please enter n, r, or q")
@@ -1305,6 +1305,7 @@ def _prompt_radio_all(
     """Prompt for radio settings with named choices plus paste/custom escape hatches."""
     current_radio = f"{freq},{bw},{sf},{cr}" if all((freq, bw, sf, cr)) else ""
     options: list[tuple[str, str, str]] = []
+    selected_key: str | None = None
 
     def _add_option(label: str, value: str | None) -> None:
         if value is None:
@@ -1321,16 +1322,31 @@ def _prompt_radio_all(
     _add_option("current value", current_radio)
 
     if options:
+        if current_radio:
+            for key, value, label in options:
+                if value == current_radio:
+                    options = [(key, value, label)] + [
+                        option for option in options if option[1] != current_radio
+                    ]
+                    options = [
+                        (str(idx), option_value, option_label)
+                        for idx, (_, option_value, option_label) in enumerate(options, 1)
+                    ]
+                    selected_key = "1"
+                    break
         click.echo("Radio settings:")
         for key, value, label in options:
-            click.echo(f"  {key}. {value:<18} {label}")
+            suffix = " (selected)" if key == selected_key else ""
+            click.echo(f"  {key}. {value:<18} {label}{suffix}")
+            if key == selected_key and len(options) > 1:
+                click.echo("")
         click.echo("  p. paste freq,bw,sf,cr")
         click.echo("  c. custom fields")
         click.echo("  q. cancel")
-        default_choice = options[0][0]
+        default_choice = selected_key or options[0][0]
         while True:
             choice = click.prompt("Radio", default=default_choice).strip().lower()
-            if choice in ("q", "quit", "n", "no", "exit"):
+            if choice in ("q", "quit", "cancel", "exit"):
                 return None
             for key, value, _ in options:
                 if choice == key:
@@ -1345,7 +1361,7 @@ def _prompt_radio_all(
                 ).strip()
                 if not raw:
                     continue
-                if raw.lower() in ("q", "quit", "n", "no", "exit"):
+                if raw.lower() in ("q", "quit", "cancel", "exit"):
                     return None
                 parsed = _validate_radio_tuple(raw)
                 if parsed is not None:
@@ -1384,11 +1400,15 @@ def _prompt_commission_group(
             click.echo("  no groups are configured; enter - for none")
 
     default_group = current if current in group_options else group_options[0]
-    default_choice = str(group_options.index(default_group) + 1)
+    choices = [default_group] + [name for name in group_options if name != default_group]
+    default_choice = "1"
 
     click.echo("Groups:")
-    for idx, name in enumerate(group_options, 1):
-        click.echo(f"  {idx}. {name}")
+    for idx, name in enumerate(choices, 1):
+        suffix = " (selected)" if name == default_group else ""
+        click.echo(f"  {idx}. {name}{suffix}")
+        if idx == 1 and len(choices) > 1:
+            click.echo("")
     click.echo("  n. none")
 
     while True:
@@ -1398,8 +1418,8 @@ def _prompt_commission_group(
             return None
         try:
             idx = int(choice) - 1
-            if 0 <= idx < len(group_options):
-                return group_options[idx]
+            if 0 <= idx < len(choices):
+                return choices[idx]
         except ValueError:
             pass
         if choice in group_options:
@@ -1415,8 +1435,8 @@ def _commission_new_wizard(
 ) -> None:
     """Collect params for a new node, confirm, send RPC with retry, display result."""
     click.echo("")
-    click.echo("New node commissioning")
-    click.echo("")
+    click.echo("New node")
+    click.echo("--------")
     radio_options = radio_options or []
     group_options = group_options or []
 
@@ -1489,16 +1509,18 @@ def _commission_new_wizard(
         click.echo("")
 
         while True:
-            action = click.prompt("Proceed? [y]es  [e]dit  [q]uit", default="y").strip().lower()
+            action = click.prompt(
+                "Proceed? [y]es  [e]dit  [q]cancel", default="y"
+            ).strip().lower()
             if action in ("", "y", "yes"):
                 break
             if action in ("e", "edit"):
                 break
-            if action in ("q", "quit", "n", "no"):
+            if action in ("q", "quit", "cancel", "n", "no"):
                 break
             click.echo("  please enter y, e, or q")
 
-        if action in ("q", "quit", "n", "no"):
+        if action in ("q", "quit", "cancel", "n", "no"):
             click.echo("cancelled")
             return
         if action in ("e", "edit"):
@@ -1531,9 +1553,9 @@ def _commission_new_wizard(
                 click.echo(hint)
             click.echo("Check the node is powered on, in range, and with an antenna.")
             choice = click.prompt(
-                "[Enter] retry  [e]dit  [q]uit", default=""
+                "[Enter] retry  [e]dit  [q]cancel", default=""
             ).strip().lower()
-            if choice == "q":
+            if choice in ("q", "quit", "cancel"):
                 click.echo("cancelled")
                 return
             if choice == "e":
@@ -1622,9 +1644,9 @@ def _commission_replace_wizard(socket: str) -> None:
         click.echo(f"\nCan't complete commissioning: {resp.get('error', 'unknown error')}")
         click.echo("Check the node is powered on, in range, and with an antenna.")
         choice = click.prompt(
-            "[Enter] retry  [q]uit", default="", show_default=False
+            "[Enter] retry  [q]cancel", default="", show_default=False
         ).strip().lower()
-        if choice == "q":
+        if choice in ("q", "quit", "cancel"):
             click.echo("cancelled")
             return
         click.echo("Retrying...")

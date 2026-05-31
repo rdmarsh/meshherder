@@ -8,7 +8,7 @@ non-goals. Keep this file limited to repeatable bench and development procedures
 
 ## Bench Reflash Commands
 
-For a clean factory-style reset before testing `mch commission`, erase flash first, then write the
+For a clean factory-style reset before testing `mch new`, erase flash first, then write the
 merged firmware image. Replace the serial device and firmware path for your bench machine.
 
 ```bash

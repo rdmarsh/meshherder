@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Renamed the commissioning wizard command from `mch commission` to `mch new`. The wizard now uses
+  consistent `q` cancel wording and shows selected group/radio choices first when editing.
 - Improved `mch validate` diagnostics for operator config mistakes: duplicate YAML keys now
   report line numbers, and unknown node-group references are reported together with close-match
   hints.

@@ -78,7 +78,7 @@ pip install -e .</code></pre>
       <li><strong>Operational evidence</strong> — foreground sync reports management radio, cached path mode, reads, failures, and writes; logs record manual sync start, completion, partial results, and aborts.</li>
       <li><strong>Open-node detection</strong> — warns when a node syncs with no ACL protection and surfaces the condition in fleet reporting.</li>
       <li><strong>mch exec</strong> — run one-off MeshCore CLI commands on any managed node without touching config. Destructive commands require confirmation; irreversible ones are blocked.</li>
-      <li><strong>mch commission</strong> — guided wizard to take a freshly-flashed node to fully managed: generates or restores a private key, sets name/password/radio, verifies identity after reboot.</li>
+      <li><strong>mch new</strong> — guided wizard to take a freshly-flashed node to fully managed: generates or restores a private key, sets name/password/radio, verifies identity after reboot.</li>
       <li><strong>Hot reload</strong> — mchd watches <code>config.yaml</code> and <code>secrets.yaml</code> and reloads on change. Invalid YAML is rejected; previous config stays active.</li>
       <li><strong>Read-only integration API</strong> — optional loopback HTTP JSON status, plan, issue, and log endpoints for reporting tools and future dashboards.</li>
     </ul>
@@ -133,7 +133,7 @@ mch sync                     # sweep all nodes in background
 mch sync &lt;prefix&gt;           # sync one node now; stream radio/path/command progress
 mch contacts                 # nodes visible to the gateway but not yet in config
 mch exec &lt;node&gt; &lt;command&gt;   # run a raw MeshCore CLI command on a managed node
-mch commission               # commission a fresh or replacement node (interactive)
+mch new                      # add a fresh or replacement node (interactive)
 mch logs                     # recent per-node activity across all nodes
 mch logs &lt;prefix&gt;           # activity for one node
 mch suggest                  # suggested txdelay per node based on neighbour count

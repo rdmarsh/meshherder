@@ -67,8 +67,7 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 - Improve commissioning for location-aware nodes, including `lat`/`lon` prompts and correct
   32-byte versus 24-byte advertised-name limits; consider an operator-configured home-radius
   warning without rejecting intentional out-of-area deployments.
-- Clarify generated-public-key wording, wizard sentinel values, and whether `commission new` /
-  `commission replace` should also be explicit subcommands.
+- Clarify generated-public-key wording and wizard sentinel values.
 - Support replacing an archived secrets-only node and decide whether group defaults should
   populate new commissioning values, including treatment of guest passwords.
 - Make profile updates explicit and validated instead of implicitly depending on remotely fetched

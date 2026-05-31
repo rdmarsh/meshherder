@@ -159,7 +159,7 @@ decide what to add to config. It is a read-only informational command.
 
 ## config.yaml is operator-managed
 
-mchd reads config.yaml at startup and on hot reload. It does not modify it. When `mch commission`
+mchd reads config.yaml at startup and on hot reload. It does not modify it. When `mch new`
 provisions a new node, it prints ready-to-paste YAML snippets for both config.yaml and
 secrets.yaml — the operator copies them in, puts them in git, then waits for hot reload or sends
 SIGHUP to mchd.
@@ -367,7 +367,7 @@ authorization used when mchd logs into a managed repeater.
 
 ## Two-layer commissioning
 
-`mch commission` is a wizard, not an automated flow. It:
+`mch new` is a wizard, not an automated flow. It:
 
 1. Pauses the work queue so commissioning and normal sync don't contend on the gateway.
 2. Hops to the factory default frequency (869.618 MHz) and discovers unmanaged nodes.
@@ -421,12 +421,12 @@ radio, but a *non-factory* admin password. Recovery cannot rely on the factory p
 
 The commissioning code therefore tries two passwords, in order:
 
-- **`commission new`**: factory `password` first, then the user-supplied admin password from the
+- **`mch new` new-node mode**: factory `password` first, then the user-supplied admin password from the
   wizard form. The CLI generates the private key once before the retry loop, so successive
   attempts use the same key. All mutation commands (`set name`, `set guest.password`, `password`,
   `set prv.key`, `set radio`) are idempotent under re-send with identical params, so the whole
   sequence is replayed each retry without stage tracking.
-- **`commission replace`**: factory `password` first, then the managed password from
+- **`mch new` replacement mode**: factory `password` first, then the managed password from
   `secrets.yaml`. The managed identity is operator-owned and pre-existing for this mode, so the
   fallback target is always available when the prefix is in secrets.
 
@@ -453,7 +453,7 @@ section only records stable design gaps that affect the architecture.
   A `mch forget <prefix>` command to purge the DB record is not yet implemented.
 - **Ghost resolution is one-directional**: `mch issues` shows ghosts but provides no CLI action
   to resolve them — either add to config (paste block) or remove from DB.
-- **Commission idempotency**: running `mch commission` on a node already in config/DB has
+- **Commission idempotency**: running `mch new` on a node already in config/DB has
   undefined behaviour. Should detect and reject.
 - **Commission new ignores group defaults**: the wizard pre-fills radio settings from the gateway
   node's home radio, but does not yet inherit from the matching `config.yaml` group (or a
