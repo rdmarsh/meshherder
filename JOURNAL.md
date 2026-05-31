@@ -4,6 +4,23 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-31 - Luna `/opt/meshherder` Checkout Restored
+
+- Incident: `mchd` on luna was restart-looping with `error loading config: unknown config key
+  'api'` even though the deployed config was valid for current meshherder.
+- Cause: `/opt/meshherder` had become an old non-git source copy whose `pyproject.toml` declared
+  `version = "0.2.0"`. Running the documented `sudo /opt/meshherder/.venv/bin/pip install .`
+  from that directory reinstalled the old package into the live venv. The old parser did not know
+  the newer `api:` config block.
+- Recovery: mirrored the clean checkout from `/home/rdm/code/meshherder` back into
+  `/opt/meshherder` while preserving `/opt/meshherder/.venv`, reinstalled from `/opt/meshherder`,
+  recopied the systemd unit, reloaded systemd, and restarted `mchd`.
+- Verified final state on luna: `/opt/meshherder` is a real `main...origin/main` checkout at
+  `9a776f2`, `mch --version` reports `0.9.0`, `mchd` is active, the control socket works, and
+  `mch status` returns fleet status.
+- Documentation guardrail added: the upgrade flow now runs `git status --short --branch` before
+  `pip install .` and warns not to install from a non-git `/opt/meshherder` tree.
+
 ## 2026-05-31 - Documentation Split for Install Flow
 
 - Moved install, service setup, udev, and upgrade instructions out of `README.md` into

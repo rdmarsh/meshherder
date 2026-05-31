@@ -169,6 +169,7 @@ Use the same checkout and venv that were created during production install:
 
 ```bash
 cd /opt/meshherder
+git status --short --branch
 sudo git pull --ff-only
 sudo /opt/meshherder/.venv/bin/pip install .
 sudo cp systemd/mchd.service /etc/systemd/system/
@@ -177,6 +178,11 @@ sudo systemctl restart mchd
 mch --version
 systemctl status mchd --no-pager
 ```
+
+If `git status` reports `not a git repository`, stop and restore `/opt/meshherder` from the real
+checkout before running `pip install .`. The install command packages whatever source tree is in
+the current directory, so an old copied tree can downgrade the daemon even when the venv and
+systemd unit are otherwise correct.
 
 If `mchd` exits because `config.yaml` is invalid, the service stops instead of restart-looping.
 Fix the config with `mch validate`, then restart `mchd`.
