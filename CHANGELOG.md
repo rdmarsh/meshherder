@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.1 - 2026-05-31
+
 - Enforced setting writes that fail over a cached stored path now perform one cheap flood-routed
   `ver` probe before retrying the write via flood. If the fallback probe also fails, the write is
   not retried, avoiding duplicate writes to a node that is not answering.
