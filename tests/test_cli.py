@@ -243,7 +243,7 @@ def test_version_options_report_source_version(flag: str):
 
 
 def test_current_release_version_is_0_9_0():
-    assert __version__ == "0.9.0"
+    assert __version__ == "0.9.1"
 
 
 def _run(args, rpc_response):
