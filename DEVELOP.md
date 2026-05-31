@@ -6,6 +6,18 @@ detailed for the main README.
 Use `BACKLOG.md` for active development todos, wishlist items, deferred ideas, and explicit
 non-goals. Keep this file limited to repeatable bench and development procedures.
 
+## README ToC
+
+`README.md` has a generated table of contents between `<!--ts-->` and `<!--te-->`. Regenerate it
+after changing README headings:
+
+```shell
+gh-md-toc --insert --no-backup --hide-footer --skip-header README.md
+```
+
+The local `.git/hooks/pre-commit` hook can do this automatically for staged Markdown files that
+contain the ToC markers, but hooks under `.git/hooks` are not versioned with the repo.
+
 ## Bench Reflash Commands
 
 For a clean factory-style reset before testing `mch new`, erase flash first, then write the

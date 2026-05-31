@@ -9,6 +9,27 @@ compliance — one node at a time, without hammering the mesh.
 
 Think Ansible for your nodes, running continuously in the background.
 
+<!--ts-->
+   * [Project Docs](#project-docs)
+   * [Features](#features)
+   * [Requirements](#requirements)
+   * [Install](#install)
+   * [Configuration](#configuration)
+      * [Bench reset / reflash](#bench-reset--reflash)
+      * [Node label vs. mesh-visible name](#node-label-vs-mesh-visible-name)
+   * [Typical workflow](#typical-workflow)
+      * [First run — discover and add nodes](#first-run--discover-and-add-nodes)
+      * [Commissioning a new node](#commissioning-a-new-node)
+      * [Building a node on the bench](#building-a-node-on-the-bench)
+      * [Day-to-day checks](#day-to-day-checks)
+      * [Forcing a sync](#forcing-a-sync)
+      * [Checking status in the field](#checking-status-in-the-field)
+      * [Read-only fleet API](#read-only-fleet-api)
+      * [Changing a setting fleet-wide](#changing-a-setting-fleet-wide)
+   * [CLI reference](#cli-reference)
+   * [Logs](#logs)
+<!--te-->
+
 ## Project Docs
 
 | File | Role |
