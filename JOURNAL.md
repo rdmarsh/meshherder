@@ -4,6 +4,16 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-05-31 - Documentation Split for Install Flow
+
+- Moved install, service setup, udev, and upgrade instructions out of `README.md` into
+  `INSTALL.md`.
+- Rationale: the README was mixing project overview, install procedure, configuration reference,
+  command reference, API examples, logs, and upgrades. A separate install guide is easier for
+  operators following a Raspberry Pi/server setup and gives a cleaner source file for a later
+  GitHub Pages documentation pass.
+- The README now keeps a short install pointer and its docs table links to `INSTALL.md`.
+
 ## 2026-05-31 - Reachability Probe Before Full Sync (0.9.0)
 
 - Problem: an unreachable node still cost a timeout on every declared fact and every enforced
