@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Split development, production, service, udev, and upgrade instructions into `INSTALL.md`, leaving
+  the README focused on overview, configuration, and command reference.
 - Renamed the commissioning wizard command from `mch commission` to `mch new`. The wizard now uses
   consistent `q` cancel wording and shows selected group/radio choices first when editing.
 - Improved `mch validate` diagnostics for operator config mistakes: duplicate YAML keys now
