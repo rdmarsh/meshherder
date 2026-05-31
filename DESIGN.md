@@ -215,20 +215,23 @@ that have moved radio without an
 updated management-radio value can repeatedly time out even though their desired settings are
 otherwise valid; recovery path inspection and historical-radio fallback remain future work.
 
-The current command flow is path-capable but not path-managing: `send_command()` sends through the
+The current command flow is path-capable and conservative: `send_command()` sends through the
 gateway's stored MeshCore contact, whose `out_path` may already contain repeater hops. Foreground
 node sync displays the effective management radio and cached contact routing mode/path metadata
-before reads start; this provides diagnostic context without additional mesh traffic. It does not
-force a chosen path or fall back from a failed stored path to flood routing.
+before reads start; this provides diagnostic context without additional mesh traffic. When a
+stored path answers but drops isolated reads, mchd spends a small per-node retry budget on the same
+stored path. It does not repeat every failed read, and it does not retry writes over flood.
+
+If a stored path fails the initial reachability probes, mchd may send one cheap flood-routed `ver`
+probe to distinguish "node unavailable" from "stored path stale." A flood hit is a path-recovery
+signal, not permission to run the rest of the sync over flood. The operator or a future explicit
+path-recovery workflow should then learn and persist a better path. This preserves the primary
+traffic rule: normal management should use learned paths and avoid hammering the mesh with flood.
+
 By contrast, the dependency's direct-message retry helper can reset a broken path to flood after
 failed attempts. Management path inspection and controlled recovery need an explicit operator
-workflow before mchd can safely retry configuration writes over an alternative route.
-
-A future reachability check should be conservative: attempt a read-only probe on the stored
-contact path with a small bounded retry because one missing reply is inconclusive, then reset to
-flood routing and retry the probe before stopping processing for that sync. Repeated failed
-scheduled probes should back off across cycles; delaying every read command within an already
-failing pass would only increase mesh load and operator wait time.
+workflow before mchd can safely update stored paths or retry configuration writes over an
+alternative route.
 
 Successful routing paths should also be retained as bounded observed history. This is useful when
 the gateway has fallen back to flood routing but a recently working repeater path is known, as

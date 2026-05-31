@@ -5,6 +5,14 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Refined lossy-link handling after qh-corbin live testing: stored-path reads now get a small
+  per-node retry budget, while failed stored-path probes get only one flood-routed `ver` check as
+  a path-recovery signal. mchd does not continue a full sync or retry writes over flood after a
+  stored path fails.
+- Recorded qh-corbin's operational recovery: the node was alive and traceable, but the gateway
+  contact had fallen back to flood. Manually restoring the stored path through qh-woldhuis
+  (`out_path=2fd9`, two-byte hash mode) allowed management syncs to complete.
+
 ## 0.9.1 - 2026-05-31
 
 - Enforced setting writes that fail over a cached stored path now perform one cheap flood-routed

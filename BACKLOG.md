@@ -14,6 +14,13 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Operation Safety And Reachability
 
+- Add explicit management path recovery controls that can learn or apply a replacement path
+  without running ordinary management over flood: show the stored path, try advert/discovered
+  path candidates, allow an operator-approved `change_path`, and preserve successful path history.
+- Store a small set of candidate management paths per node with success/failure counts or
+  percentages. Normal sync should try the current stored path first, then fall back to a known
+  strong recent path before using flood as a bounded recovery signal. The recovery command is
+  currently `ver`, but should be explicit/configurable if a better low-cost probe emerges.
 - Build a per-node reliability/fragility view from collected sync evidence: rolling command
   success/failure and timeout rates first, then assess path length/history and optional physical
   distance as explanatory signals. Use it to inform scheduling/backoff only after the evidence

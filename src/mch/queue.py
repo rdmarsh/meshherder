@@ -76,6 +76,11 @@ def _describe_cached_management_path(contact: dict[str, Any]) -> str:
     return "unknown (no route metadata in cached contact)"
 
 
+def _uses_stored_path(contact: dict[str, Any]) -> bool:
+    path_len = contact.get("out_path_len")
+    return isinstance(path_len, int) and path_len > 0
+
+
 def _flood_route_contact(contact: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of a contact that sends via MeshCore flood routing."""
     routed = dict(contact)
@@ -227,6 +232,7 @@ _PERMISSION_ERROR_MARKERS = ("no permission",)
 # fact, so its reply is reused rather than read twice.
 _PROBE_COMMAND = "ver"
 _PROBE_ATTEMPTS = 2
+_STORED_PATH_READ_RETRY_BUDGET = 3
 
 
 def _is_permission_error(text: str) -> bool:
@@ -867,11 +873,12 @@ class WorkQueue:
             result.reachable = True
             node.last_connected = datetime.now(UTC)
             await self._db.upsert_node(node)
+            read_retry_budget = [_STORED_PATH_READ_RETRY_BUDGET]
 
             # collect facts (reusing the probe's `ver` reply where applicable)
             result.facts_collected = await self._collect_facts(
                 pubkey, contact, node, node_cfg, progress=progress,
-                probe_result=probe_result,
+                probe_result=probe_result, read_retry_budget=read_retry_budget,
             )
 
             # enforce / audit settings
@@ -883,7 +890,8 @@ class WorkQueue:
                 enforce_drifted,
                 enforce_failed,
             ) = await self._process_settings(
-                pubkey, contact, node_cfg, group_cfg, global_cfg, node, progress=progress
+                pubkey, contact, node_cfg, group_cfg, global_cfg, node,
+                progress=progress, read_retry_budget=read_retry_budget,
             )
             result.settings_checked = s_checked
             result.settings_enforced = s_enforced
@@ -1043,6 +1051,7 @@ class WorkQueue:
         a re-login failure raises _ReloginFailed, which the caller treats as
         offline (we cannot manage a node we cannot authenticate to).
         """
+        stored_path_failed = False
         for attempt in range(1, _PROBE_ATTEMPTS + 1):
             await _progress(
                 progress, f"checking reachability ({attempt}/{_PROBE_ATTEMPTS})"
@@ -1050,10 +1059,31 @@ class WorkQueue:
             res = await self._send_authed(contact, _PROBE_COMMAND, node, node_cfg)
             if res.success:
                 return res
+            stored_path_failed = stored_path_failed or _uses_stored_path(contact)
             log.debug(
                 "reachability probe %d/%d failed for %s: %s",
                 attempt, _PROBE_ATTEMPTS, node.pubkey[:12], res.error or "no response",
             )
+        if stored_path_failed:
+            await _progress(progress, "stored path failed; checking flood reachability once")
+            flood_contact = _flood_route_contact(contact)
+            res = await self._send_authed(flood_contact, _PROBE_COMMAND, node, node_cfg)
+            if res.success:
+                await self._db.write_log(
+                    node.pubkey,
+                    "WARNING",
+                    "stored path failed but flood probe reached node; path repair needed",
+                )
+                await _progress(
+                    progress,
+                    "flood reached node but full sync is deferred until path is repaired",
+                )
+            else:
+                await self._db.write_log(
+                    node.pubkey,
+                    "WARNING",
+                    f"stored path and flood probe both failed: {res.error or 'no response'}",
+                )
         return None
 
     async def _send_enforced_write(
@@ -1067,53 +1097,50 @@ class WorkQueue:
         timeout: float | None,
         progress: ProgressCallback = None,
     ) -> tuple[CommandResult, int]:
-        """Send an idempotent desired-state write with bounded flood-route fallback.
-
-        The normal cached route is tried first. If that route is a stored path
-        and the write fails, send one cheap `ver` over a flood-routed contact
-        before retrying the write over flood. The probe prevents a failed stored
-        path from turning into an unbounded duplicate write attempt on a node
-        that is not answering at all.
-        """
+        """Send an idempotent desired-state write over the cached management path."""
         result = await self._send_authed(contact, command, node, node_cfg, timeout=timeout)
-        attempts = 1
-        path_len = contact.get("out_path_len")
-        if result.success or not (isinstance(path_len, int) and path_len > 0):
-            return result, attempts
+        return result, 1
 
-        flood_contact = _flood_route_contact(contact)
+    async def _send_read_with_lossy_retry(
+        self,
+        pubkey: str,
+        contact: dict[str, Any],
+        command: str,
+        node: Node,
+        node_cfg: NodeConfig,
+        *,
+        read_retry_budget: list[int],
+        progress: ProgressCallback = None,
+    ) -> CommandResult:
+        """Read over the cached path, retrying a few stored-path misses per node.
+
+        qh-corbin live testing showed that a learned repeater path can be correct
+        yet still lose an isolated command. Retrying every command would hammer
+        a weak mesh, so retries are only used for stored paths and are capped for
+        the whole node pass. Flood is deliberately not used as a recovery path.
+        """
+        result = await self._send_authed(contact, command, node, node_cfg)
+        if result.success:
+            return result
+        if not _uses_stored_path(contact) or read_retry_budget[0] <= 0:
+            return result
+
+        read_retry_budget[0] -= 1
         error = result.error or "no response"
-        log.warning(
-            "write %r failed for %s on cached route (%s); probing flood fallback",
-            command, pubkey[:12], error,
+        log.info(
+            "read %r failed for %s on stored path (%s); retrying once "
+            "(remaining read retries for node: %d)",
+            command, pubkey[:12], error, read_retry_budget[0],
         )
-        await self._db.write_log(
-            pubkey,
-            "WARNING",
-            f"write {command!r} failed on cached route: {error}; probing flood fallback",
-        )
-        await _progress(progress, "write failed on cached route; probing flood fallback")
-
-        probe = await self._send_authed(flood_contact, _PROBE_COMMAND, node, node_cfg)
-        if not probe.success:
-            probe_error = probe.error or "no response"
-            log.warning("flood fallback probe failed for %s: %s", pubkey[:12], probe_error)
+        await _progress(progress, f"read {command!r} missed; retrying on stored path")
+        retry = await self._send_authed(contact, command, node, node_cfg)
+        if retry.success:
             await self._db.write_log(
                 pubkey,
-                "WARNING",
-                f"flood fallback probe failed: {probe_error}; write not retried",
+                "INFO",
+                f"read {command!r} succeeded on stored-path retry",
             )
-            await _progress(progress, f"flood fallback probe failed: {probe_error}")
-            return result, attempts
-
-        await _progress(progress, "flood fallback reachable; retrying write")
-        retry = await self._send_authed(
-            flood_contact, command, node, node_cfg, timeout=timeout
-        )
-        attempts += 1
-        if retry.success:
-            await self._db.write_log(pubkey, "INFO", f"write {command!r} succeeded via flood")
-        return retry, attempts
+        return retry
 
     async def _collect_facts(
         self,
@@ -1124,6 +1151,7 @@ class WorkQueue:
         *,
         progress: ProgressCallback = None,
         probe_result: CommandResult | None = None,
+        read_retry_budget: list[int] | None = None,
     ) -> int:
         """Run all declared fact commands and store results.
 
@@ -1133,6 +1161,8 @@ class WorkQueue:
         reading the same value again over the mesh.
         """
         collected = 0
+        if read_retry_budget is None:
+            read_retry_budget = [0]
         keys = list(self._config.facts)
         random.shuffle(keys)
         for key in keys:
@@ -1143,7 +1173,15 @@ class WorkQueue:
                 res = probe_result
             else:
                 await _progress(progress, f"reading fact: {key}")
-                res = await self._send_authed(contact, cmd, node, node_cfg)
+                res = await self._send_read_with_lossy_retry(
+                    pubkey,
+                    contact,
+                    cmd,
+                    node,
+                    node_cfg,
+                    read_retry_budget=read_retry_budget,
+                    progress=progress,
+                )
             if res.success and res.text:
                 if key == "neighbors":
                     # store the count, not the raw multi-line list
@@ -1174,10 +1212,13 @@ class WorkQueue:
         node: Node,
         *,
         progress: ProgressCallback = None,
+        read_retry_budget: list[int] | None = None,
     ) -> tuple[int, int, int, int, int, int]:
         """Check settings, including reportable drift and enforce-blocking failures."""
         checked = enforced = drifted = read_failed = 0
         enforced_drifted = enforced_read_failed = 0
+        if read_retry_budget is None:
+            read_retry_budget = [0]
         keys = list(all_setting_keys(node_cfg, group_cfg, global_cfg))
         # Randomise read order each cycle so a marginal link does not keep losing
         # the same trailing settings (mirrors the fact-collection shuffle).
@@ -1193,7 +1234,15 @@ class WorkQueue:
 
             read_cmd = read_command_for_key(key)
             await _progress(progress, f"reading setting: {key}")
-            res = await self._send_authed(contact, read_cmd, node, node_cfg)
+            res = await self._send_read_with_lossy_retry(
+                pubkey,
+                contact,
+                read_cmd,
+                node,
+                node_cfg,
+                read_retry_budget=read_retry_budget,
+                progress=progress,
+            )
             if not res.success:
                 error = res.error or "no response"
                 log.warning("get %s failed for %s: %s", key, pubkey[:12], error)
