@@ -496,11 +496,15 @@ class WorkQueue:
                 None,
             )
             if contact is None:
-                log.warning(
-                    "config node '%s' (prefix: %s) not visible to gateway — cannot manage",
-                    node_cfg.label or node_cfg.pubkey_prefix,
-                    node_cfg.pubkey_prefix,
+                message = (
+                    f"config node '{node_cfg.label or node_cfg.pubkey_prefix}' "
+                    f"(prefix: {node_cfg.pubkey_prefix}) not visible to gateway — cannot manage"
                 )
+                log.warning(
+                    "%s",
+                    message,
+                )
+                await self._db.write_log(None, "WARNING", message)
                 continue
 
             pubkey = contact["public_key"]
