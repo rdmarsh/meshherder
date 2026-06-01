@@ -207,6 +207,7 @@ class NodeResult:
     pubkey: str
     name: str
     reachable: bool = False
+    skipped_reason: str | None = None
     facts_collected: int = 0
     settings_checked: int = 0
     settings_enforced: int = 0
@@ -873,6 +874,7 @@ class WorkQueue:
                         "reachability probes - skipped sync this cycle",
                     )
                     await _progress(progress, "node unreachable over flood - skipping sync")
+                    result.skipped_reason = "unreachable over flood"
                     return result  # finally still runs to restore the gateway radio
 
                 result.reachable = True
@@ -914,6 +916,7 @@ class WorkQueue:
                     "probes - skipped sync this cycle",
                 )
                 await _progress(progress, "node unreachable - skipping sync this cycle")
+                result.skipped_reason = "unreachable"
                 return result  # finally still runs to restore the gateway radio
             result.reachable = True
             node.last_connected = datetime.now(UTC)
