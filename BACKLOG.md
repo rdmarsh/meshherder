@@ -50,9 +50,11 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   foreground node sync.
 - Explain partial status more directly when enforced reads timed out after other reads succeeded;
   `TRIES` counts writes, so a failed read correctly does not increment it.
-- Add an operator-controlled cleanup for stale cached facts that are no longer configured, such
+- Add an operator-controlled way to hide stale cached facts that are no longer configured, such
   as a misspelled `facts:` key (`powersavings`) that remains visible in node status after it is
-  removed from configuration. Preserve observation history by default; make deletion explicit.
+  removed from configuration. Preserve observation history by default.
+- Add an explicit stale-fact cleanup command for operators who want to delete unconfigured cached
+  fact rows from the local database after reviewing them.
 - Consider an opt-in Markdown/clipboard-friendly rendering mode for sharing reports, while
   retaining aligned terminal tables as the default.
 - Persist "configured node not visible to gateway" warnings in `mch logs`, not only the journal.

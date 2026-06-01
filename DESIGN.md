@@ -287,6 +287,11 @@ facts and settings. Unknown keys remain legal and retain the ordinary `get <key>
 new firmware value can be investigated before the registry is updated, but validation warns and
 suggests close registered names to prevent silent repeated reads of a typo.
 
+Status presentation should be able to hide cached fact rows that are no longer configured, for
+example after correcting a misspelled fact key. Hiding keeps routine status output clean while
+retaining the historical observation in the local database. Permanent deletion should be a
+separate explicit cleanup action so operators can review stale rows before discarding them.
+
 **Settings** are managed values with additional meaning: desired value, inheritance from
 global/group/node configuration, enforcement or audit policy, comparison status, write attempts,
 and a planned action. Even when the current setting is only being observed, retaining that
