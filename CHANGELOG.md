@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.21 - 2026-06-02
+
+- Shortened actionable clock offset notes in `mch status NODE` from `clock fast by ...` /
+  `clock slow by ...` to `fast by ...` / `slow by ...`.
+
 ## 0.9.20 - 2026-06-02
 
 - Changed clock freshness notes in `mch status NODE` to use `within ±1m` for tolerated offsets
