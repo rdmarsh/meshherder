@@ -346,6 +346,13 @@ Reachability and path behavior is deliberately conservative:
 - If both initial `ver` probes fail on a stored path, mch sends one flood-routed `ver` probe as a
   recovery signal. If flood reaches the node, mch logs that the stored path needs repair, but it
   does not continue the full sync over flood.
+- If normal reachability fails for a node with configured radio context, mch may try up to three
+  radio recovery candidates. Profile radio presets are tried first, then nearby spreading-factor
+  variants of the node's effective `via_radio` or desired `radio`. Each attempt is logged and the
+  gateway radio is restored afterward.
+- Successful enforced setting writes are recorded in the local `setting_history` table with the
+  previous observed value and the command used, giving a rollback breadcrumb for radio and other
+  managed settings.
 - Scheduled syncs use the same rules as manual syncs. A node due once per `sync_interval_days`
   can therefore get one flood `ver` recovery probe per scheduled attempt when its stored path is
   failing, plus any manual syncs the operator explicitly requests.

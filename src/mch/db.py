@@ -82,6 +82,17 @@ CREATE TABLE IF NOT EXISTS logs (
     level           TEXT NOT NULL,
     message         TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS setting_history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_pubkey     TEXT NOT NULL,
+    key             TEXT NOT NULL,
+    previous        TEXT,
+    new_value       TEXT,
+    command         TEXT NOT NULL,
+    changed_at      TEXT NOT NULL,
+    FOREIGN KEY (node_pubkey) REFERENCES nodes(pubkey)
+);
 """
 
 
@@ -269,6 +280,36 @@ class Database:
         ) as cur:
             rows = await cur.fetchall()
         return [_row_to_setting(r) for r in rows]
+
+    async def record_setting_change(
+        self,
+        node_pubkey: str,
+        key: str,
+        previous: str | None,
+        new_value: str | None,
+        command: str,
+    ) -> None:
+        """Append a successful setting write to rollback/audit history."""
+        db = self._db_required()
+        await db.execute(
+            """
+            INSERT INTO setting_history
+                (node_pubkey, key, previous, new_value, command, changed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (node_pubkey, key, previous, new_value, command, _dt(datetime.now(UTC))),
+        )
+        await db.commit()
+
+    async def get_setting_history(self, node_pubkey: str) -> list[dict[str, Any]]:
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM setting_history WHERE node_pubkey = ? "
+            "ORDER BY changed_at DESC, id DESC",
+            (node_pubkey,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # facts (read-only CMDB inventory)

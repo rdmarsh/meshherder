@@ -5,6 +5,17 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.13 - 2026-06-01
+
+- Added conservative radio recovery for nodes with configured radio context: after normal
+  reachability probes fail, mchd tries up to three config-derived radio candidates. Curated
+  `profiles.yaml` radio presets are tried first, followed by nearby spreading-factor variants
+  of the node's effective `via_radio` or desired `radio`; each attempt is logged and the gateway
+  radio is restored afterward.
+- Added structured `setting_history` persistence for successful enforced writes, recording the
+  previous observed value, new value, command, and timestamp. This gives operators a rollback
+  breadcrumb for radio changes and other enforced settings on hard-to-access nodes.
+
 ## 0.9.12 - 2026-06-01
 
 - Added standalone MeshCore anonymous repeater probing tooling under `tools/`. The

@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mch.command_registry import command_timeout, read_command_for_key, write_command_for_key
@@ -238,6 +239,150 @@ def all_setting_keys(
     return keys
 
 
+def _radio_from_setting(raw: str | None, source: str) -> _RadioCandidate | None:
+    if raw is None:
+        return None
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) != 4:
+        return None
+    try:
+        return _RadioCandidate(
+            freq=round(float(parts[0]), 3),
+            bw=float(parts[1]),
+            sf=int(parts[2]),
+            cr=int(parts[3]),
+            source=source,
+        )
+    except ValueError:
+        return None
+
+
+def _radio_from_config(
+    radio: Any,
+    source: str,
+) -> _RadioCandidate | None:
+    if radio is None:
+        return None
+    return _RadioCandidate(
+        freq=round(float(radio.freq), 3),
+        bw=float(radio.bw),
+        sf=int(radio.sf),
+        cr=int(radio.cr),
+        source=source,
+    )
+
+
+def _candidate_with_sf(candidate: _RadioCandidate, sf: int, source: str) -> _RadioCandidate:
+    return _RadioCandidate(
+        freq=candidate.freq,
+        bw=candidate.bw,
+        sf=sf,
+        cr=candidate.cr,
+        source=source,
+    )
+
+
+def _append_radio_candidate(
+    candidates: list[_RadioCandidate],
+    seen_channels: set[tuple[float, float, int]],
+    candidate: _RadioCandidate | None,
+) -> None:
+    if candidate is None or not 7 <= candidate.sf <= 12:
+        return
+    if candidate.channel in seen_channels:
+        return
+    seen_channels.add(candidate.channel)
+    candidates.append(candidate)
+
+
+def radio_recovery_candidates(
+    config: Config,
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None,
+    tried_channels: set[tuple[float, float, int]],
+) -> list[_RadioCandidate]:
+    """Return a bounded list of config-derived radios to try after reachability fails."""
+    candidates: list[_RadioCandidate] = []
+    seen_channels = set(tried_channels)
+
+    effective: list[_RadioCandidate] = []
+    effective_via = _radio_from_config(
+        resolve_via_radio(node_cfg, group_cfg, global_cfg),
+        "effective via_radio",
+    )
+    if effective_via is not None:
+        effective.append(effective_via)
+    effective_desired = _radio_from_setting(
+        resolve_desired("radio", node_cfg, group_cfg, global_cfg),
+        "effective desired radio",
+    )
+    if effective_desired is not None:
+        effective.append(effective_desired)
+    if not effective:
+        return []
+
+    profile_candidates: list[_RadioCandidate | None] = []
+    try:
+        from mch.recommend import load_radio_presets
+
+        profiles_file = Path(config.profiles_file) if config.profiles_file else None
+        profile_candidates.extend(
+            _radio_from_setting(preset.value, f"profile preset {preset.name}")
+            for preset in load_radio_presets(
+                profiles_url=config.profiles_url,
+                profiles_file=profiles_file,
+            )
+        )
+    except Exception as exc:
+        log.warning("could not load profile radio presets for fallback: %s", exc)
+
+    for candidate in profile_candidates:
+        _append_radio_candidate(candidates, seen_channels, candidate)
+        if len(candidates) >= _RADIO_FALLBACK_MAX_CANDIDATES:
+            return candidates
+
+    for base in effective:
+        for delta in (-1, 1):
+            sf = base.sf + delta
+            _append_radio_candidate(
+                candidates,
+                seen_channels,
+                _candidate_with_sf(base, sf, f"{base.source} SF{sf} fallback"),
+            )
+        _append_radio_candidate(candidates, seen_channels, base)
+
+    configured: list[_RadioCandidate | None] = [
+        _radio_from_config(config.gateway.radio, "gateway.radio"),
+        _radio_from_config(global_cfg.via_radio if global_cfg else None, "global via_radio"),
+        _radio_from_setting(
+            global_cfg.settings.get("radio").desired
+            if global_cfg and global_cfg.settings.get("radio") else None,
+            "global desired radio",
+        ),
+    ]
+    for group in config.groups:
+        configured.append(_radio_from_config(group.via_radio, f"group {group.name} via_radio"))
+        configured.append(_radio_from_setting(
+            group.settings.get("radio").desired if group.settings.get("radio") else None,
+            f"group {group.name} desired radio",
+        ))
+    for node in config.nodes:
+        label = node.label or node.pubkey_prefix
+        configured.append(_radio_from_config(node.via_radio, f"node {label} via_radio"))
+        configured.append(_radio_from_setting(
+            node.settings.get("radio").desired if node.settings.get("radio") else None,
+            f"node {label} desired radio",
+        ))
+
+    for candidate in configured:
+        _append_radio_candidate(candidates, seen_channels, candidate)
+        if len(candidates) >= _RADIO_FALLBACK_MAX_CANDIDATES:
+            break
+
+    return candidates[:_RADIO_FALLBACK_MAX_CANDIDATES]
+
+
 # ---------------------------------------------------------------------------
 # per-node result
 # ---------------------------------------------------------------------------
@@ -278,6 +423,7 @@ _PERMISSION_ERROR_MARKERS = ("no permission",)
 _PROBE_COMMAND = "ver"
 _PROBE_ATTEMPTS = 2
 _STORED_PATH_READ_RETRY_BUDGET = 3
+_RADIO_FALLBACK_MAX_CANDIDATES = 3
 
 
 def _is_permission_error(text: str) -> bool:
@@ -295,6 +441,19 @@ class _ReloginFailed(Exception):
 
 class OperationBusyError(RuntimeError):
     """Raised when a manual gateway-owning operation is already in progress."""
+
+
+@dataclass(frozen=True)
+class _RadioCandidate:
+    freq: float
+    bw: float
+    sf: int
+    cr: int
+    source: str
+
+    @property
+    def channel(self) -> tuple[float, float, int]:
+        return (round(self.freq, 3), self.bw, self.sf)
 
 
 # ---------------------------------------------------------------------------
@@ -963,6 +1122,9 @@ class WorkQueue:
                 (node_radio.freq, node_radio.bw, node_radio.sf)
                 if node_radio is not None else None
             )
+            tried_radio_channels = {gateway_channel}
+            if required_channel is not None:
+                tried_radio_channels.add(required_channel)
             switch_required = node_radio is not None and required_channel != gateway_channel
             if switch_required:
                 assert node_radio is not None
@@ -1054,20 +1216,33 @@ class WorkQueue:
                 contact, node, node_cfg, progress=progress
             )
             if probe_result is None:
-                node.state = NodeState.UNREACHABLE
-                await self._db.upsert_node(node)
-                log.warning(
-                    "node %r (%s) did not answer %d reachability probes - "
-                    "skipping sync this cycle", name, pubkey[:12], _PROBE_ATTEMPTS,
+                recovered = await self._try_radio_recovery(
+                    node_cfg,
+                    group_cfg,
+                    global_cfg,
+                    contact,
+                    node,
+                    tried_radio_channels,
+                    current_saved_radio=saved_radio,
+                    progress=progress,
                 )
-                await self._db.write_log(
-                    pubkey, "WARNING",
-                    f"node unreachable: no reply to {_PROBE_ATTEMPTS} reachability "
-                    "probes - skipped sync this cycle",
-                )
-                await _progress(progress, "node unreachable - skipping sync this cycle")
-                result.skipped_reason = "unreachable"
-                return result  # finally still runs to restore the gateway radio
+                if recovered is None:
+                    saved_radio = None
+                    node.state = NodeState.UNREACHABLE
+                    await self._db.upsert_node(node)
+                    log.warning(
+                        "node %r (%s) did not answer %d reachability probes - "
+                        "skipping sync this cycle", name, pubkey[:12], _PROBE_ATTEMPTS,
+                    )
+                    await self._db.write_log(
+                        pubkey, "WARNING",
+                        f"node unreachable: no reply to {_PROBE_ATTEMPTS} reachability "
+                        "probes - skipped sync this cycle",
+                    )
+                    await _progress(progress, "node unreachable - skipping sync this cycle")
+                    result.skipped_reason = "unreachable"
+                    return result  # finally still runs to restore the gateway radio
+                probe_result, saved_radio = recovered
             result.reachable = True
             node.last_connected = datetime.now(UTC)
             await self._db.upsert_node(node)
@@ -1230,6 +1405,73 @@ class WorkQueue:
                 result = await self._gateway.send_command(contact, command, timeout=timeout)
 
         return result
+
+    async def _try_radio_recovery(
+        self,
+        node_cfg: NodeConfig,
+        group_cfg: GroupConfig | None,
+        global_cfg: GroupConfig | None,
+        contact: dict[str, Any],
+        node: Node,
+        tried_channels: set[tuple[float, float, int]],
+        *,
+        current_saved_radio: tuple[float, float, int, int] | None,
+        progress: ProgressCallback = None,
+    ) -> tuple[CommandResult, tuple[float, float, int, int]] | None:
+        candidates = radio_recovery_candidates(
+            self._config, node_cfg, group_cfg, global_cfg, tried_channels
+        )
+        if not candidates:
+            return None
+
+        if current_saved_radio is not None:
+            await _progress(progress, "restoring gateway radio before fallback probes")
+            await self._gateway.restore_radio(*current_saved_radio)
+
+        await self._db.write_log(
+            node.pubkey,
+            "WARNING",
+            (
+                "normal reachability failed; trying "
+                f"{len(candidates)} config-derived radio fallback(s)"
+            ),
+        )
+        for candidate in candidates:
+            saved_radio: tuple[float, float, int, int] | None = None
+            reached = False
+            candidate_text = _format_radio(
+                candidate.freq, candidate.bw, candidate.sf, candidate.cr
+            )
+            await _progress(progress, f"trying radio fallback: {candidate_text}")
+            await self._db.write_log(
+                node.pubkey,
+                "WARNING",
+                f"trying radio fallback {candidate_text} ({candidate.source})",
+            )
+            try:
+                saved_radio = await self._gateway.switch_radio_temporarily(
+                    candidate.freq, candidate.bw, candidate.sf, candidate.cr
+                )
+                probe = await self._probe_reachable(contact, node, node_cfg, progress=progress)
+                if probe is not None:
+                    reached = True
+                    await self._db.write_log(
+                        node.pubkey,
+                        "WARNING",
+                        f"radio fallback reached node on {candidate_text} ({candidate.source})",
+                    )
+                    await _progress(progress, f"radio fallback reached node: {candidate_text}")
+                    return probe, saved_radio
+            finally:
+                if saved_radio is not None and not reached:
+                    await self._gateway.restore_radio(*saved_radio)
+
+        await self._db.write_log(
+            node.pubkey,
+            "WARNING",
+            f"radio fallback exhausted ({len(candidates)} candidate(s))",
+        )
+        return None
 
     async def _probe_reachable(
         self,
@@ -1508,6 +1750,13 @@ class WorkQueue:
                         if key == "name" and desired:
                             node.name = desired
                         setting.last_set = datetime.now(UTC)
+                        await self._db.record_setting_change(
+                            pubkey,
+                            key,
+                            observed,
+                            desired,
+                            write_cmd,
+                        )
                         await self._db.write_log(
                             pubkey, "INFO", f"set {key}={desired!r} (was {observed!r})"
                         )
