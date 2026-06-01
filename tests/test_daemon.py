@@ -662,6 +662,21 @@ async def test_sync_dispatch_reports_failed_result(db, wq, config):
     assert resp == {"ok": False, "error": "sync failed for 'Tower' (aabbccdd): login rejected"}
 
 
+async def test_sync_dispatch_reports_skipped_result(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.OFFLINE)
+    await db.upsert_node(node)
+    wq.run_node = AsyncMock(return_value=NodeResult(
+        pubkey=node.pubkey, name=node.name, skipped_reason="unreachable over flood"
+    ))
+
+    resp = await _dispatch({"cmd": "sync", "prefix": "aabbcc"}, wq, db, config)
+
+    assert resp == {
+        "ok": True,
+        "data": "sync skipped for 'Tower' (aabbccdd): unreachable over flood",
+    }
+
+
 async def test_sync_dispatch_with_prefix_busy_returns_error(db, wq, config):
     """forced node sync returns busy when another gateway operation is active."""
     node = Node(pubkey="aabbccdd" * 8, name="Tower", state=NodeState.CONFIGURED)

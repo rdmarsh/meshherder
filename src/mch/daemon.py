@@ -60,6 +60,11 @@ def _sync_result_response(result: NodeResult) -> dict[str, Any]:
     target = f"{result.name!r} ({result.pubkey[:8]})"
     if result.error:
         return {"ok": False, "error": f"sync failed for {target}: {result.error}"}
+    if result.skipped_reason:
+        return {
+            "ok": True,
+            "data": f"sync skipped for {target}: {result.skipped_reason}",
+        }
 
     partial = []
     if result.enforced_settings_drifted:
