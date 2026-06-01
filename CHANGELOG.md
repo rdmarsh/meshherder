@@ -5,6 +5,12 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.14 - 2026-06-01
+
+- Fixed `tools/query_node_info.py --radio` to save the attached gateway's current radio before
+  switching and restore it afterward, including normal exception, Ctrl-C, and SIGTERM paths.
+- Added focused tests for anonymous-probe gateway radio restoration behavior.
+
 ## 0.9.13 - 2026-06-01
 
 - Added conservative radio recovery for nodes with configured radio context: after normal
