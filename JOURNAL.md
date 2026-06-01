@@ -12,9 +12,10 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 - Read-only smoke test: `mch path qh-corbin` reported the expected stored route through
   `out_path=2fd9`, `out_path_len=1`, `out_path_hash_mode=1`, matching the manually recovered
   path from the qh-corbin investigation.
-- Deployment note: `sudo git pull --ff-only` in `/opt/meshherder` still fails on luna because root
-  lacks the GitHub SSH key. The working flow is to pull `/home/rdm/code/meshherder`, then `sudo
-  rsync -a --delete --exclude .venv` into `/opt/meshherder` before reinstalling from `/opt`.
+- Deployment note: root on luna cannot fetch the private GitHub remote by SSH, and unauthenticated
+  HTTPS also fails. `/opt/meshherder` now uses `/home/rdm/code/meshherder` as its `origin`, so the
+  operator checkout pulls from GitHub and the production checkout can use `sudo git pull --ff-only`
+  locally without root network credentials.
 
 ## 2026-06-01 - Path Inspection And Admin Shell
 
