@@ -4,6 +4,17 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.22/0.9.24 Next Sync Status
+
+- Released and deployed `0.9.22` to add an approximate `next sync` line to `mch status NODE`,
+  rendering stored scheduler state as `in ~...`, `due now`, or `unscheduled`.
+- Follow-up `0.9.23` preserved `next_sync_at` in the legacy node-detail payload; live smoke
+  testing then showed the active `mch status NODE` path used the canonical `fleet_node`
+  projection instead.
+- Released and deployed `0.9.24` at commit `b8cae8f`, preserving `next_sync_at` in that canonical
+  projection. Verified luna reported `mch, version 0.9.24`, `mchd` was active, both checkouts were
+  at `b8cae8f`, and `mch status e2601d591517` showed `next sync: ... (in ~15h 27m)`.
+
 ## 2026-06-02 - Luna 0.9.21 Deployment
 
 - Released and deployed `0.9.21` to luna at commit `f0c761f`, shortening actionable clock notes
