@@ -4,6 +4,20 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Luna 0.9.14/0.9.15 Deployment
+
+- Released and deployed `0.9.14` to luna at commit `4406845`. The release makes
+  `tools/query_node_info.py --radio` save the attached gateway's current radio and restore it after
+  the anonymous query, including normal exception, Ctrl-C, and SIGTERM cleanup paths.
+- Updated `/home/rdm/code/meshherder` from GitHub, fast-forwarded `/opt/meshherder` from that
+  operator checkout, installed `meshherder-0.9.14` into the production venv, and restarted `mchd`.
+- Verified `mch --version` reported `0.9.14`, `/opt/meshherder` was at `4406845`, and `mchd` was
+  active with the gateway on `915.075/125/SF9/CR5`.
+- The `0.9.14` restart interrupted an operator foreground `mch sync`, which exposed a CLI bug:
+  EOF on the control socket was parsed as JSON and surfaced as a `JSONDecodeError` traceback.
+  `0.9.15` fixes that path so daemon restarts/disconnects report a clean daemon-connection-closed
+  error instead.
+
 ## 2026-06-01 - Luna 0.9.12 Deployment
 
 - Released and deployed `0.9.12` to luna. The first production install attempt stayed on

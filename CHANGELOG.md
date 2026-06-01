@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.15 - 2026-06-01
+
+- Fixed the CLI RPC reader to report a clean error when `mchd` closes the control socket before
+  sending a final response, such as during a daemon restart in the middle of foreground `mch sync`.
+  This replaces an operator-facing `JSONDecodeError` traceback with a short daemon-disconnected
+  message.
+
 ## 0.9.14 - 2026-06-01
 
 - Fixed `tools/query_node_info.py --radio` to save the attached gateway's current radio before

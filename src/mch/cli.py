@@ -151,7 +151,16 @@ async def _request(
     try:
         while True:
             raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
-            data: dict[str, Any] = json.loads(raw)
+            if raw == b"":
+                writer.close()
+                click.echo("error: daemon connection closed before a response", err=True)
+                raise SystemExit(1) from None
+            try:
+                data: dict[str, Any] = json.loads(raw)
+            except json.JSONDecodeError:
+                writer.close()
+                click.echo("error: daemon returned an invalid response", err=True)
+                raise SystemExit(1) from None
             if data.get("type") == "progress":
                 if on_progress:
                     on_progress(data["msg"])
