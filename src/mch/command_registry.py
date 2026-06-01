@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 CommandKind = Literal["setting", "fact", "operation", "dangerous"]
-ComparatorName = Literal["exact", "radio_tuple", "float_0005"]
+ComparatorName = Literal["exact", "radio_tuple", "float_0005", "region_home", "region_default"]
 ValidatorName = Literal[
     "on_off",
     "radio_tuple",
@@ -250,7 +250,9 @@ _SPECS: tuple[CommandSpec, ...] = (
         notes=(
             "Create a region, optionally under a parent. Official MeshCore CLI docs describe "
             "`region put <name> [parent_name]`. Current MeshCore guidance says newer firmware "
-            "defaults new regions to allow-flood, but live fleet behavior should still be checked."
+            "defaults new regions to allow-flood. On Mac-attached Heltec V3 v1.15.0, "
+            "`region put mch-test` returned `OK - (flood allowed)` and `region get mch-test` "
+            "returned `mch-test F`; removing the unsaved test region returned OK."
         ),
     ),
     CommandSpec(
@@ -265,8 +267,12 @@ _SPECS: tuple[CommandSpec, ...] = (
         read="region home",
         write="region home {value}",
         writable=True,
+        comparator="region_home",
         min_firmware="1.10.0",
-        notes="Home region command from the MeshCore region-management CLI.",
+        notes=(
+            "Home region command from the MeshCore region-management CLI. On Mac-attached "
+            "Heltec V3 v1.15.0, the read reply was `home is *`."
+        ),
     ),
     CommandSpec(
         "region.default",
@@ -274,11 +280,13 @@ _SPECS: tuple[CommandSpec, ...] = (
         read="region default",
         write="region default {value}",
         writable=True,
+        comparator="region_default",
         min_firmware="1.15.0",
         notes=(
             "Default scope region for repeater/room-server-originated packets. MeshCore's "
             "2026 default-scope note says this auto-creates the region if missing and performs "
-            "an implicit region save."
+            "an implicit region save. On Mac-attached Heltec V3 v1.15.0, the read reply was "
+            "`default scope is <null>`."
         ),
     ),
     CommandSpec("erase", "dangerous", dangerous=True, serial_only=True),

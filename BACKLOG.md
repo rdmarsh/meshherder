@@ -32,9 +32,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 ### Configuration And Radio Semantics
 
 - Live-test region management on representative firmware before recommending it for ordinary
-  enforcement: `region put`, `region save`, `region home`, and `region default`; confirm exact
-  read-back text for `region.home`/`region.default` and whether v1.15+ auto-allow/auto-save
-  behavior holds across deployed boards.
+  enforcement: `region put`, `region save`, `region home`, and `region default`; Heltec V3
+  v1.15.0 has been checked, but the same read-back text and v1.15+ auto-allow/auto-save behavior
+  still need confirmation across deployed boards.
 - Keep desired node radio distinct from the radio used to reach it. Replacement commissioning
   currently consumes `via_radio` as the value to push with `set radio`; this becomes ambiguous
   if the node is being moved to a new radio.

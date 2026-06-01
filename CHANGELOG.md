@@ -11,8 +11,10 @@ and backlog history. Dates use the project repository's commit dates.
   remain privileged but the launched `meshcore-cli` process drops back to the invoking user and
   groups instead of running the interactive serial session as root.
 - Added command metadata for MeshCore region operations (`region put`, `region save`) and
-  first-class setting keys for `region.home` and `region.default`; live verification is still
-  required before recommending region enforcement broadly.
+  first-class setting keys for `region.home` and `region.default`, including field-aware
+  comparison for their prose readbacks. Mac-attached Heltec V3 / MeshCore v1.15.0 testing
+  confirmed `region put` creates flood-allowed regions by default and that unsaved test regions
+  can be removed.
 
 ## 0.9.8 - 2026-06-01
 

@@ -33,3 +33,14 @@ def test_non_numeric_values_fall_back_to_not_equal():
 def test_unknown_settings_still_use_exact_string_comparison():
     assert compare_setting("owner.info", "rdm", "rdm").equal is True
     assert compare_setting("owner.info", "rdm", "rdm ").equal is False
+
+
+def test_region_home_comparison_extracts_firmware_reply_value():
+    assert compare_setting("region.home", "*", " home is *").equal is True
+    assert compare_setting("region.home", "au-nsw", "home is *").equal is False
+
+
+def test_region_default_comparison_extracts_firmware_reply_value():
+    assert compare_setting("region.default", "<null>", " default scope is <null>").equal is True
+    assert compare_setting("region.default", "au-nsw", "default scope is au-nsw").equal is True
+    assert compare_setting("region.default", "au-vic", "default scope is au-nsw").equal is False
