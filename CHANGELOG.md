@@ -13,6 +13,11 @@ and backlog history. Dates use the project repository's commit dates.
   contact had fallen back to flood. Manually restoring the stored path through qh-woldhuis
   (`out_path=2fd9`, two-byte hash mode) allowed management syncs to complete.
 
+## 0.9.4 - 2026-06-01
+
+- Render node identities in log output as `[pubkey/label]` and align the level and node columns
+  across each displayed log set.
+
 ## 0.9.3 - 2026-06-01
 
 - Render absolute timestamps in `mch logs` and node recent activity using the operator's local

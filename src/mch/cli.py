@@ -117,6 +117,14 @@ def _ago_with_ts(iso: str | None) -> str:
     return f"{ts} ({_ago(iso).lstrip()})"
 
 
+def _log_node_identity(entry: dict[str, Any]) -> str:
+    pubkey = entry.get("node_pubkey")
+    if not pubkey:
+        return ""
+    label = entry.get("label") or "-"
+    return f"{pubkey[:12]}/{label}"
+
+
 async def _request(
     socket_path: str,
     cmd: dict[str, Any],
@@ -489,15 +497,19 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
         click.echo("no logs")
         return
 
+    level_w = max(len(entry.get("level") or "") for entry in data)
+    node_w = max((_wlen(_log_node_identity(entry)) for entry in data), default=0)
+
     for entry in reversed(data):
         ts = _local_ts(entry.get("timestamp"))
         age = _ago(entry.get("timestamp")).lstrip()
-        if entry.get("node_pubkey"):
-            identity = entry.get("label") or entry["node_pubkey"][:12]
-            node_label = f" [{identity}/{entry['node_pubkey'][:12]}]"
+        level = entry.get("level") or ""
+        identity = _log_node_identity(entry)
+        if identity:
+            node_label = f" [{_wpad(identity, node_w)}]"
         else:
-            node_label = ""
-        click.echo(f"{ts} ({age}) [{entry['level']:<5}]{node_label} {entry['message']}")
+            node_label = f" {' ' * (node_w + 2)}" if node_w else ""
+        click.echo(f"{ts} ({age}) [{level:<{level_w}}]{node_label} {entry['message']}")
 
 
 # ---------------------------------------------------------------------------
@@ -575,12 +587,13 @@ def _render_node_detail(data: dict[str, Any]) -> None:
 
     logs = data.get("logs", [])
     if logs:
+        level_w = max(len(entry.get("level") or "") for entry in logs[:10])
         click.echo("recent activity:")
         for entry in reversed(logs[:10]):
             ts = _local_ts(entry.get("timestamp"))
-            level = entry["level"]
+            level = entry.get("level") or ""
             age = _ago(entry.get("timestamp")).lstrip()
-            click.echo(f"  [{level:<5}] {ts} ({age})  {entry['message']}")
+            click.echo(f"  [{level:<{level_w}}] {ts} ({age})  {entry['message']}")
 
 
 def _render_issue_sections(
