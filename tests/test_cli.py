@@ -811,9 +811,9 @@ def test_status_single_match_shows_unobserved_settings_as_unknown_in_yellow():
         )
 
     assert result.exit_code == 0
-    assert "unknown = not yet observed" in result.output
+    assert "unknown = not yet observed" not in result.output
     assert re.search(
-        r"owner\.info\s+-\s+Managed by mch\s+0\s+\x1b\[33munknown\x1b\[0m",
+        r"owner\.info\s+-\s+Managed by mch\s+0\s+\x1b\[33mnot yet observed\x1b\[0m",
         result.output,
     )
 
@@ -838,10 +838,10 @@ def test_status_single_match_shows_approximate_settings_marker():
         "last_checked": None, "last_set": None,
     }])
     result = _run_multi(["status", "aabb"], status, detail)
-    assert "* = nominal (within expected tolerance)" in result.output
+    assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
-        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+0\s+\*",
+        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+0\s+within expected tolerance",
         result.output,
     )
 

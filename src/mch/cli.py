@@ -519,18 +519,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 else "-"
             )
 
-        any_unobserved = any(s.get("observed") is None for s in settings)
-        any_drift = any(s["drift"] for s in settings)
-        any_approximate = any(s.get("approximate") for s in settings)
-        legend_parts = []
-        if any_unobserved:
-            legend_parts.append("unknown = not yet observed")
-        if any_drift:
-            legend_parts.append("~~~ = drifted from desired")
-        if any_approximate:
-            legend_parts.append("* = nominal (within expected tolerance)")
-        legend = f"  ({', '.join(legend_parts)})" if legend_parts else ""
-        click.echo(f"settings:{legend}")
+        click.echo("settings:")
         # column widths based on content display width, not char count
         col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
@@ -550,11 +539,11 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         click.echo(_srow("------", "---", "-------", "--------", "-----", "-----"))
         for s in settings:
             if s.get("observed") is None:
-                drift_flag = click.style("unknown", fg="yellow")
+                drift_flag = click.style("not yet observed", fg="yellow")
             elif s["drift"]:
                 drift_flag = "~~~"
             elif s.get("approximate"):
-                drift_flag = "*"
+                drift_flag = "within expected tolerance"
             else:
                 drift_flag = ""
             click.echo(_srow(
