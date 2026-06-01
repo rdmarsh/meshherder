@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.24 - 2026-06-02
+
+- Fixed the canonical `fleet_node` detail projection used by `mch status NODE` to preserve
+  `next_sync_at`, so the approximate `next sync` line renders the scheduler timestamp.
+
 ## 0.9.23 - 2026-06-02
 
 - Fixed the legacy node-detail status payload to include `next_sync_at`, so the new

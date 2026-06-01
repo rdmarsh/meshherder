@@ -509,6 +509,7 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
         "state": node["state"],
         "last_seen": node["last_seen"],
         "last_connected": node["last_connected"],
+        "next_sync_at": node.get("next_sync_at"),
         "auth_cached": node["auth"]["cached"],
         "passwd_known": node["auth"]["password_known"],
         "facts": facts,
