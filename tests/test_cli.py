@@ -20,6 +20,7 @@ from mch.cli import (
     _filter_drift,
     _filter_nodes,
     _local_ts,
+    _log_node_identity,
     cli,
 )
 from mch.meshkey import derive_public_key
@@ -81,6 +82,11 @@ def test_local_ts_displays_utc_timestamp_in_local_timezone(monkeypatch):
             monkeypatch.setenv("TZ", old_tz)
         if hasattr(time, "tzset"):
             time.tzset()
+
+
+def test_log_node_identity_uses_pubkey_then_label():
+    entry = {"node_pubkey": "aabbccdd11223344", "label": "site-a"}
+    assert _log_node_identity(entry) == "aabbccdd1122/site-a"
 
 
 def test_filter_contacts_no_query_returns_all():
@@ -261,8 +267,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_3():
-    assert __version__ == "0.9.3"
+def test_current_release_version_is_0_9_4():
+    assert __version__ == "0.9.4"
 
 
 def _run(args, rpc_response):
@@ -1133,9 +1139,22 @@ def test_logs_shows_entries():
     assert result.exit_code == 0
     assert "synced ok" in result.output
     assert "INFO" in result.output
-    assert "[site-a/aabbccddaabb]" in result.output
+    assert "[aabbccddaabb/site-a]" in result.output
     assert "ago)" in result.output
     assert "( " not in result.output
+
+
+def test_logs_align_level_and_node_columns():
+    result = _run(["logs"], {"ok": True, "data": [
+        {"node_pubkey": "11223344" * 8, "label": "long-label", "level": "WARNING",
+         "timestamp": "2026-05-19T12:00:00", "message": "second event"},
+        {"node_pubkey": "aabbccdd" * 8, "label": "a", "level": "INFO",
+         "timestamp": "2026-05-19T10:00:00", "message": "first event"},
+    ]})
+
+    assert result.exit_code == 0
+    assert "[INFO   ] [aabbccddaabb/a         ] first event" in result.output
+    assert "[WARNING] [112233441122/long-label] second event" in result.output
 
 
 def test_logs_newest_at_bottom():
