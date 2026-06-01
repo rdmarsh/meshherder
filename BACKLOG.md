@@ -14,10 +14,6 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Operation Safety And Reachability
 
-- Add explicit management path recovery controls that can learn or apply a replacement path
-  without running ordinary management over flood: try advert/discovered path candidates, allow an
-  operator-approved `change_path`, and preserve successful path history. `mch path <node>` now
-  covers read-only inspection of the current cached gateway route.
 - Store a small set of candidate management paths per node with success/failure counts or
   percentages. Normal sync should try the current stored path first, then fall back to a known
   strong recent path before using flood as a bounded recovery signal. The recovery command is
@@ -144,6 +140,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-06-01: Added explicit `mch path` recovery controls: `--discover` and `--advert` learn
+  candidate paths without applying them, while `--apply <path[:mode]>` applies an
+  operator-confirmed replacement path to the gateway contact and records the change in logs.
 - 2026-06-01: Added `mch path <node>` for read-only cached management route inspection, including
   raw `out_path` metadata and explicit flood/missing `path repair needed` status.
 - 2026-06-01: Added `mch admin` to stop `mchd`, run `meshcore-cli` against the configured gateway

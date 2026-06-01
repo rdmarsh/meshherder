@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_10():
-    assert __version__ == "0.9.10"
+def test_current_release_version_is_0_9_11():
+    assert __version__ == "0.9.11"
 
 
 def _run(args, rpc_response):
@@ -391,6 +391,60 @@ def test_path_command_marks_flood_route_for_repair():
     assert result.exit_code == 0
     assert "cached path: flood" in result.output
     assert "route: flood (path repair needed)" in result.output
+
+
+def test_path_discover_command_shows_candidate():
+    result = _run(["path", "site-a", "--discover"], {"ok": True, "data": {
+        "pubkey": "aabbccdd11223344",
+        "label": "site-a",
+        "name": "Tower",
+        "source": "discovery",
+        "path": "e260,5f6c",
+        "path_len": 2,
+        "path_hash_mode": 1,
+        "apply_value": "e260,5f6c:1",
+    }})
+
+    assert result.exit_code == 0
+    assert "discovery path candidate:" in result.output
+    assert "path: e260,5f6c" in result.output
+    assert "apply with: mch path aabbccdd1122 --apply e260,5f6c:1" in result.output
+
+
+def test_path_apply_command_confirms_and_renders_updated_status():
+    rpc_response = {"ok": True, "data": {
+        "pubkey": "aabbccdd11223344",
+        "label": "site-a",
+        "name": "Tower",
+        "contact_present": True,
+        "cached_path": "stored (out_path=e260; out_path_len=1; hash-mode=1)",
+        "route": "stored",
+        "path_repair_needed": False,
+        "out_path": "e260",
+        "out_path_len": 1,
+        "out_path_hash_mode": 1,
+    }}
+    runner = CliRunner()
+    with patch("mch.cli._rpc", return_value=rpc_response):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "path", "site-a", "--apply", "e260:1"],
+            input="y\n",
+        )
+
+    assert result.exit_code == 0
+    assert "updated cached management path" in result.output
+    assert "route: stored" in result.output
+
+
+def test_path_command_rejects_multiple_mutating_options():
+    result = _run(
+        ["path", "site-a", "--discover", "--apply", "e260:1"],
+        {"ok": True, "data": {}},
+    )
+
+    assert result.exit_code != 0
+    assert "choose only one" in result.output
 
 
 # ------ validate ------

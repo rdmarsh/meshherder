@@ -4,6 +4,19 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Management Path Recovery Controls
+
+- Added explicit path recovery controls to keep normal management off flood while giving operators
+  a daemon-owned repair workflow. `mch path <node>` remains read-only inspection;
+  `--discover` requests a MeshCore path-discovery candidate, `--advert` reads the gateway's cached
+  advert path, and `--apply <path[:mode]>` writes an operator-approved replacement path to the
+  gateway contact.
+- Candidate discovery deliberately does not apply the result. The operator still has to inspect
+  and approve the path, because a wrong path can make management reachability worse.
+- The apply path records a warning log entry with the previous cached route and new applied path.
+  Historical success/failure scoring remains future work; the next useful step is to store a small
+  set of observed candidate paths with outcome counters rather than only logging one-off repairs.
+
 ## 2026-06-01 - Luna 0.9.10 Deployment
 
 - Released `0.9.10` so the deployed package version reflects the live region-command behavior

@@ -207,6 +207,38 @@ async def _dispatch(
             return {"ok": False, "error": f"node {query!r} not found"}
         return {"ok": True, "data": wq.management_path_status(node)}
 
+    if cmd == "path_discover":
+        query = req.get("query", "")
+        source = req.get("source", "discovery")
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"node {query!r} not found"}
+        try:
+            return {"ok": True, "data": await wq.discover_management_path(node, source=source)}
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    if cmd == "path_apply":
+        query = req.get("query", "")
+        path = req.get("path", "")
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"node {query!r} not found"}
+        try:
+            return {"ok": True, "data": await wq.apply_management_path(node, path)}
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
     if cmd == "sync":
         prefix = req.get("prefix")
         if prefix:

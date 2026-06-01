@@ -45,6 +45,8 @@ def wq():
     m.exec_command = AsyncMock(return_value="(ok)")
     m.unfiled_contacts = AsyncMock(return_value=[])
     m.management_path_status = MagicMock(return_value={"route": "stored"})
+    m.discover_management_path = AsyncMock(return_value={"path": "e260", "path_hash_mode": 1})
+    m.apply_management_path = AsyncMock(return_value={"route": "stored"})
     return m
 
 
@@ -140,6 +142,36 @@ async def test_path_dispatch_resolves_node_and_returns_cached_path_status(db, wq
     assert resp["ok"] is True
     assert resp["data"]["route"] == "flood"
     wq.management_path_status.assert_called_once_with(node)
+
+
+async def test_path_discover_dispatch_resolves_node_and_returns_candidate(db, wq, config):
+    node = await _seed_node_with_facts(db)
+
+    resp = await _dispatch(
+        {"cmd": "path_discover", "query": "test", "source": "advert"},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["path"] == "e260"
+    wq.discover_management_path.assert_awaited_once_with(node, source="advert")
+
+
+async def test_path_apply_dispatch_resolves_node_and_applies_path(db, wq, config):
+    node = await _seed_node_with_facts(db)
+
+    resp = await _dispatch(
+        {"cmd": "path_apply", "query": "test", "path": "e260:1"},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["route"] == "stored"
+    wq.apply_management_path.assert_awaited_once_with(node, "e260:1")
 
 
 async def test_issues_dispatch_no_open_node_when_default_password(db, wq, config):

@@ -229,9 +229,11 @@ stored path. It does not repeat every failed read, and it does not retry writes 
 
 If a stored path fails the initial reachability probes, mchd may send one cheap flood-routed `ver`
 probe to distinguish "node unavailable" from "stored path stale." A flood hit is a path-recovery
-signal, not permission to run the rest of the sync over flood. The operator or a future explicit
-path-recovery workflow should then learn and persist a better path. This preserves the primary
-traffic rule: normal management should use learned paths and avoid hammering the mesh with flood.
+signal, not permission to run the rest of the sync over flood. The operator can then use
+`mch path <node> --discover` or `--advert` to inspect candidate paths and
+`mch path <node> --apply <path[:mode]>` to persist a confirmed replacement path on the gateway
+contact. This preserves the primary traffic rule: normal management should use learned paths and
+avoid hammering the mesh with flood.
 
 By contrast, the dependency's direct-message retry helper can reset a broken path to flood after
 failed attempts. Management path inspection and controlled recovery need an explicit operator
