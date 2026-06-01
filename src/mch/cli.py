@@ -121,6 +121,21 @@ def _ago_with_ts(iso: str | None) -> str:
     return f"{ts} ({_ago(iso).lstrip()})"
 
 
+def _next_sync_text(iso: str | None) -> str:
+    """Format the scheduled sync time as an estimate, not a guarantee."""
+    if not iso:
+        return "unscheduled"
+    try:
+        dt = _parse_display_datetime(iso)
+    except (ValueError, TypeError):
+        return iso[:19].replace("T", " ")
+    ts = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    secs = int((dt - datetime.now(UTC)).total_seconds())
+    if secs <= 0:
+        return f"{ts} (due now)"
+    return f"{ts} (in ~{_duration_text(secs)})"
+
+
 _CLOCK_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s+-\s+(\d{1,2})/(\d{1,2})/(\d{4})\s+UTC\s*$")
 
 
@@ -746,6 +761,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     click.echo(f"state:       {_state_text(data.get('state'))}")
     click.echo(f"last seen:   {_ago_with_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ago_with_ts(data.get('last_connected'))}")
+    click.echo(f"next sync:   {_next_sync_text(data.get('next_sync_at'))}")
     click.echo(f"pubkey:      {_pk(data.get('pubkey'))}")
     click.echo(f"pubkey full: {data['pubkey']}")
     click.echo(f"authed:      {'yes' if data.get('auth_cached') else 'no'}")

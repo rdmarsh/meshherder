@@ -464,8 +464,8 @@ man mchd
 mch status                    Fleet overview: state, label, group, firmware, neighbours, last seen
 mch status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
                               Detail view: facts, all desired settings (config + group, including
-                              pending ones not yet synced), last seen/last conn with full timestamp
-                              and relative time, recent activity logs
+                              pending ones not yet synced), last seen/last conn and approximate
+                              next sync with full timestamp and relative time, recent activity logs
 mch validate                  Validate /etc/meshherder/config.yaml
 mch validate --config <path>  Validate an explicit config file
 mch plan                      Desired-vs-known changes; no mesh traffic and no writes

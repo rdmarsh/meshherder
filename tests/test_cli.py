@@ -22,6 +22,7 @@ from mch.cli import (
     _local_ts,
     _log_node_label,
     _log_node_pubkey,
+    _next_sync_text,
     cli,
 )
 from mch.meshkey import derive_public_key
@@ -67,6 +68,23 @@ def test_ago_with_timestamp_is_not_padded_in_prose_output():
 
     assert "(7m ago)" in result.output
     assert "(  7m ago)" not in result.output
+
+
+def test_next_sync_text_formats_future_as_approximate():
+    when = datetime.now(UTC) + timedelta(hours=19, minutes=30)
+    text = _next_sync_text(when.isoformat())
+
+    assert "(in ~19h 29m)" in text or "(in ~19h 30m)" in text
+
+
+def test_next_sync_text_formats_overdue_as_due_now():
+    when = datetime.now(UTC) - timedelta(minutes=5)
+
+    assert _next_sync_text(when.isoformat()).endswith("(due now)")
+
+
+def test_next_sync_text_formats_missing_as_unscheduled():
+    assert _next_sync_text(None) == "unscheduled"
 
 
 def test_local_ts_displays_utc_timestamp_in_local_timezone(monkeypatch):
@@ -279,8 +297,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_21():
-    assert __version__ == "0.9.21"
+def test_current_release_version_is_0_9_22():
+    assert __version__ == "0.9.22"
 
 
 def _run(args, rpc_response):
@@ -682,7 +700,7 @@ def _summary(pubkey="aabbccdd" * 8, name="Tower", label="site-a",
              group=None, state="configured", ver=None, neighbors=None):
     return {"pubkey": pubkey, "name": name, "label": label, "group": group,
             "state": state, "last_seen": None, "last_connected": None,
-            "neighbors": neighbors, "ver": ver}
+            "next_sync_at": None, "neighbors": neighbors, "ver": ver}
 
 
 def _detail(pubkey="aabbccdd" * 8, name="Tower", label="site-a", group=None,
@@ -690,6 +708,7 @@ def _detail(pubkey="aabbccdd" * 8, name="Tower", label="site-a", group=None,
     return {"ok": True, "data": {
         "pubkey": pubkey, "name": name, "label": label, "group": group,
         "state": "configured", "last_seen": None, "last_connected": None,
+        "next_sync_at": None,
         "auth_required": False, "auth_cached": True, "passwd_known": True,
         "facts": facts or {}, "facts_collected_at": fact_times or {},
         "settings": settings or [], "logs": logs or [],
@@ -947,6 +966,18 @@ def test_status_single_match_shows_detail():
     assert "v1.14.1" in result.output
     assert "authed:" in result.output
     assert "passwd:" in result.output
+
+
+def test_status_single_match_shows_next_sync_estimate():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail()
+    detail["data"]["next_sync_at"] = (datetime.now(UTC) + timedelta(hours=19)).isoformat()
+
+    result = _run_multi(["status", "aabb"], status, detail)
+
+    assert result.exit_code == 0
+    assert "next sync:" in result.output
+    assert "(in ~" in result.output
 
 
 def test_status_single_match_facts_show_observed_time_and_clock_drift():
