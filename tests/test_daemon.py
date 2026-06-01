@@ -849,6 +849,52 @@ async def test_logs_dispatch_filtered_by_pubkey_prefix(db, wq, config):
     assert all(e["message"] == "from A" for e in resp["data"])
 
 
+async def test_clean_facts_dispatch_lists_stale_facts_without_deleting(db, wq, config):
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Tower",
+        label="site-a",
+        group="default",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(node)
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="powersavings", value="on"))
+
+    resp = await _dispatch({"cmd": "clean_facts", "query": "site-a"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["deleted"] == 0
+    assert [item["key"] for item in resp["data"]["candidates"]] == ["powersavings"]
+    assert "powersavings" in await db.get_facts(node.pubkey)
+
+
+async def test_clean_facts_dispatch_deletes_scoped_fact(db, wq, config):
+    node_a = Node(pubkey="aabbccdd" * 8, name="A", label="a", group="default")
+    node_b = Node(pubkey="11223344" * 8, name="B", label="b", group="other")
+    await db.upsert_node(node_a)
+    await db.upsert_node(node_b)
+    await db.upsert_fact(NodeFact(node_pubkey=node_a.pubkey, key="powersavings", value="on"))
+    await db.upsert_fact(NodeFact(node_pubkey=node_b.pubkey, key="powersavings", value="on"))
+
+    resp = await _dispatch(
+        {
+            "cmd": "clean_facts",
+            "group": "default",
+            "fact": "powersavings",
+            "dry_run": False,
+        },
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["deleted"] == 1
+    assert "powersavings" not in await db.get_facts(node_a.pubkey)
+    assert "powersavings" in await db.get_facts(node_b.pubkey)
+
+
 # ------------------------------------------------------------------
 # status command
 # ------------------------------------------------------------------

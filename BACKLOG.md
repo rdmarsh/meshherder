@@ -51,6 +51,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### CLI And Reporting
 
+- Allow `facts:` to be configured at global, group, and node scope with Node > Group > Global
+  precedence. Current behavior is one fleet-wide fact list, so stale-fact cleanup can scope which
+  nodes are cleaned but not yet compute different desired fact sets per group/node.
 - Decide whether anonymous repeater probing should stay as a standalone `tools/` helper or grow
   into a supported `mch` command. If it becomes supported, add an optional guest-login path for
   firmware version via `REQ_TYPE_GET_OWNER_INFO` while keeping anonymous results clearly marked.

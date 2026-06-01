@@ -90,6 +90,18 @@ Delete listed local database state for retired nodes. This does not edit
 .IR secrets.yaml ,
 or gateway favourites.
 .TP
+.B clean facts \fINODE\fR [\-\-fact \fIKEY\fR] [\-\-yes]
+List or delete cached fact rows that are no longer present in the configured
+.B facts:
+list. Scope may be one node,
+.B \-\-group
+.IR NAME ,
+or
+.B \-\-all .
+Without
+.B \-\-yes
+this is a dry run.
+.TP
 .B remove \fILABEL_OR_PREFIX\fR
 Delete one node's local database state after confirmation. This deletes local
 facts, settings, operations, logs, and the database node row. It refuses nodes

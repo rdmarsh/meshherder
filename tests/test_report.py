@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from mch.config import Config, NodeConfig, SettingConfig
@@ -27,7 +29,13 @@ async def test_fleet_report_classifies_node_health_settings_and_actions(db):
         auth_cached=True,
     )
     await db.upsert_node(node)
-    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="lat", value="-33.731"))
+    collected = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    await db.upsert_fact(NodeFact(
+        node_pubkey=node.pubkey,
+        key="lat",
+        value="-33.731",
+        collected_at=collected,
+    ))
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="lon", value="150.902"))
     await db.upsert_setting(SettingRecord(
         node_pubkey=node.pubkey,
@@ -65,6 +73,7 @@ async def test_fleet_report_classifies_node_health_settings_and_actions(db):
     api_node = report["nodes"][0]
     assert api_node["fact_keys"] == ["ver", "board", "role"]
     assert api_node["facts"]["lat"] == "-33.731"
+    assert api_node["facts_collected_at"]["lat"] == collected.isoformat()
     settings = {setting["key"]: setting for setting in api_node["settings"]}
     assert settings["name"]["status"] == "drift"
     assert settings["name"]["action"] == "write"

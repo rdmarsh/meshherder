@@ -11,6 +11,7 @@ import grp
 import json
 import os
 import pwd
+import re
 import shlex
 import subprocess
 import unicodedata
@@ -118,6 +119,45 @@ def _ago_with_ts(iso: str | None) -> str:
         return "never"
     ts = _local_ts(iso)
     return f"{ts} ({_ago(iso).lstrip()})"
+
+
+_CLOCK_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s+-\s+(\d{1,2})/(\d{1,2})/(\d{4})\s+UTC\s*$")
+
+
+def _duration_text(seconds: int) -> str:
+    seconds = abs(seconds)
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes and len(parts) < 2:
+        parts.append(f"{minutes}m")
+    if not parts:
+        parts.append(f"{seconds}s")
+    return " ".join(parts[:2])
+
+
+def _clock_drift_text(value: str | None, observed_at: str | None) -> str:
+    if not value or not observed_at:
+        return ""
+    match = _CLOCK_RE.match(value)
+    if not match:
+        return ""
+    hour, minute, day, month, year = (int(part) for part in match.groups())
+    try:
+        node_clock = datetime(year, month, day, hour, minute, tzinfo=UTC)
+        observed = _parse_display_datetime(observed_at).astimezone(UTC)
+    except ValueError:
+        return ""
+    drift = int((node_clock - observed).total_seconds())
+    if abs(drift) < 60:
+        return "drift <1m"
+    sign = "+" if drift > 0 else "-"
+    return f"drift {sign}{_duration_text(drift)}"
 
 
 def _log_node_pubkey(entry: dict[str, Any]) -> str:
@@ -444,6 +484,8 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
         return node
     facts = {key: "???" for key in node.get("fact_keys", [])}
     facts.update(node["facts"])
+    fact_times = {key: None for key in facts}
+    fact_times.update(node.get("facts_collected_at", {}))
     return {
         "pubkey": node["pubkey"],
         "name": node["name"],
@@ -455,6 +497,7 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
         "auth_cached": node["auth"]["cached"],
         "passwd_known": node["auth"]["password_known"],
         "facts": facts,
+        "facts_collected_at": fact_times,
         "settings": [
             {
                 "key": setting["key"],
@@ -711,11 +754,38 @@ def _render_node_detail(data: dict[str, Any]) -> None:
 
     facts = data.get("facts", {})
     if facts:
+        fact_times = data.get("facts_collected_at", {})
         # Match settings table behavior: pad to visual width, not char count.
-        key_w = max(_wlen(k) for k in facts)
+        key_w = max(_wlen("KEY"), max((_wlen(k) for k in facts), default=0))
+        value_w = max(_wlen("VALUE"), max((_wlen(_sv(v)) for v in facts.values()), default=0))
+        observed_w = max(
+            _wlen("OBSERVED"),
+            max((_wlen(_ago_with_ts(ts)) for ts in fact_times.values() if ts), default=0),
+        )
         click.echo("facts:")
+        row = "  {}  {}  {}  {}"
+        click.echo(row.format(
+            _wpad("KEY", key_w),
+            _wpad("VALUE", value_w),
+            _wpad("OBSERVED", observed_w),
+            "NOTE",
+        ))
+        click.echo(row.format(
+            _wpad("---", key_w),
+            _wpad("-----", value_w),
+            _wpad("--------", observed_w),
+            "----",
+        ))
         for k, v in sorted(facts.items()):
-            click.echo(f"  {_wpad(k + ':', key_w + 1)}  {v}")
+            observed_at = fact_times.get(k)
+            observed = _ago_with_ts(observed_at) if observed_at else "-"
+            note = _clock_drift_text(v, observed_at) if k == "clock" else ""
+            click.echo(row.format(
+                _wpad(k, key_w),
+                _wpad(_sv(v), value_w),
+                _wpad(observed, observed_w),
+                note,
+            ).rstrip())
         click.echo("")
 
     settings = data.get("settings", [])
@@ -1136,6 +1206,98 @@ def prune(ctx: click.Context, yes: bool) -> None:
         click.echo("")
         click.echo("run 'mch prune --yes' to delete these local DB rows")
     click.echo("secrets.yaml entries and gateway favourites are left unchanged")
+
+
+@cli.group()
+def clean() -> None:
+    """Clean reviewed stale local DB state."""
+
+
+@clean.command("facts")
+@click.argument("node", required=False)
+@click.option("--group", "group_name", help="Clean stale facts for nodes in this group.")
+@click.option("--all", "all_nodes", is_flag=True, help="Clean stale facts across the fleet.")
+@click.option("--fact", "fact_key", help="Only consider one fact key, e.g. powersavings.")
+@click.option("--yes", "-y", is_flag=True, help="Delete the listed stale facts.")
+@click.pass_context
+def clean_facts(
+    ctx: click.Context,
+    node: str | None,
+    group_name: str | None,
+    all_nodes: bool,
+    fact_key: str | None,
+    yes: bool,
+) -> None:
+    """List or delete cached facts no longer present in facts: config."""
+    scopes = sum(1 for value in (node, group_name, all_nodes) if value)
+    if scopes != 1:
+        raise click.UsageError("choose exactly one scope: NODE, --group, or --all")
+
+    resp = _rpc(
+        ctx.obj["socket"],
+        {
+            "cmd": "clean_facts",
+            "query": node,
+            "group": group_name,
+            "all": all_nodes,
+            "fact": fact_key,
+            "dry_run": not yes,
+        },
+    )
+    data = _check(resp)
+    candidates = data.get("candidates", [])
+
+    if not candidates:
+        click.echo("no stale facts")
+        return
+
+    label_w = max(
+        _wlen("LABEL"),
+        max((_wlen(item.get("label") or "-") for item in candidates), default=0),
+    )
+    key_w = max(len("FACT"), max((len(item.get("key") or "") for item in candidates), default=0))
+    value_w = max(
+        _wlen("VALUE"),
+        max((_wlen(_sv(item.get("value"))) for item in candidates), default=0),
+    )
+    observed_w = max(
+        _wlen("OBSERVED"),
+        max((_wlen(_ago_with_ts(item.get("collected_at"))) for item in candidates), default=0),
+    )
+    row = "  {:<12}  {}  {:<{kw}}  {}  {}"
+    click.echo("stale facts:")
+    click.echo(row.format(
+        "PUBKEY",
+        _wpad("LABEL", label_w),
+        "FACT",
+        _wpad("VALUE", value_w),
+        _wpad("OBSERVED", observed_w),
+        kw=key_w,
+    ))
+    click.echo(row.format(
+        "------",
+        _wpad("-----", label_w),
+        "----",
+        _wpad("-----", value_w),
+        _wpad("--------", observed_w),
+        kw=key_w,
+    ))
+    for item in candidates:
+        click.echo(row.format(
+            _pk(item.get("pubkey")),
+            _wpad(item.get("label") or "-", label_w),
+            item.get("key") or "",
+            _wpad(_sv(item.get("value")), value_w),
+            _wpad(_ago_with_ts(item.get("collected_at")), observed_w),
+            kw=key_w,
+        ))
+
+    if yes:
+        click.echo("")
+        click.echo(f"deleted {data.get('deleted', 0)} stale fact(s)")
+    else:
+        click.echo("")
+        click.echo("run again with --yes to delete these stale fact rows")
 
 
 @cli.command("remove")
