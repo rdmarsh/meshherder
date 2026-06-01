@@ -179,6 +179,18 @@ mch --version
 systemctl status mchd --no-pager
 ```
 
+If root cannot fetch the Git remote, update the real operator checkout first and mirror it into
+`/opt/meshherder` while preserving the production virtualenv:
+
+```bash
+cd ~/code/meshherder
+git pull --ff-only
+sudo rsync -a --delete --exclude .venv ~/code/meshherder/ /opt/meshherder/
+cd /opt/meshherder
+sudo /opt/meshherder/.venv/bin/pip install .
+sudo systemctl restart mchd
+```
+
 If `git status` reports `not a git repository`, stop and restore `/opt/meshherder` from the real
 checkout before running `pip install .`. The install command packages whatever source tree is in
 the current directory, so an old copied tree can downgrade the daemon even when the venv and
