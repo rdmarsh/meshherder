@@ -4,6 +4,14 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.21 Deployment
+
+- Released and deployed `0.9.21` to luna at commit `f0c761f`, shortening actionable clock notes
+  in `mch status NODE` from `clock fast by ...` / `clock slow by ...` to `fast by ...` /
+  `slow by ...`.
+- Installed `meshherder-0.9.21`, restarted `mchd`, and verified `mch --version` reported
+  `0.9.21`, both luna checkouts were at `f0c761f`, and `mchd` was active.
+
 ## 2026-06-02 - Luna 0.9.20 Deployment
 
 - Released and deployed `0.9.20` to luna at commit `578adc7`, changing clock notes in
