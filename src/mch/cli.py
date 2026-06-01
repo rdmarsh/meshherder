@@ -155,9 +155,9 @@ def _clock_drift_text(value: str | None, observed_at: str | None) -> str:
         return ""
     drift = int((node_clock - observed).total_seconds())
     if abs(drift) < 60:
-        return "within +-1m"
-    sign = "+" if drift > 0 else "-"
-    return f"drift {sign}{_duration_text(drift)}"
+        return "within ±1m"
+    direction = "fast" if drift > 0 else "slow"
+    return f"clock {direction} by {_duration_text(drift)}"
 
 
 def _log_node_pubkey(entry: dict[str, Any]) -> str:
