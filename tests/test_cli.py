@@ -794,6 +794,30 @@ def test_status_single_match_shows_settings_drift_flag():
     assert "20" in result.output
 
 
+def test_status_single_match_shows_unobserved_settings_as_unknown_in_yellow():
+    runner = CliRunner()
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(settings=[{
+        "key": "owner.info", "desired": "Managed by mch",
+        "observed": None, "policy": "enforce", "drift": True,
+        "update_attempts": 0,
+    }])
+    responses = [status, detail]
+    with patch("mch.cli._rpc", side_effect=responses):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "--color", "status", "aabb"],
+            color=True,
+        )
+
+    assert result.exit_code == 0
+    assert "unknown = not yet observed" in result.output
+    assert re.search(
+        r"owner\.info\s+-\s+Managed by mch\s+0\s+\x1b\[33munknown\x1b\[0m",
+        result.output,
+    )
+
+
 def test_status_single_match_shows_tries_as_not_applicable_for_audit():
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{
