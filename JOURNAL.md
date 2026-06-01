@@ -4,6 +4,14 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.19 Deployment
+
+- Released and deployed `0.9.19` to luna at commit `15cc961`, changing near-zero clock drift
+  display in `mch status NODE` from `drift <1m` to `within +-1m`.
+- Installed `meshherder-0.9.19`, restarted `mchd`, and verified `mch --version` reported
+  `0.9.19`, `/opt/meshherder` was at `15cc961`, and `mchd` was active.
+- Read-only smoke check on `mch status e2601d591517` showed the `clock` fact as `within +-1m`.
+
 ## 2026-06-02 - Luna 0.9.17/0.9.18 Deployment
 
 - Released `0.9.17` for per-fact observation timestamps, clock drift display in
