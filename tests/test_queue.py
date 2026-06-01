@@ -638,7 +638,8 @@ async def test_flood_routed_contact_probe_defers_full_sync(db):
     results = await wq.run_cycle()
 
     assert results[0].reachable is True
-    assert results[0].error == "cached contact is flood-routed; path repair needed before full sync"
+    assert results[0].error is None
+    assert results[0].skipped_reason == "path repair needed before full sync"
     assert [c.args[1] for c in gw.send_command.await_args_list] == ["ver"]
     assert gw.send_command.await_args_list[0].args[0]["out_path_len"] == -1
     node = await db.get_node("aabbccdd1122")

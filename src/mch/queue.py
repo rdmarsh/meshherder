@@ -878,7 +878,7 @@ class WorkQueue:
                     return result  # finally still runs to restore the gateway radio
 
                 result.reachable = True
-                result.error = "cached contact is flood-routed; path repair needed before full sync"
+                result.skipped_reason = "path repair needed before full sync"
                 node.state = NodeState.PARTIAL
                 node.last_connected = datetime.now(UTC)
                 await self._db.upsert_node(node)
