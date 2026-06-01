@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.22 - 2026-06-02
+
+- Added an approximate `next sync` line to `mch status NODE`, rendering the scheduler's stored
+  `next_sync_at` as `in ~...`, `due now`, or `unscheduled`.
+
 ## 0.9.21 - 2026-06-02
 
 - Shortened actionable clock offset notes in `mch status NODE` from `clock fast by ...` /
