@@ -430,7 +430,7 @@ curl -fsS http://127.0.0.1:8743/status | jq
 curl -fsS http://127.0.0.1:8743/status/SiteA-Rooftop | jq '.health, .facts, .settings'
 ```
 
-`/status` returns `schema_version: 1`, a health summary, nodes, unresolved configured
+`/status` returns `schema_version: 2`, a health summary, DB-backed nodes, unseen configured
 nodes, issues, and planned work. Each node includes `health`, configured `fact_keys`, collected `facts` such as
 `lat`/`lon`, and settings classified with `status` (`ok`, `nominal`, `drift`, `unknown`,
 `ignored`) and `action` (`none`, `read`, `write`, `report`, `ignore`). This is the contract a

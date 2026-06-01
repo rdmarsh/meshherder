@@ -384,6 +384,7 @@ def status(ctx: click.Context, query: str | None) -> None:
     drifted = _filter_drift(data.get("drifted", []), query)
     bad_state = _filter_nodes(data.get("bad_state", []), query)
     ghosts = _filter_ghosts(data.get("ghosts", []), query)
+    unseen_nodes = _filter_unseen_nodes(data.get("unseen_nodes", []), query)
     open_nodes = _filter_nodes(data.get("open_nodes", []), query)
 
     filtered = bool(query and len(nodes) != len(all_nodes))
@@ -452,7 +453,7 @@ def status(ctx: click.Context, query: str | None) -> None:
     else:
         click.echo(f"{len(all_nodes)} nodes")
 
-    _render_issue_sections(drifted, bad_state, ghosts, open_nodes)
+    _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
 
 
 # ---------------------------------------------------------------------------
@@ -606,10 +607,11 @@ def _render_issue_sections(
     drifted: list[dict[str, Any]],
     bad_state: list[dict[str, Any]],
     ghosts: list[dict[str, Any]],
+    unseen_nodes: list[dict[str, Any]],
     open_nodes: list[dict[str, Any]],
 ) -> None:
     """Render issue sections below the fleet table. No-ops if all lists are empty."""
-    if not drifted and not bad_state and not ghosts and not open_nodes:
+    if not drifted and not bad_state and not ghosts and not unseen_nodes and not open_nodes:
         return
 
     click.echo("")
@@ -669,13 +671,48 @@ def _render_issue_sections(
         click.echo("")
 
     if ghosts:
-        click.echo("config ghosts (in config.yaml but not visible to gateway):")
-        label_w = max(len("LABEL"), max((len(g.get("label") or "-") for g in ghosts), default=0))
+        click.echo("ghost nodes (in local DB but not config.yaml):")
+        label_w = max(
+            _wlen("LABEL"),
+            max((_wlen(g.get("label") or "-") for g in ghosts), default=0),
+        )
+        name_w = max(
+            _wlen("MESH NAME"),
+            max((_wlen(g.get("name") or "-") for g in ghosts), default=0),
+        )
+        fmt = "  {:<12}  {}  {}  {:<12}"
+        click.echo(fmt.format(
+            "PUBKEY",
+            _wpad("LABEL", label_w),
+            _wpad("MESH NAME", name_w),
+            "LAST SEEN",
+        ))
+        click.echo(fmt.format(
+            "------",
+            _wpad("-----", label_w),
+            _wpad("---------", name_w),
+            "---------",
+        ))
+        for g in ghosts:
+            click.echo(fmt.format(
+                _pk(g.get("pubkey")),
+                _wpad(g.get("label") or "-", label_w),
+                _wpad(g.get("name") or "-", name_w),
+                _ago(g.get("last_seen")),
+            ))
+        click.echo("")
+
+    if unseen_nodes:
+        click.echo("unseen config nodes (in config.yaml but not known to gateway/DB):")
+        label_w = max(
+            _wlen("LABEL"),
+            max((_wlen(n.get("label") or "-") for n in unseen_nodes), default=0),
+        )
         fmt = "  {:<8}  {}"
         click.echo(fmt.format("PREFIX", _wpad("LABEL", label_w)))
         click.echo(fmt.format("------", _wpad("-----", label_w)))
-        for g in ghosts:
-            click.echo(fmt.format(g["pubkey_prefix"][:8], g.get("label") or "-"))
+        for n in unseen_nodes:
+            click.echo(fmt.format(n["pubkey_prefix"][:8], _wpad(n.get("label") or "-", label_w)))
         click.echo("")
 
     if open_nodes:
@@ -748,14 +785,27 @@ def _filter_plan_items(items: list[dict[str, Any]], query: str | None) -> list[d
 
 
 def _filter_ghosts(ghosts: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
-    """Filter ghost config entries by pubkey_prefix or label substring."""
+    """Filter DB-only ghost nodes by pubkey, label, or mesh name."""
     if not query:
         return ghosts
     q = query.lower()
     return [
         g for g in ghosts
-        if g["pubkey_prefix"].startswith(query)
+        if (g.get("pubkey") or "").startswith(query)
         or q in (g.get("label") or "").lower()
+        or q in (g.get("name") or "").lower()
+    ]
+
+
+def _filter_unseen_nodes(nodes: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
+    """Filter config-only unseen nodes by pubkey_prefix or label substring."""
+    if not query:
+        return nodes
+    q = query.lower()
+    return [
+        n for n in nodes
+        if n["pubkey_prefix"].startswith(query)
+        or q in (n.get("label") or "").lower()
     ]
 
 

@@ -69,7 +69,7 @@ async def test_api_routes_mirror_read_only_cli_commands(db, config):
     assert health == {"ok": True}
     assert status == HTTPStatus.OK
     assert isinstance(fleet, dict)
-    assert fleet["schema_version"] == 1
+    assert fleet["schema_version"] == 2
     assert node_status == HTTPStatus.OK
     assert isinstance(node, dict)
     assert node["settings"][0]["action"] == "write"

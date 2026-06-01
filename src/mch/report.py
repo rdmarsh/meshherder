@@ -12,7 +12,7 @@ from mch.models import Node, NodeState, SettingPolicy, SettingRecord
 from mch.queue import all_setting_keys, resolve_desired, resolve_policy
 from mch.settings_compare import compare_setting
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _BAD_STATES = {
     NodeState.UNKNOWN,
     NodeState.OFFLINE,
@@ -65,16 +65,16 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             "settings": settings,
         })
 
-    missing = _missing_config_nodes(nodes, config)
-    plan = _plan_report(node_reports, missing)
-    fleet_issues = _issues_report(node_reports, missing)
-    summary = _summary(node_reports, missing, fleet_issues)
+    unseen = _unseen_config_nodes(nodes, config)
+    plan = _plan_report(node_reports, unseen)
+    fleet_issues = _issues_report(node_reports, unseen)
+    summary = _summary(node_reports, unseen, fleet_issues)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
         "summary": summary,
         "nodes": node_reports,
-        "missing_nodes": missing,
+        "unseen_nodes": unseen,
         "issues": fleet_issues,
         "plan": plan,
     }
@@ -269,7 +269,7 @@ def _node_health(node: Node, issues: list[dict[str, str]]) -> str:
 
 def _plan_report(
     nodes: list[dict[str, Any]],
-    missing: list[dict[str, Any]],
+    unseen: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
     writes: list[dict[str, Any]] = []
     audits: list[dict[str, Any]] = []
@@ -284,7 +284,7 @@ def _plan_report(
             "policy": "",
             "reason": "node not known to gateway/DB",
         }
-        for item in missing
+        for item in unseen
     ]
     for node in nodes:
         for setting in node["settings"]:
@@ -312,12 +312,21 @@ def _plan_report(
 
 def _issues_report(
     nodes: list[dict[str, Any]],
-    missing: list[dict[str, Any]],
+    unseen: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
     drifted: list[dict[str, Any]] = []
     bad_state: list[dict[str, Any]] = []
+    ghosts: list[dict[str, Any]] = []
     open_nodes: list[dict[str, Any]] = []
     for node in nodes:
+        if not node["configured"]:
+            ghosts.append({
+                "pubkey": node["pubkey"],
+                "label": node["label"],
+                "name": node["name"],
+                "state": node["state"],
+                "last_seen": node["last_seen"],
+            })
         if node["state"] in {state.value for state in _BAD_STATES}:
             bad_state.append({
                 "pubkey": node["pubkey"],
@@ -346,22 +355,21 @@ def _issues_report(
     return {
         "drifted": drifted,
         "bad_state": bad_state,
-        "ghosts": [
-            {"pubkey_prefix": node["pubkey_prefix"], "label": node["label"]}
-            for node in missing
-        ],
+        "ghosts": ghosts,
+        "unseen_nodes": unseen,
         "open_nodes": open_nodes,
     }
 
 
 def _summary(
     nodes: list[dict[str, Any]],
-    missing: list[dict[str, Any]],
+    unseen: list[dict[str, Any]],
     issues: dict[str, list[dict[str, Any]]],
 ) -> dict[str, int]:
     return {
         "known_nodes": len(nodes),
-        "configured_missing_nodes": len(missing),
+        "unseen_nodes": len(unseen),
+        "ghost_nodes": len(issues["ghosts"]),
         "healthy_nodes": sum(node["health"] == "healthy" for node in nodes),
         "warning_nodes": sum(node["health"] == "warning" for node in nodes),
         "critical_nodes": sum(node["health"] == "critical" for node in nodes),
@@ -370,7 +378,7 @@ def _summary(
     }
 
 
-def _missing_config_nodes(nodes: list[Node], config: Config) -> list[dict[str, Any]]:
+def _unseen_config_nodes(nodes: list[Node], config: Config) -> list[dict[str, Any]]:
     return [
         {
             "pubkey_prefix": node_cfg.pubkey_prefix,

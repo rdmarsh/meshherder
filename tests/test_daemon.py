@@ -806,12 +806,13 @@ async def test_logs_dispatch_filtered_by_pubkey_prefix(db, wq, config):
 # ------------------------------------------------------------------
 
 async def test_status_dispatch_returns_node_list_and_issue_arrays(db, wq, config):
-    """status returns node list plus drifted/bad_state/ghosts/open_nodes arrays."""
+    """status returns node list plus issue arrays."""
     node = Node(
         pubkey="aabbccdd" * 8, name="Tower", label="site-a",
         state=NodeState.CONFIGURED, auth_cached=True
     )
     await db.upsert_node(node)
+    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="site-a")]
 
     resp = await _dispatch({"cmd": "status"}, wq, db, config)
 
@@ -823,6 +824,7 @@ async def test_status_dispatch_returns_node_list_and_issue_arrays(db, wq, config
     assert data["drifted"] == []
     assert data["bad_state"] == []
     assert data["ghosts"] == []
+    assert data["unseen_nodes"] == []
     assert data["open_nodes"] == []
 
 
@@ -1073,6 +1075,7 @@ async def test_issues_dispatch_no_issues(db, wq, config):
         state=NodeState.CONFIGURED, auth_cached=True
     )
     await db.upsert_node(node)
+    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="site-a")]
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
@@ -1080,6 +1083,7 @@ async def test_issues_dispatch_no_issues(db, wq, config):
     assert resp["data"]["drifted"] == []
     assert resp["data"]["bad_state"] == []
     assert resp["data"]["ghosts"] == []
+    assert resp["data"]["unseen_nodes"] == []
     assert resp["data"]["open_nodes"] == []
 
 
@@ -1124,17 +1128,41 @@ async def test_issues_dispatch_online_not_in_bad_state(db, wq, config):
     assert resp["data"]["bad_state"] == []
 
 
-async def test_issues_dispatch_returns_ghosts(db, wq, config):
-    """issues ghosts section lists config entries with no matching DB node."""
+async def test_issues_dispatch_returns_unseen_config_nodes(db, wq, config):
+    """issues unseen_nodes section lists config entries with no matching DB node."""
     from mch.config import NodeConfig
     config.nodes = [NodeConfig(pubkey_prefix="deadbeef", label="wrong")]
     # DB is empty — no node with that prefix exists
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
-    assert len(resp["data"]["ghosts"]) == 1
-    assert resp["data"]["ghosts"][0]["pubkey_prefix"] == "deadbeef"
-    assert resp["data"]["ghosts"][0]["label"] == "wrong"
+    assert resp["data"]["ghosts"] == []
+    assert len(resp["data"]["unseen_nodes"]) == 1
+    assert resp["data"]["unseen_nodes"][0]["pubkey_prefix"] == "deadbeef"
+    assert resp["data"]["unseen_nodes"][0]["label"] == "wrong"
+
+
+async def test_issues_dispatch_returns_db_only_nodes_as_ghosts(db, wq, config):
+    """issues ghosts section lists DB nodes no longer present in config."""
+    node = Node(
+        pubkey="11223344" * 8,
+        name="Retired",
+        label="old-site",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(node)
+    config.nodes = []
+
+    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+
+    assert resp["data"]["ghosts"] == [{
+        "pubkey": node.pubkey,
+        "label": "old-site",
+        "name": "Retired",
+        "state": "configured",
+        "last_seen": None,
+    }]
+    assert resp["data"]["unseen_nodes"] == []
 
 
 async def test_dispatch_unknown_command_returns_error(db, wq, config):
@@ -1266,7 +1294,7 @@ async def test_commission_dispatch_disconnected_progress_cancels(db, wq, config)
 
 
 async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):
-    """A config node whose prefix matches a DB node is not a ghost."""
+    """A config node whose prefix matches a DB node is neither ghost nor unseen."""
     from mch.config import NodeConfig
     node = Node(pubkey="aabbccdd" * 8, name="N", label="n", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
@@ -1275,6 +1303,7 @@ async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
     assert resp["data"]["ghosts"] == []
+    assert resp["data"]["unseen_nodes"] == []
 
 
 # ------------------------------------------------------------------

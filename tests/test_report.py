@@ -59,7 +59,7 @@ async def test_fleet_report_classifies_node_health_settings_and_actions(db):
 
     report = await build_fleet_report(db, config)
 
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert report["summary"]["critical_nodes"] == 1
     assert report["summary"]["drifted_settings"] == 1
     api_node = report["nodes"][0]
@@ -84,9 +84,30 @@ async def test_fleet_report_includes_configured_nodes_missing_from_observed_stat
 
     report = await build_fleet_report(db, config)
 
-    assert report["summary"]["configured_missing_nodes"] == 1
-    assert report["missing_nodes"][0]["pubkey_prefix"] == "deadbeef"
-    assert report["issues"]["ghosts"] == [
-        {"pubkey_prefix": "deadbeef", "label": "lost-site"}
-    ]
+    assert report["summary"]["unseen_nodes"] == 1
+    assert report["unseen_nodes"][0]["pubkey_prefix"] == "deadbeef"
+    assert report["issues"]["unseen_nodes"] == report["unseen_nodes"]
+    assert report["issues"]["ghosts"] == []
     assert report["plan"]["unknown"][0]["reason"] == "node not known to gateway/DB"
+
+
+async def test_fleet_report_lists_db_nodes_outside_config_as_ghosts(db):
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        label="retired",
+        name="Retired",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(node)
+
+    report = await build_fleet_report(db, Config(nodes=[]))
+
+    assert report["summary"]["ghost_nodes"] == 1
+    assert report["issues"]["ghosts"] == [{
+        "pubkey": node.pubkey,
+        "label": "retired",
+        "name": "Retired",
+        "state": "configured",
+        "last_seen": None,
+    }]
+    assert report["issues"]["unseen_nodes"] == []

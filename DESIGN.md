@@ -64,7 +64,7 @@ The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`
 `nominal` means the observed value differs textually but is equivalent within expected firmware or
 computer representation tolerance.
 
-Implemented contract: `src/mch/report.py` builds `schema_version: 1` fleet/node reports consumed
+Implemented contract: `src/mch/report.py` builds `schema_version: 2` fleet/node reports consumed
 by CLI reporting and the optional read-only HTTP API. HTTP is loopback-only until authentication
 exists; it deliberately provides no sync, exec, or commissioning routes. A future dashboard and
 map should consume this model rather than deriving status independently.
@@ -148,8 +148,13 @@ Once found, the full pubkey is written to the DB and used from there on.
 
 A node in the DB but not in config.yaml is called a **ghost**. Ghosts appear in `mch issues`.
 They accumulate if you remove a node from config.yaml without purging the DB, or if a node was
-previously added via an older seeding path. There is currently no `mch forget` command to clean
-them up — this is a known gap.
+previously added via an older seeding path. Use `mch prune` or `mch remove <node>` to clean up
+local DB state for retired nodes.
+
+A node in config.yaml that has no matching DB record is an **unseen config node**. This usually
+means the gateway has never seen the configured prefix, or the prefix does not match the intended
+node. Unseen config nodes appear separately in `mch issues` because the fix is different: correct
+the config prefix, bring the node into gateway range, or wait for it to advertise.
 
 ## `mch contacts` vs the DB
 
@@ -457,10 +462,9 @@ restores the factory admin password without auth, after which normal commissioni
 For the current prioritized todo list, wishlist, and explicit non-goals, see `BACKLOG.md`. This
 section only records stable design gaps that affect the architecture.
 
-- **No node decommissioning**: removing a node from config.yaml leaves a ghost in the DB.
-  A `mch forget <prefix>` command to purge the DB record is not yet implemented.
-- **Ghost resolution is one-directional**: `mch issues` shows ghosts but provides no CLI action
-  to resolve them — either add to config (paste block) or remove from DB.
+- **Ghost resolution is one-directional**: `mch issues` shows DB-only ghosts, while `mch prune`
+  and `mch remove` delete their local DB state. Re-adopting a ghost still requires adding it back
+  to config.yaml manually.
 - **Commission idempotency**: running `mch new` on a node already in config/DB has
   undefined behaviour. Should detect and reject.
 - **Commission new ignores group defaults**: the wizard pre-fills radio settings from the gateway

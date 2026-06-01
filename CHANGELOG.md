@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.7 - 2026-06-01
+
 - Refined lossy-link handling after qh-corbin live testing: stored-path reads now get a small
   per-node retry budget, while failed stored-path probes get only one flood-routed `ver` check as
   a path-recovery signal. mchd does not continue a full sync or retry writes over flood after a
@@ -12,6 +14,9 @@ and backlog history. Dates use the project repository's commit dates.
 - Recorded qh-corbin's operational recovery: the node was alive and traceable, but the gateway
   contact had fallen back to flood. Manually restoring the stored path through qh-woldhuis
   (`out_path=2fd9`, two-byte hash mode) allowed management syncs to complete.
+- Split issue reporting terminology: DB-only retired nodes are now `ghosts`, while configured
+  nodes that have never been seen are reported separately as `unseen_nodes`. The read-only fleet
+  report schema is now version 2.
 
 ## 0.9.6 - 2026-06-01
 
