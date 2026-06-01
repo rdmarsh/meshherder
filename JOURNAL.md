@@ -11,7 +11,7 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   had not yet pulled from GitHub. Updating `/home/rdm/code/meshherder` first, then pulling
   `/opt/meshherder`, installed `meshherder-0.9.12`.
 - Verified `mch --version` reported `0.9.12`, `mchd` restarted and reported `active`, and the
-  production checkout was at commit `87f647d`.
+  release-code checkout was at commit `87f647d` before this journal-only follow-up.
 
 ## 2026-06-01 - Anonymous MeshCore Repeater Probe Tool
 
