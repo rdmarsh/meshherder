@@ -12,6 +12,11 @@ By default the tool sends:
 Firmware version is not available through the anonymous request path. The tool reports
 `version: null` with that reason.
 
+When `--radio` or `--frequency` is supplied, the tool reads the attached gateway's current radio,
+switches only if needed, and restores the saved radio when the run ends. The restore path also runs
+for normal exceptions, Ctrl-C, and SIGTERM. It cannot protect against SIGKILL, power loss, or USB
+device failure during the restore command.
+
 ### Zero-hop example
 
 ```bash

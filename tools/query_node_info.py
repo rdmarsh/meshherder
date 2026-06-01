@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -64,6 +65,14 @@ class RadioSpec:
     bandwidth: float
     spreading_factor: int
     coding_rate: int
+
+    def as_tuple(self) -> tuple[float, float, int, int]:
+        return (
+            self.frequency,
+            self.bandwidth,
+            self.spreading_factor,
+            self.coding_rate,
+        )
 
 
 def parse_path(path_hex: str, path_hash_mode: int) -> PathSpec:
@@ -114,6 +123,28 @@ def resolve_radio(args: argparse.Namespace) -> RadioSpec | None:
         bandwidth=bandwidth,
         spreading_factor=spreading_factor,
         coding_rate=coding_rate,
+    )
+
+
+def radios_match(left: tuple[float, float, int, int], right: tuple[float, float, int, int]) -> bool:
+    return (
+        abs(left[0] - right[0]) < 0.0005
+        and abs(left[1] - right[1]) < 0.0005
+        and left[2] == right[2]
+        and left[3] == right[3]
+    )
+
+
+async def current_radio(mc: MeshCore) -> tuple[float, float, int, int]:
+    result = await mc.commands.send_appstart()
+    if result.type == EventType.ERROR:
+        raise RuntimeError(f"send_appstart failed: {result.payload}")
+    payload = result.payload
+    return (
+        float(payload["radio_freq"]),
+        float(payload["radio_bw"]),
+        int(payload["radio_sf"]),
+        int(payload["radio_cr"]),
     )
 
 
@@ -256,16 +287,22 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         ]
 
     mc = await connect(args)
+    saved_radio: tuple[float, float, int, int] | None = None
+    restore_needed = False
+    primary_exc: BaseException | None = None
     try:
         if radio_spec is not None:
-            radio = await mc.commands.set_radio(
-                radio_spec.frequency,
-                radio_spec.bandwidth,
-                radio_spec.spreading_factor,
-                radio_spec.coding_rate,
-            )
-            if radio.type == EventType.ERROR:
-                raise RuntimeError(f"set_radio failed: {radio.payload}")
+            saved_radio = await current_radio(mc)
+            if not radios_match(saved_radio, radio_spec.as_tuple()):
+                restore_needed = True
+                radio = await mc.commands.set_radio(
+                    radio_spec.frequency,
+                    radio_spec.bandwidth,
+                    radio_spec.spreading_factor,
+                    radio_spec.coding_rate,
+                )
+                if radio.type == EventType.ERROR:
+                    raise RuntimeError(f"set_radio failed: {radio.payload}")
 
         result: dict[str, Any] = {
             "success": True,
@@ -298,8 +335,44 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 result["success"] = False
             result["responses"][name] = response
         return result
+    except BaseException as exc:
+        primary_exc = exc
+        raise
     finally:
+        if restore_needed and saved_radio is not None:
+            try:
+                radio = await mc.commands.set_radio(*saved_radio)
+                if radio.type == EventType.ERROR:
+                    raise RuntimeError(f"restore radio failed: {radio.payload}")
+            except Exception as exc:
+                if primary_exc is not None:
+                    print(f"error: failed to restore radio: {exc}", file=sys.stderr)
+                else:
+                    await mc.disconnect()
+                    raise
         await mc.disconnect()
+
+
+async def run_with_signals(args: argparse.Namespace) -> dict[str, Any]:
+    task = asyncio.create_task(run(args))
+    loop = asyncio.get_running_loop()
+    handled_signals: list[signal.Signals] = []
+
+    def cancel_task() -> None:
+        task.cancel()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, cancel_task)
+            handled_signals.append(sig)
+        except NotImplementedError:
+            pass
+
+    try:
+        return await task
+    finally:
+        for sig in handled_signals:
+            loop.remove_signal_handler(sig)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -358,7 +431,19 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     try:
-        result = asyncio.run(run(args))
+        result = asyncio.run(run_with_signals(args))
+    except KeyboardInterrupt:
+        if args.json:
+            print(json.dumps({"success": False, "error": "interrupted"}, sort_keys=True))
+        else:
+            print("error: interrupted", file=sys.stderr)
+        return 130
+    except asyncio.CancelledError:
+        if args.json:
+            print(json.dumps({"success": False, "error": "cancelled"}, sort_keys=True))
+        else:
+            print("error: cancelled", file=sys.stderr)
+        return 130
     except Exception as exc:
         if args.json:
             print(json.dumps({"success": False, "error": str(exc)}, sort_keys=True))
