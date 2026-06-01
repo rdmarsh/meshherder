@@ -1,7 +1,9 @@
 """Tests for CLI helper functions and command output."""
 
 import asyncio
+import os
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +19,7 @@ from mch.cli import (
     _filter_contacts,
     _filter_drift,
     _filter_nodes,
+    _local_ts,
     cli,
 )
 from mch.meshkey import derive_public_key
@@ -62,6 +65,22 @@ def test_ago_with_timestamp_is_not_padded_in_prose_output():
 
     assert "(7m ago)" in result.output
     assert "(  7m ago)" not in result.output
+
+
+def test_local_ts_displays_utc_timestamp_in_local_timezone(monkeypatch):
+    old_tz = os.environ.get("TZ")
+    monkeypatch.setenv("TZ", "Australia/Sydney")
+    if hasattr(time, "tzset"):
+        time.tzset()
+    try:
+        assert _local_ts("2026-06-01T05:03:49+00:00") == "2026-06-01 15:03:49"
+    finally:
+        if old_tz is None:
+            monkeypatch.delenv("TZ", raising=False)
+        else:
+            monkeypatch.setenv("TZ", old_tz)
+        if hasattr(time, "tzset"):
+            time.tzset()
 
 
 def test_filter_contacts_no_query_returns_all():
@@ -242,8 +261,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_2():
-    assert __version__ == "0.9.2"
+def test_current_release_version_is_0_9_3():
+    assert __version__ == "0.9.3"
 
 
 def _run(args, rpc_response):
