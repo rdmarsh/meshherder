@@ -529,30 +529,30 @@ def _render_node_detail(data: dict[str, Any]) -> None:
             len("TRIES"), max(len(_tries(s)) for s in settings)
         )
         def _srow(
-            policy: str, key: str, observed: str, desired: str, tries: str, drift: str
+            policy: str, key: str, observed: str, desired: str, tries: str, status: str
         ) -> str:
             return (
                 f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(observed, col_obs)}"
-                f"  {_wpad(desired, col_des)}  {tries:>{col_tries}}  {drift}"
+                f"  {_wpad(desired, col_des)}  {tries:>{col_tries}}  {status}"
             )
-        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "TRIES", "DRIFT"))
-        click.echo(_srow("------", "---", "-------", "--------", "-----", "-----"))
+        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "TRIES", "STATUS"))
+        click.echo(_srow("------", "---", "-------", "--------", "-----", "------"))
         for s in settings:
             if s.get("observed") is None:
-                drift_flag = click.style("not yet observed", fg="yellow")
+                status = click.style("not observed", fg="yellow")
             elif s["drift"]:
-                drift_flag = "~~~"
+                status = click.style("drifted", fg="red")
             elif s.get("approximate"):
-                drift_flag = "within expected tolerance"
+                status = click.style("nominal", fg="green")
             else:
-                drift_flag = ""
+                status = click.style("ok", fg="green")
             click.echo(_srow(
                 s["policy"],
                 s["key"],
                 _sv(s.get("observed")),
                 _sv(s.get("desired")),
                 _tries(s),
-                drift_flag,
+                status,
             ))
         click.echo("")
 

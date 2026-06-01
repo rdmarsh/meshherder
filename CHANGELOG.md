@@ -13,6 +13,11 @@ and backlog history. Dates use the project repository's commit dates.
   contact had fallen back to flood. Manually restoring the stored path through qh-woldhuis
   (`out_path=2fd9`, two-byte hash mode) allowed management syncs to complete.
 
+## 0.9.2 - 2026-06-01
+
+- Renamed the node-detail settings result column to `STATUS` and replaced symbolic drift markers
+  with colored text statuses: `ok`, `nominal`, `not observed`, and `drifted`.
+
 ## 0.9.1 - 2026-05-31
 
 - Enforced setting writes that fail over a cached stored path now perform one cheap flood-routed

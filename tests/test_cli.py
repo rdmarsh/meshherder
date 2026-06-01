@@ -242,8 +242,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_0():
-    assert __version__ == "0.9.1"
+def test_current_release_version_is_0_9_2():
+    assert __version__ == "0.9.2"
 
 
 def _run(args, rpc_response):
@@ -779,7 +779,7 @@ def test_status_single_match_activity_newest_at_bottom():
     assert result.output.index("first event") < result.output.index("second event")
 
 
-def test_status_single_match_shows_settings_drift_flag():
+def test_status_single_match_shows_settings_drift_status():
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{
         "key": "owner.info", "desired": "Managed by mch",
@@ -788,13 +788,14 @@ def test_status_single_match_shows_settings_drift_flag():
         "last_checked": None, "last_set": None,
     }])
     result = _run_multi(["status", "aabb"], status, detail)
-    assert "~" in result.output
+    assert "STATUS" in result.output
+    assert "drifted" in result.output
     assert "owner.info" in result.output
     assert "TRIES" in result.output
     assert "20" in result.output
 
 
-def test_status_single_match_shows_unobserved_settings_as_unknown_in_yellow():
+def test_status_single_match_shows_unobserved_settings_in_yellow():
     runner = CliRunner()
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{
@@ -813,7 +814,7 @@ def test_status_single_match_shows_unobserved_settings_as_unknown_in_yellow():
     assert result.exit_code == 0
     assert "unknown = not yet observed" not in result.output
     assert re.search(
-        r"owner\.info\s+-\s+Managed by mch\s+0\s+\x1b\[33mnot yet observed\x1b\[0m",
+        r"owner\.info\s+-\s+Managed by mch\s+0\s+\x1b\[33mnot observed\x1b\[0m",
         result.output,
     )
 
@@ -826,10 +827,10 @@ def test_status_single_match_shows_tries_as_not_applicable_for_audit():
         "update_attempts": 0,
     }])
     result = _run_multi(["status", "aabb"], status, detail)
-    assert re.search(r"audit\s+owner\.info\s+wrong\s+Managed by mch\s+-\s+~~~", result.output)
+    assert re.search(r"audit\s+owner\.info\s+wrong\s+Managed by mch\s+-\s+drifted", result.output)
 
 
-def test_status_single_match_shows_approximate_settings_marker():
+def test_status_single_match_shows_approximate_settings_status():
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{
         "key": "radio", "desired": "915.075,125,9,5",
@@ -841,7 +842,31 @@ def test_status_single_match_shows_approximate_settings_marker():
     assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
-        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+0\s+within expected tolerance",
+        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+0\s+nominal",
+        result.output,
+    )
+
+
+def test_status_single_match_shows_ok_settings_in_green():
+    runner = CliRunner()
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(settings=[{
+        "key": "owner.info", "desired": "Managed by mch",
+        "observed": "Managed by mch", "policy": "enforce",
+        "drift": False, "approximate": False,
+        "update_attempts": 0,
+    }])
+    responses = [status, detail]
+    with patch("mch.cli._rpc", side_effect=responses):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "--color", "status", "aabb"],
+            color=True,
+        )
+
+    assert result.exit_code == 0
+    assert re.search(
+        r"owner\.info\s+Managed by mch\s+Managed by mch\s+0\s+\x1b\[32mok\x1b\[0m",
         result.output,
     )
 
