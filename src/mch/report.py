@@ -16,6 +16,7 @@ SCHEMA_VERSION = 1
 _BAD_STATES = {
     NodeState.UNKNOWN,
     NodeState.OFFLINE,
+    NodeState.UNREACHABLE,
     NodeState.CONFIGURING,
     NodeState.PARTIAL,
 }

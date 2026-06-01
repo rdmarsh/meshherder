@@ -328,7 +328,7 @@ not a fresh reachability test. Manual sync start, completion, failure, and abort
 in `mch logs`.
 
 Each sync starts with a cheap reachability probe (a bare `ver` read, retried once). If the node
-answers neither attempt it is marked offline and the rest of the pass is skipped, rather than
+answers neither attempt it is marked unreachable and the rest of the pass is skipped, rather than
 timing out on every fact and setting. When the node answers, that `ver` reply is reused as the
 `ver` fact. Independent fact and setting reads are then issued in a randomized order each cycle, so
 a marginal link does not keep losing the same trailing observations.
