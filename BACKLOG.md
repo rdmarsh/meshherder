@@ -36,6 +36,10 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   if the node is being moved to a new radio.
 - Decide whether `via_radio.cr` should be optional. A CR difference alone does not prevent
   reception, but commissioning currently needs a complete `freq,bw,sf,cr` transmit setting.
+- Review whether radio recovery should use `profiles.yaml` radio presets automatically. Presets
+  are region-specific and a fetched or shared profile can contain frequencies that are illegal for
+  the current country; recovery may need an explicit operator-approved region/band allow-list
+  before trying profile-derived radios.
 - Decide the node-name-prefix design. If `name_prefix` is added it should use Node > Group >
   Global precedence and respect the advertised-name byte limits: 32 bytes without location and
   24 with location. Do not add a suffix because truncation can create an enforcement loop.
