@@ -61,6 +61,10 @@ def _format_radio(freq: Any, bw: Any, sf: Any, cr: Any) -> str:
     return f"{float(freq):.3f}/{float(bw):g}/SF{int(sf)}/CR{int(cr)}"
 
 
+def _format_radio_tuple(radio: tuple[float, float, int, int]) -> str:
+    return _format_radio(*radio)
+
+
 def _describe_cached_management_path(contact: dict[str, Any]) -> str:
     path_len = contact.get("out_path_len")
     if path_len == -1:
@@ -1164,6 +1168,15 @@ class WorkQueue:
                         f"SF{node_radio.sf}/CR{node_radio.cr}"
                     ),
                 )
+                await self._db.write_log(
+                    pubkey,
+                    "INFO",
+                    (
+                        "switching gateway radio to "
+                        f"{node_radio.freq:.3f}/{node_radio.bw:g}/"
+                        f"SF{node_radio.sf}/CR{node_radio.cr}"
+                    ),
+                )
                 saved_radio = await self._gateway.switch_radio_temporarily(
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
                 )
@@ -1300,6 +1313,11 @@ class WorkQueue:
             if saved_radio is not None:
                 try:
                     await self._gateway.restore_radio(*saved_radio)
+                    restored = _format_radio_tuple(saved_radio)
+                    await self._db.write_log(
+                        node.pubkey, "INFO", f"restored gateway radio to {restored}"
+                    )
+                    await _progress(progress, f"restored gateway radio to {restored}")
                 except asyncio.CancelledError:
                     await self._mark_sync_incomplete(
                         node, "sync interrupted restoring gateway radio"
@@ -1427,6 +1445,11 @@ class WorkQueue:
         if current_saved_radio is not None:
             await _progress(progress, "restoring gateway radio before fallback probes")
             await self._gateway.restore_radio(*current_saved_radio)
+            restored = _format_radio_tuple(current_saved_radio)
+            await self._db.write_log(
+                node.pubkey, "INFO", f"restored gateway radio to {restored}"
+            )
+            await _progress(progress, f"restored gateway radio to {restored}")
 
         await self._db.write_log(
             node.pubkey,
@@ -1465,6 +1488,11 @@ class WorkQueue:
             finally:
                 if saved_radio is not None and not reached:
                     await self._gateway.restore_radio(*saved_radio)
+                    await self._db.write_log(
+                        node.pubkey,
+                        "INFO",
+                        f"restored gateway radio to {_format_radio_tuple(saved_radio)}",
+                    )
 
         await self._db.write_log(
             node.pubkey,

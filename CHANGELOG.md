@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.16 - 2026-06-01
+
+- Made `mch status NODE` recent activity use the same timestamp, relative-age, and level layout as
+  `mch logs`, while omitting redundant node identity columns in the single-node detail view.
+- Added explicit activity/progress messages when temporary gateway radio switches are restored, so
+  node history shows both the switch away and the switch back.
+
 ## 0.9.15 - 2026-06-01
 
 - Fixed the CLI RPC reader to report a clean error when `mchd` closes the control socket before

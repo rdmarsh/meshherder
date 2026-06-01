@@ -766,13 +766,18 @@ def _render_node_detail(data: dict[str, Any]) -> None:
 
     logs = data.get("logs", [])
     if logs:
-        level_w = max(len(entry.get("level") or "") for entry in logs[:10])
+        visible_logs = logs[:10]
+        level_w = max(len(entry.get("level") or "") for entry in visible_logs)
+        age_w = max(
+            (len(_ago(entry.get("timestamp")).lstrip()) for entry in visible_logs),
+            default=0,
+        )
         click.echo("recent activity:")
-        for entry in reversed(logs[:10]):
+        for entry in reversed(visible_logs):
             ts = _local_ts(entry.get("timestamp"))
             level = entry.get("level") or ""
             age = _ago(entry.get("timestamp")).lstrip()
-            click.echo(f"  [{level:<{level_w}}] {ts} ({age})  {entry['message']}")
+            click.echo(f"  {ts} ({age:>{age_w}}) [{level:<{level_w}}] {entry['message']}")
 
 
 def _render_path_status(data: dict[str, Any]) -> None:
