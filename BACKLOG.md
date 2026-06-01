@@ -47,6 +47,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### CLI And Reporting
 
+- Decide whether anonymous repeater probing should stay as a standalone `tools/` helper or grow
+  into a supported `mch` command. If it becomes supported, add an optional guest-login path for
+  firmware version via `REQ_TYPE_GET_OWNER_INFO` while keeping anonymous results clearly marked.
 - Decide whether live sync progress should include timestamps now that it is always displayed for
   foreground node sync.
 - Explain partial status more directly when enforced reads timed out after other reads succeeded;

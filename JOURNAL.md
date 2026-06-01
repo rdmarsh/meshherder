@@ -4,6 +4,19 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Anonymous MeshCore Repeater Probe Tool
+
+- Confirmed from upstream MeshCore firmware that anonymous repeater requests expose owner/basic
+  metadata but not firmware version. `ANON_REQ_TYPE_OWNER` returns remote clock, node name, and
+  owner info; `ANON_REQ_TYPE_BASIC` returns remote clock plus feature flags; firmware version is
+  only available through the logged-in/guest owner-info request path.
+- Added `tools/query_node_info.py` as a standalone live-test helper rather than folding it into
+  mch/mchd. It sends raw anonymous request frames through a local companion, parses owner/basic
+  and optional regions responses, and keeps output provenance clear by reporting version as
+  unavailable for anonymous requests.
+- Added compact `--radio freq,bw,sf,cr` handling for bench and field testing, while preserving
+  detailed per-field overrides such as `--coding-rate 8`.
+
 ## 2026-06-01 - Luna 0.9.11 Deployment
 
 - Released and deployed `0.9.11` to luna at commit `91ae8b8`. The production venv installed
