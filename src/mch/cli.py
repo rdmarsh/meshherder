@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import subprocess
 import unicodedata
 from datetime import UTC, datetime
@@ -202,6 +203,57 @@ def _commission_busy_hint(error: str) -> str | None:
 
 def _default_config_path() -> Path:
     return DEFAULT_CONFIG
+
+
+def _systemctl(action: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["systemctl", action, "mchd"], capture_output=True, text=True)
+
+
+def _meshcore_cli_command(config_path: Path, executable: str, extra_args: tuple[str, ...]) -> list[str]:
+    cfg = load_config(config_path, load_secrets=False)
+    return [
+        executable,
+        "-s",
+        cfg.gateway.device,
+        "-b",
+        str(cfg.gateway.baud),
+        *extra_args,
+    ]
+
+
+def _run_admin_session(
+    *,
+    config_path: Path,
+    executable: str,
+    restart: bool,
+    extra_args: tuple[str, ...],
+) -> None:
+    command = _meshcore_cli_command(config_path, executable, extra_args)
+    click.echo("stopping mchd so meshcore-cli can own the gateway serial port...")
+    stop_result = _systemctl("stop")
+    if stop_result.returncode != 0:
+        click.echo(stop_result.stderr.strip() or "systemctl stop failed", err=True)
+        raise SystemExit(stop_result.returncode)
+
+    click.echo("running: " + " ".join(shlex.quote(part) for part in command))
+    try:
+        try:
+            result = subprocess.run(command)
+        except FileNotFoundError:
+            click.echo(f"error: {executable!r} not found", err=True)
+            raise SystemExit(127) from None
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+    finally:
+        if restart:
+            click.echo("restarting mchd...")
+            start_result = _systemctl("start")
+            if start_result.returncode != 0:
+                click.echo(start_result.stderr.strip() or "systemctl start failed", err=True)
+                raise SystemExit(start_result.returncode)
+            click.echo("mchd restarted")
+        else:
+            click.echo("mchd left stopped")
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +508,16 @@ def status(ctx: click.Context, query: str | None) -> None:
     _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
 
 
+@cli.command()
+@click.argument("node")
+@click.pass_context
+def path(ctx: click.Context, node: str) -> None:
+    """Show cached management path metadata for one node."""
+    resp = _rpc(ctx.obj["socket"], {"cmd": "path", "query": node})
+    data = _check(resp)
+    _render_path_status(data)
+
+
 # ---------------------------------------------------------------------------
 # sync
 # ---------------------------------------------------------------------------
@@ -601,6 +663,36 @@ def _render_node_detail(data: dict[str, Any]) -> None:
             level = entry.get("level") or ""
             age = _ago(entry.get("timestamp")).lstrip()
             click.echo(f"  [{level:<{level_w}}] {ts} ({age})  {entry['message']}")
+
+
+def _render_path_status(data: dict[str, Any]) -> None:
+    label = data.get("label") or "-"
+    name = data.get("name") or "-"
+    click.echo(f"{data['pubkey'][:12]}  {label}  {name}")
+    click.echo(f"cached path: {data.get('cached_path') or 'unknown'}")
+
+    route = data.get("route") or "unknown"
+    if data.get("path_repair_needed"):
+        click.echo(f"route: {route} (path repair needed)")
+    else:
+        click.echo(f"route: {route}")
+
+    if not data.get("contact_present"):
+        return
+
+    click.echo("gateway contact:")
+    contact_name = data.get("contact_name") or "-"
+    contact_type = data.get("contact_type")
+    contact_flags = data.get("contact_flags")
+    click.echo(f"  name: {contact_name}")
+    click.echo(f"  type: {contact_type if contact_type is not None else '-'}")
+    click.echo(f"  flags: {contact_flags if contact_flags is not None else '-'}")
+
+    path_len = data.get("out_path_len")
+    hash_mode = data.get("out_path_hash_mode")
+    click.echo(f"  out_path: {data.get('out_path') or '-'}")
+    click.echo(f"  out_path_len: {path_len if path_len is not None else '-'}")
+    click.echo(f"  out_path_hash_mode: {hash_mode if hash_mode is not None else '-'}")
 
 
 def _render_issue_sections(
@@ -1777,7 +1869,7 @@ def _commission_replace_wizard(socket: str) -> None:
 @cli.command()
 def start() -> None:
     """Start the mchd daemon via systemd."""
-    result = subprocess.run(["systemctl", "start", "mchd"], capture_output=True, text=True)
+    result = _systemctl("start")
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl start failed", err=True)
         raise SystemExit(result.returncode)
@@ -1788,7 +1880,7 @@ def start() -> None:
 def stop() -> None:
     """Stop the mchd daemon via systemd."""
     click.echo("stopping current sync, this may take some time...")
-    result = subprocess.run(["systemctl", "stop", "mchd"], capture_output=True, text=True)
+    result = _systemctl("stop")
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl stop failed", err=True)
         raise SystemExit(result.returncode)
@@ -1799,11 +1891,49 @@ def stop() -> None:
 def restart() -> None:
     """Restart the mchd daemon via systemd."""
     click.echo("stopping current sync, this may take some time...")
-    result = subprocess.run(["systemctl", "restart", "mchd"], capture_output=True, text=True)
+    result = _systemctl("restart")
     if result.returncode != 0:
         click.echo(result.stderr.strip() or "systemctl restart failed", err=True)
         raise SystemExit(result.returncode)
     click.echo("mchd restarted")
+
+
+@cli.command(context_settings={"ignore_unknown_options": True})
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path),
+    default=DEFAULT_CONFIG,
+    show_default=True,
+    help="Config file to read gateway.device and gateway.baud from.",
+)
+@click.option(
+    "--cli",
+    "executable",
+    default="meshcore-cli",
+    show_default=True,
+    help="meshcore-cli executable to launch.",
+)
+@click.option(
+    "--restart/--no-restart",
+    default=True,
+    show_default=True,
+    help="Restart mchd after meshcore-cli exits.",
+)
+@click.argument("meshcore_args", nargs=-1, type=click.UNPROCESSED)
+def admin(
+    config_path: Path,
+    executable: str,
+    restart: bool,
+    meshcore_args: tuple[str, ...],
+) -> None:
+    """Stop mchd, run meshcore-cli on the configured gateway, then restart mchd."""
+    _run_admin_session(
+        config_path=config_path,
+        executable=executable,
+        restart=restart,
+        extra_args=meshcore_args,
+    )
 
 
 # ---------------------------------------------------------------------------

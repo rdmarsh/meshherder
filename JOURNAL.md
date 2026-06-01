@@ -4,6 +4,21 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Path Inspection And Admin Shell
+
+- Added a read-only `mch path <node>` command after qh-corbin and Acacia showed that route state
+  needs to be inspectable before adding any path mutation workflow. The command only reports the
+  daemon's cached gateway contact metadata; it does not probe, discover, sync, or change routes.
+- The path output deliberately calls out flood and missing gateway contacts as `path repair needed`
+  because normal management should not treat flood as a healthy steady-state route. Stored and
+  direct routes are shown as cached evidence, not proof that the node is currently reachable.
+- Added `mch admin` for deliberate serial administration. It stops `mchd`, launches
+  `meshcore-cli` using `gateway.device` and `gateway.baud` from config, then restarts `mchd` unless
+  `--no-restart` is requested. This releases the serial port at the process level; merely pausing
+  the scheduler is not sufficient while `mchd` still owns the gateway connection.
+- Kept only one command name, `admin`, rather than carrying a `connect` alias. Project CLI
+  vocabulary should stay narrow unless a second name has clear operator value.
+
 ## 2026-06-01 - Acacia Flood-Route Partial Diagnosis
 
 - Acacia (`4d0385b9d942`) was staying `partial` because its last successful management pass was

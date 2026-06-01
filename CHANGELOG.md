@@ -5,6 +5,15 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.8 - 2026-06-01
+
+- Added `mch path <node>` to show the daemon's cached gateway management route for one node
+  without sending mesh traffic. The command reports direct, stored, flood, missing, or unknown
+  route state, raw `out_path` metadata, and flags flood/missing routes as needing path repair.
+- Added `mch admin`, which stops `mchd`, launches `meshcore-cli` with the configured gateway
+  serial device and baud, then restarts `mchd` when the admin session exits. `--no-restart`,
+  `--config`, `--cli`, and passthrough `meshcore-cli` arguments are supported.
+
 ## 0.9.7 - 2026-06-01
 
 - Refined lossy-link handling after qh-corbin live testing: stored-path reads now get a small

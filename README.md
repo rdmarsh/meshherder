@@ -461,6 +461,7 @@ mch validate                  Validate /etc/meshherder/config.yaml
 mch validate --config <path>  Validate an explicit config file
 mch plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch plan <label|prefix>       Filter planned writes/audit drift/unknown values
+mch path <label|prefix>       Show cached gateway management route metadata for one node
 mch suggest                      Suggested txdelay for all nodes based on neighbour count
 mch suggest <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes
@@ -472,6 +473,7 @@ mch remove <label|prefix>     Delete one node's local DB state
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node; stream progress while waiting for the result
 mch exec <label|prefix> <command>  Run a raw MeshCore CLI command (e.g. ver, stats-radio)
+mch admin                     Stop mchd, open meshcore-cli on the gateway, then restart mchd
 mch new                       Add a fresh or replacement MeshCore node (interactive wizard)
 mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch stop                      Stop mchd via systemd
