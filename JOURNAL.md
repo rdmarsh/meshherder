@@ -4,6 +4,15 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Luna 0.9.12 Deployment
+
+- Released and deployed `0.9.12` to luna. The first production install attempt stayed on
+  `0.9.11` because `/opt/meshherder` pulls from luna's local operator checkout, and that checkout
+  had not yet pulled from GitHub. Updating `/home/rdm/code/meshherder` first, then pulling
+  `/opt/meshherder`, installed `meshherder-0.9.12`.
+- Verified `mch --version` reported `0.9.12`, `mchd` restarted and reported `active`, and the
+  production checkout was at commit `87f647d`.
+
 ## 2026-06-01 - Anonymous MeshCore Repeater Probe Tool
 
 - Confirmed from upstream MeshCore firmware that anonymous repeater requests expose owner/basic
