@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_19():
-    assert __version__ == "0.9.19"
+def test_current_release_version_is_0_9_20():
+    assert __version__ == "0.9.20"
 
 
 def _run(args, rpc_response):
@@ -966,7 +966,7 @@ def test_status_single_match_facts_show_observed_time_and_clock_drift():
     assert "OBSERVED" in result.output
     assert "clock" in result.output
     assert "2026-06-02" in result.output
-    assert "drift -" in result.output
+    assert "clock slow by 7d 11h" in result.output
 
 
 def test_status_single_match_clock_within_one_minute_is_not_called_drift():
@@ -979,8 +979,21 @@ def test_status_single_match_clock_within_one_minute_is_not_called_drift():
     result = _run_multi(["status", "aabb"], status, detail)
 
     assert result.exit_code == 0
-    assert "within +-1m" in result.output
+    assert "within ±1m" in result.output
     assert "drift <1m" not in result.output
+
+
+def test_status_single_match_clock_ahead_is_reported_as_fast():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(
+        facts={"clock": "12:08 - 25/5/2026 UTC"},
+        fact_times={"clock": "2026-05-25T12:04:00+00:00"},
+    )
+
+    result = _run_multi(["status", "aabb"], status, detail)
+
+    assert result.exit_code == 0
+    assert "clock fast by 4m" in result.output
 
 
 def test_status_single_match_activity_newest_at_bottom():
