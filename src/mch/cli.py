@@ -524,7 +524,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         any_approximate = any(s.get("approximate") for s in settings)
         legend_parts = []
         if any_unobserved:
-            legend_parts.append("??? = not yet observed")
+            legend_parts.append("unknown = not yet observed")
         if any_drift:
             legend_parts.append("~~~ = drifted from desired")
         if any_approximate:
@@ -550,7 +550,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         click.echo(_srow("------", "---", "-------", "--------", "-----", "-----"))
         for s in settings:
             if s.get("observed") is None:
-                drift_flag = "???"
+                drift_flag = click.style("unknown", fg="yellow")
             elif s["drift"]:
                 drift_flag = "~~~"
             elif s.get("approximate"):
