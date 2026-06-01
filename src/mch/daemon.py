@@ -354,7 +354,11 @@ async def _dispatch(
         return {
             "ok": True,
             "data": [
-                {**entry, "label": labels.get(entry["node_pubkey"], "")}
+                {
+                    **entry,
+                    "display_pubkey": entry.get("display_pubkey") or entry["node_pubkey"],
+                    "label": labels.get(entry["node_pubkey"], ""),
+                }
                 if entry.get("node_pubkey") else entry
                 for entry in logs
             ],

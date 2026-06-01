@@ -121,7 +121,11 @@ class ReadOnlyApi:
             logs = await self._db.get_logs(pubkey, limit=limit)
             labels = {node.pubkey: node.label for node in await self._db.get_all_nodes()}
             return HTTPStatus.OK, [
-                {**entry, "label": labels.get(entry["node_pubkey"], "")}
+                {
+                    **entry,
+                    "display_pubkey": entry.get("display_pubkey") or entry["node_pubkey"],
+                    "label": labels.get(entry["node_pubkey"], ""),
+                }
                 if entry.get("node_pubkey") else entry
                 for entry in logs
             ]
