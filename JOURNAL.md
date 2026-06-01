@@ -15,6 +15,14 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   `region save`, `region home`, and v1.15+ `region default`. mch already supported raw region
   setup through long-interval operations; added command metadata for `region put`/`region save`
   operations and first-class setting keys `region.home` and `region.default`.
+- Mac-attached Heltec V3 / MeshCore v1.15.0 testing: `region` returned `*^ F`, `region help` and
+  `region list` returned `Err - ??`, `region home` returned `home is *`, and `region default`
+  returned `default scope is <null>`. A temporary unsaved `region put mch-test` returned
+  `OK - (flood allowed)`, `region get mch-test` returned `mch-test F`, `region remove mch-test`
+  returned `OK`, and a final `region get mch-test` returned `Err - unknown region`.
+- Because `region home/default` readbacks are prose rather than bare values, `region.home` and
+  `region.default` use field-aware comparison so desired `*` matches `home is *` and desired
+  `<null>` matches `default scope is <null>`.
 - Do not claim region enforcement is field-proven yet. The next live step is to read/write
   `region home` and `region default` on representative firmware, capture exact reply text, and
   confirm whether the v1.15+ auto-allow/auto-save behavior is consistent across deployed boards.

@@ -28,6 +28,10 @@ def compare_setting(key: str, desired: str | None, observed: str | None) -> Sett
         return _compare_radio(desired, observed)
     if comparator == "float_0005":
         return _compare_float(desired, observed, tolerance=0.0005)
+    if comparator == "region_home":
+        return _compare_region_value(desired, observed, prefix="home is ")
+    if comparator == "region_default":
+        return _compare_region_value(desired, observed, prefix="default scope is ")
 
     return SettingComparison(False)
 
@@ -68,3 +72,15 @@ def _parse_radio(raw: str) -> tuple[float, float, int, int] | None:
         return float(parts[0]), float(parts[1]), int(parts[2]), int(parts[3])
     except ValueError:
         return None
+
+
+def _compare_region_value(desired: str, observed: str, *, prefix: str) -> SettingComparison:
+    observed_value = _parse_region_reply(observed, prefix=prefix)
+    return SettingComparison(desired == observed_value)
+
+
+def _parse_region_reply(raw: str, *, prefix: str) -> str:
+    text = raw.strip()
+    if text.startswith(prefix):
+        return text[len(prefix):].strip()
+    return text

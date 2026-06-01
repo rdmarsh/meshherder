@@ -472,8 +472,8 @@ mch prune --yes               Delete listed local DB state for retired nodes
 mch remove <label|prefix>     Delete one node's local DB state
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node; stream progress while waiting for the result
-mch exec <label|prefix> <command>  Run a raw MeshCore CLI command (e.g. ver, stats-radio)
-mch admin                     Stop mchd, open meshcore-cli on the gateway, then restart mchd
+mch exec <label|prefix> <command>  Run one raw remote command through mchd over the mesh
+mch admin                     Stop mchd, open local serial meshcore-cli, then restart mchd
 mch new                       Add a fresh or replacement MeshCore node (interactive wizard)
 mch start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch stop                      Stop mchd via systemd
