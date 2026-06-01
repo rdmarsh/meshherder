@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.12 - 2026-06-01
+
+- Added standalone MeshCore anonymous repeater probing tooling under `tools/`. The
+  `query_node_info.py` helper sends anonymous owner, basic, and optional regions requests,
+  supports compact `--radio freq,bw,sf,cr` test-radio selection, and reports explicitly that
+  firmware version is unavailable through the anonymous request path.
+
 ## 0.9.11 - 2026-06-01
 
 - Added explicit `mch path` recovery controls: `--discover` asks the mesh for a fresh path
