@@ -1383,6 +1383,45 @@ async def test_run_node_progress_shows_stored_cached_path_metadata(db):
     ) in messages
 
 
+async def test_management_path_status_reports_stored_path_without_mesh_traffic(db):
+    contact = _contact("aabbccdd1122")
+    contact.update({
+        "out_path": "e260,5f6c",
+        "out_path_len": 2,
+        "out_path_hash_mode": 1,
+        "flags": 1,
+    })
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", label="TestNode")])
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="aabbccdd1122", name="TestNode", label="test")
+
+    status = wq.management_path_status(node)
+
+    assert status["route"] == "stored"
+    assert status["path_repair_needed"] is False
+    assert status["cached_path"] == "stored (out_path=e260,5f6c; out_path_len=2; hash-mode=1)"
+    assert status["out_path"] == "e260,5f6c"
+    gw.send_command.assert_not_awaited()
+
+
+async def test_management_path_status_marks_flood_as_repair_needed(db):
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", label="TestNode")])
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="aabbccdd1122", name="TestNode", label="test")
+
+    status = wq.management_path_status(node)
+
+    assert status["route"] == "flood"
+    assert status["cached_path"] == "flood"
+    assert status["path_repair_needed"] is True
+
+
 async def test_run_node_odd_prefix_rejected(db):
     """Prefix with an odd number of hex chars is rejected (convention: must be even)."""
     cfg = _make_config()

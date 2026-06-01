@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_6():
-    assert __version__ == "0.9.7"
+def test_current_release_version_is_0_9_8():
+    assert __version__ == "0.9.8"
 
 
 def _run(args, rpc_response):
@@ -347,6 +347,50 @@ def test_daemon_connection_failure_reports_config_ok(tmp_path):
     assert "cannot connect to daemon" in result.output
     assert f"checking config: {config}" in result.output
     assert "config ok:" in result.output
+
+
+def test_path_command_shows_stored_route_metadata():
+    result = _run(["path", "site-a"], {"ok": True, "data": {
+        "pubkey": "aabbccdd11223344",
+        "label": "site-a",
+        "name": "Tower",
+        "contact_present": True,
+        "cached_path": "stored (out_path=e260,5f6c; out_path_len=2; hash-mode=1)",
+        "route": "stored",
+        "path_repair_needed": False,
+        "contact_name": "Tower",
+        "contact_type": 2,
+        "contact_flags": 1,
+        "out_path": "e260,5f6c",
+        "out_path_len": 2,
+        "out_path_hash_mode": 1,
+    }})
+
+    assert result.exit_code == 0
+    assert "aabbccdd1122  site-a  Tower" in result.output
+    assert "cached path: stored (out_path=e260,5f6c; out_path_len=2; hash-mode=1)" in result.output
+    assert "route: stored" in result.output
+    assert "path repair needed" not in result.output
+    assert "out_path_hash_mode: 1" in result.output
+
+
+def test_path_command_marks_flood_route_for_repair():
+    result = _run(["path", "site-a"], {"ok": True, "data": {
+        "pubkey": "aabbccdd11223344",
+        "label": "site-a",
+        "name": "Tower",
+        "contact_present": True,
+        "cached_path": "flood",
+        "route": "flood",
+        "path_repair_needed": True,
+        "out_path": "",
+        "out_path_len": -1,
+        "out_path_hash_mode": 0,
+    }})
+
+    assert result.exit_code == 0
+    assert "cached path: flood" in result.output
+    assert "route: flood (path repair needed)" in result.output
 
 
 # ------ validate ------
@@ -1331,6 +1375,65 @@ def test_lifecycle_stop_paths_warn_while_current_sync_is_finishing(command: str,
     systemctl.assert_called_once_with(
         ["systemctl", command, "mchd"], capture_output=True, text=True
     )
+
+
+def test_admin_stops_mchd_runs_meshcore_cli_and_restarts(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("""\
+gateway:
+  device: /dev/ttyUSB-admin
+  baud: 57600
+nodes: []
+""")
+    runner = CliRunner()
+    ok = SimpleNamespace(returncode=0, stderr="")
+
+    with patch("mch.cli.subprocess.run", return_value=ok) as run:
+        result = runner.invoke(
+            cli,
+            ["admin", "--config", str(config), "--", "-r", "ver"],
+        )
+
+    assert result.exit_code == 0
+    assert "stopping mchd" in result.output
+    assert "meshcore-cli -s /dev/ttyUSB-admin -b 57600 -r ver" in result.output
+    assert "mchd restarted" in result.output
+    assert run.call_args_list[0].args[0] == ["systemctl", "stop", "mchd"]
+    assert run.call_args_list[1].args[0] == [
+        "meshcore-cli",
+        "-s",
+        "/dev/ttyUSB-admin",
+        "-b",
+        "57600",
+        "-r",
+        "ver",
+    ]
+    assert run.call_args_list[2].args[0] == ["systemctl", "start", "mchd"]
+
+
+def test_admin_can_leave_mchd_stopped(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("""\
+gateway:
+  device: /dev/ttyUSB-admin
+  baud: 115200
+nodes: []
+""")
+    runner = CliRunner()
+    ok = SimpleNamespace(returncode=0, stderr="")
+
+    with patch("mch.cli.subprocess.run", return_value=ok) as run:
+        result = runner.invoke(
+            cli,
+            ["admin", "--config", str(config), "--no-restart"],
+        )
+
+    assert result.exit_code == 0
+    assert "mchd left stopped" in result.output
+    assert [call.args[0] for call in run.call_args_list] == [
+        ["systemctl", "stop", "mchd"],
+        ["meshcore-cli", "-s", "/dev/ttyUSB-admin", "-b", "115200"],
+    ]
 
 
 # ------ suggest ------

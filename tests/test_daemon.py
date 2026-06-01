@@ -44,6 +44,7 @@ def wq():
     m.operation = MagicMock(side_effect=_operation_ok)
     m.exec_command = AsyncMock(return_value="(ok)")
     m.unfiled_contacts = AsyncMock(return_value=[])
+    m.management_path_status = MagicMock(return_value={"route": "stored"})
     return m
 
 
@@ -124,6 +125,21 @@ async def test_node_dispatch_passwd_known_true_when_default_secret(db, wq, confi
 
     assert resp["ok"] is True
     assert resp["data"]["passwd_known"] is True
+
+
+async def test_path_dispatch_resolves_node_and_returns_cached_path_status(db, wq, config):
+    node = await _seed_node_with_facts(db)
+    wq.management_path_status.return_value = {
+        "pubkey": node.pubkey,
+        "route": "flood",
+        "path_repair_needed": True,
+    }
+
+    resp = await _dispatch({"cmd": "path", "query": "test"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["route"] == "flood"
+    wq.management_path_status.assert_called_once_with(node)
 
 
 async def test_issues_dispatch_no_open_node_when_default_password(db, wq, config):

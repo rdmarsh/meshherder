@@ -428,6 +428,46 @@ class WorkQueue:
         """Return visible repeater contacts that are not yet in config."""
         return await get_unfiled_contacts(self._config, self._gateway)
 
+    def management_path_status(self, node: Node) -> dict[str, Any]:
+        """Return cached gateway route metadata for a managed node without mesh traffic."""
+        contact = self._contact_for_pubkey(node.pubkey)
+        if contact is None:
+            return {
+                "pubkey": node.pubkey,
+                "label": node.label,
+                "name": node.name,
+                "contact_present": False,
+                "cached_path": "not in gateway contacts",
+                "route": "missing",
+                "path_repair_needed": True,
+            }
+
+        path_len = contact.get("out_path_len")
+        if path_len == -1:
+            route = "flood"
+        elif path_len == 0:
+            route = "direct"
+        elif isinstance(path_len, int) and path_len > 0:
+            route = "stored"
+        else:
+            route = "unknown"
+
+        return {
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+            "contact_present": True,
+            "cached_path": _describe_cached_management_path(contact),
+            "route": route,
+            "path_repair_needed": route in {"flood", "missing"},
+            "contact_name": contact.get("adv_name") or "",
+            "contact_type": contact.get("type"),
+            "contact_flags": contact.get("flags"),
+            "out_path": contact.get("out_path") or "",
+            "out_path_len": path_len,
+            "out_path_hash_mode": contact.get("out_path_hash_mode"),
+        }
+
     def _contact_for_pubkey(self, pubkey: str) -> dict[str, Any] | None:
         return next(
             (c for c in self._contacts if c.get("public_key", "")[:12] == pubkey[:12]),

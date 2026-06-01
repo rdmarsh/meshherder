@@ -197,6 +197,16 @@ async def _dispatch(
         report = await build_node_report(db, config, node)
         return {"ok": True, "data": legacy_node(report, config)}
 
+    if cmd == "path":
+        query = req.get("query", "")
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"node {query!r} not found"}
+        return {"ok": True, "data": wq.management_path_status(node)}
+
     if cmd == "sync":
         prefix = req.get("prefix")
         if prefix:
