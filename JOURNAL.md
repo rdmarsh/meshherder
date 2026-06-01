@@ -4,6 +4,18 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Luna 0.9.8 Deployment
+
+- Released and deployed `0.9.8` to luna at commit `ec3d86d`. The production venv installed
+  `meshherder-0.9.8`, `mch --version` reported `0.9.8`, `mchd` restarted cleanly, and
+  `mch status` responded through the control socket.
+- Read-only smoke test: `mch path qh-corbin` reported the expected stored route through
+  `out_path=2fd9`, `out_path_len=1`, `out_path_hash_mode=1`, matching the manually recovered
+  path from the qh-corbin investigation.
+- Deployment note: `sudo git pull --ff-only` in `/opt/meshherder` still fails on luna because root
+  lacks the GitHub SSH key. The working flow is to pull `/home/rdm/code/meshherder`, then `sudo
+  rsync -a --delete --exclude .venv` into `/opt/meshherder` before reinstalling from `/opt`.
+
 ## 2026-06-01 - Path Inspection And Admin Shell
 
 - Added a read-only `mch path <node>` command after qh-corbin and Acacia showed that route state
