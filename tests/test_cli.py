@@ -23,6 +23,7 @@ from mch.cli import (
     _log_node_label,
     _log_node_pubkey,
     _next_sync_text,
+    _node_detail_view,
     cli,
 )
 from mch.meshkey import derive_public_key
@@ -85,6 +86,27 @@ def test_next_sync_text_formats_overdue_as_due_now():
 
 def test_next_sync_text_formats_missing_as_unscheduled():
     assert _next_sync_text(None) == "unscheduled"
+
+
+def test_node_detail_view_preserves_next_sync_at():
+    detail = _node_detail_view({
+        "pubkey": "aabbccdd" * 8,
+        "name": "Tower",
+        "label": "site-a",
+        "group": None,
+        "state": "configured",
+        "last_seen": None,
+        "last_connected": None,
+        "next_sync_at": "2026-06-02T15:10:07+00:00",
+        "auth": {"cached": True, "password_known": True},
+        "fact_keys": [],
+        "facts": {},
+        "facts_collected_at": {},
+        "settings": [],
+        "logs": [],
+    })
+
+    assert detail["next_sync_at"] == "2026-06-02T15:10:07+00:00"
 
 
 def test_local_ts_displays_utc_timestamp_in_local_timezone(monkeypatch):
@@ -297,8 +319,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_23():
-    assert __version__ == "0.9.23"
+def test_current_release_version_is_0_9_24():
+    assert __version__ == "0.9.24"
 
 
 def _run(args, rpc_response):
