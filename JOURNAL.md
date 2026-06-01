@@ -4,6 +4,18 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Luna 0.9.16 Deployment
+
+- Released and deployed `0.9.16` to luna at commit `bd99fd8`. The release makes
+  `mch status NODE` recent activity use the same timestamp/age/level shape as `mch logs` while
+  omitting redundant node identity columns in the single-node view.
+- Added explicit sync activity/progress messages for gateway radio restoration, so temporary radio
+  switches now leave both a "switching gateway radio to ..." and "restored gateway radio to ..."
+  breadcrumb.
+- Installed `meshherder-0.9.16`, restarted `mchd`, and verified `mch --version` reported
+  `0.9.16`, `/opt/meshherder` was at `bd99fd8`, and `mchd` was active with the gateway on
+  `915.075/125/SF9/CR5`.
+
 ## 2026-06-01 - Luna 0.9.14/0.9.15 Deployment
 
 - Released and deployed `0.9.14` to luna at commit `4406845`. The release makes
