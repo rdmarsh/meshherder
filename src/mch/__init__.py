@@ -1,2 +1,2 @@
 # mchd — Mesh Herder fleet management daemon
-__version__ = "0.9.9"
+__version__ = "0.9.10"
