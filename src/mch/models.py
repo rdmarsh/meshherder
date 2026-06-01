@@ -14,6 +14,7 @@ class NodeState(Enum):
     UNKNOWN     = "unknown"      # never contacted
     ONLINE      = "online"       # contacted this cycle
     OFFLINE     = "offline"      # not seen recently
+    UNREACHABLE = "unreachable"  # route/contact exists but did not answer probes
     CONFIGURING = "configuring"  # commands in flight
     CONFIGURED  = "configured"   # all enforced settings match desired, all operations done
     PARTIAL     = "partial"      # some settings pending/failed or drifted

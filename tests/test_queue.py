@@ -412,8 +412,8 @@ async def test_cycle_collects_facts(db):
 # reachability probe
 # ------------------------------------------------------------------
 
-async def test_probe_failure_skips_sync_and_marks_offline(db):
-    """Two failed reachability probes skip the pass and mark the node offline."""
+async def test_probe_failure_skips_sync_and_marks_unreachable(db):
+    """Two failed reachability probes skip the pass and mark the node unreachable."""
     node_cfg = _node(
         pubkey="aabbcc", label="TestNode",
         settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
@@ -431,7 +431,7 @@ async def test_probe_failure_skips_sync_and_marks_offline(db):
     assert sent == ["ver", "ver"]
     assert results[0].reachable is False
     node = await db.get_node("aabbccdd1122")
-    assert node.state == NodeState.OFFLINE
+    assert node.state == NodeState.UNREACHABLE
     logs = await db.get_logs("aabbccdd1122")
     assert any("node unreachable" in entry["message"] for entry in logs)
 
@@ -616,7 +616,7 @@ async def test_stored_path_failure_flood_probe_does_not_run_full_sync(db):
     assert [c.args[1] for c in gw.send_command.await_args_list] == ["ver", "ver", "ver"]
     assert gw.send_command.await_args_list[2].args[0]["out_path_len"] == -1
     node = await db.get_node("aabbccdd1122")
-    assert node.state == NodeState.OFFLINE
+    assert node.state == NodeState.UNREACHABLE
     logs = await db.get_logs("aabbccdd1122")
     assert any("path repair needed" in entry["message"] for entry in logs)
 
@@ -668,7 +668,7 @@ async def test_flood_routed_contact_unreachable_skips_full_sync(db):
     assert results[0].reachable is False
     assert [c.args[1] for c in gw.send_command.await_args_list] == ["ver", "ver"]
     node = await db.get_node("aabbccdd1122")
-    assert node.state == NodeState.OFFLINE
+    assert node.state == NodeState.UNREACHABLE
     logs = await db.get_logs("aabbccdd1122")
     assert any("node unreachable over flood" in entry["message"] for entry in logs)
 

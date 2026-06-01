@@ -34,6 +34,7 @@ STATE_COLORS = {
     "partial": "yellow",
     "configuring": "yellow",
     "unknown": "yellow",
+    "unreachable": "red",
     "offline": "red",
 }
 

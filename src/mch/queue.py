@@ -861,7 +861,7 @@ class WorkQueue:
                     contact, node, node_cfg, progress=progress
                 )
                 if probe_result is None:
-                    node.state = NodeState.OFFLINE
+                    node.state = NodeState.UNREACHABLE
                     await self._db.upsert_node(node)
                     log.warning(
                         "node %r (%s) is flood-routed and did not answer %d "
@@ -904,7 +904,7 @@ class WorkQueue:
                 contact, node, node_cfg, progress=progress
             )
             if probe_result is None:
-                node.state = NodeState.OFFLINE
+                node.state = NodeState.UNREACHABLE
                 await self._db.upsert_node(node)
                 log.warning(
                     "node %r (%s) did not answer %d reachability probes - "

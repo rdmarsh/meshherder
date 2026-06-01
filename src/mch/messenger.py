@@ -206,7 +206,7 @@ class Messenger:
     async def _cmd_issues(self) -> str:
         nodes = await self._db.get_all_nodes()
         drifted = await self._db.get_drifted_settings()
-        _bad_states = {"unknown", "offline", "configuring", "partial"}
+        _bad_states = {"unknown", "offline", "unreachable", "configuring", "partial"}
         bad_state = [n for n in nodes if n.state.value in _bad_states]
         lines = []
         if drifted:
