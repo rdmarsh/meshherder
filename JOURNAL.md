@@ -17,6 +17,9 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   EOF on the control socket was parsed as JSON and surfaced as a `JSONDecodeError` traceback.
   `0.9.15` fixes that path so daemon restarts/disconnects report a clean daemon-connection-closed
   error instead.
+- Deployed `0.9.15` to luna at commit `0cb804a`, installed `meshherder-0.9.15`, restarted `mchd`,
+  and verified `mch --version` reported `0.9.15`, `/opt/meshherder` was at `0cb804a`, and `mchd`
+  was active with the gateway on `915.075/125/SF9/CR5`.
 
 ## 2026-06-01 - Luna 0.9.12 Deployment
 
