@@ -4,6 +4,17 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Luna 0.9.11 Deployment
+
+- Released and deployed `0.9.11` to luna at commit `91ae8b8`. The production venv installed
+  `meshherder-0.9.11`, `mch --version` reported `0.9.11`, `mchd` restarted and reported
+  `active`, and `/opt/meshherder` was at the expected commit.
+- Read-only smoke test: `mch path qh-corbin` still reported the expected stored route through
+  `out_path=2fd9`, `out_path_len=1`, `out_path_hash_mode=1`.
+- No live path mutation was run during deployment. The new recovery controls were only installed
+  and verified through read-only CLI behavior; `--discover`/`--advert`/`--apply` still need
+  deliberate field use when a route actually needs repair.
+
 ## 2026-06-01 - Management Path Recovery Controls
 
 - Added explicit path recovery controls to keep normal management off flood while giving operators
