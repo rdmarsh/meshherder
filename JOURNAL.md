@@ -4,6 +4,20 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.17/0.9.18 Deployment
+
+- Released `0.9.17` for per-fact observation timestamps, clock drift display in
+  `mch status NODE`, and dry-run-first `mch clean facts` stale fact cleanup.
+- Initial `0.9.17` deployment exposed that luna's config used `operations:` under a group, while
+  the parser only supported node-level operations. `mchd` exited with `unknown groups[0] key
+  'operations'`.
+- Released and deployed `0.9.18` at commit `53b992f`, adding `operations:` support on `global:`
+  and `groups:` with Node > Group > Global command precedence. Installed `meshherder-0.9.18`,
+  restarted `mchd`, and verified the daemon was active on luna.
+- Read-only smoke checks: `mch clean facts --all --fact powersavings` listed the stale
+  `qh-corbin` `powersavings` row without deleting it, and `mch status e2601d591517` showed
+  per-fact observed timestamps plus a clock drift note.
+
 ## 2026-06-01 - Luna 0.9.16 Deployment
 
 - Released and deployed `0.9.16` to luna at commit `bd99fd8`. The release makes
