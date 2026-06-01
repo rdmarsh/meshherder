@@ -424,6 +424,47 @@ class Gateway:
         log.debug("favourited contact %s", contact.get("public_key", "?")[:12])
         return True
 
+    async def discover_contact_path(
+        self, contact: dict[str, Any], timeout: float = 30.0
+    ) -> dict[str, Any]:
+        """Ask the mesh for a fresh path-discovery response for a stored contact."""
+        mc = self._require_connected()
+        result = await mc.commands.send_path_discovery_sync(
+            contact,
+            timeout=timeout,
+            min_timeout=timeout,
+        )
+        if result is None or result.type == EventType.ERROR:
+            payload = getattr(result, "payload", None)
+            raise GatewayError(f"path discovery failed: {payload or 'no response'}")
+
+        payload = dict(result.payload or {})
+        payload["path_hash_mode"] = int(payload.get("out_path_hash_len", 1)) - 1
+        payload["path"] = payload.get("out_path") or ""
+        payload["path_len"] = payload.get("out_path_len")
+        return payload
+
+    async def get_contact_advert_path(self, contact: dict[str, Any]) -> dict[str, Any]:
+        """Return the gateway's cached advert path for a stored contact."""
+        mc = self._require_connected()
+        result = await mc.commands.get_advert_path(contact)
+        if result.type == EventType.ERROR:
+            raise GatewayError(f"advert path lookup failed: {result.payload}")
+        return dict(result.payload or {})
+
+    async def change_contact_path(
+        self, contact: dict[str, Any], path: str, path_hash_mode: int
+    ) -> None:
+        """Persist a replacement MeshCore path on a gateway contact."""
+        mc = self._require_connected()
+        result = await mc.commands.change_contact_path(
+            contact,
+            path,
+            path_hash_mode=path_hash_mode,
+        )
+        if result.type == EventType.ERROR:
+            raise GatewayError(f"change_contact_path failed: {result.payload}")
+
     # ------------------------------------------------------------------
     # radio
     # ------------------------------------------------------------------

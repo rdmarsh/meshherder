@@ -211,7 +211,11 @@ def _systemctl(action: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["systemctl", action, "mchd"], capture_output=True, text=True)
 
 
-def _meshcore_cli_command(config_path: Path, executable: str, extra_args: tuple[str, ...]) -> list[str]:
+def _meshcore_cli_command(
+    config_path: Path,
+    executable: str,
+    extra_args: tuple[str, ...],
+) -> list[str]:
     cfg = load_config(config_path, load_secrets=False)
     return [
         executable,
@@ -552,9 +556,64 @@ def status(ctx: click.Context, query: str | None) -> None:
 
 @cli.command()
 @click.argument("node")
+@click.option(
+    "--discover",
+    is_flag=True,
+    help="Ask the mesh for a fresh path-discovery candidate without applying it.",
+)
+@click.option(
+    "--advert",
+    is_flag=True,
+    help="Show the gateway's cached advert path candidate without applying it.",
+)
+@click.option(
+    "--apply",
+    "apply_path",
+    metavar="PATH[:MODE]",
+    help="Apply an operator-approved replacement path to the gateway contact.",
+)
+@click.option("--yes", "-y", is_flag=True, help="Apply without an interactive confirmation.")
 @click.pass_context
-def path(ctx: click.Context, node: str) -> None:
-    """Show cached management path metadata for one node."""
+def path(
+    ctx: click.Context,
+    node: str,
+    discover: bool,
+    advert: bool,
+    apply_path: str | None,
+    yes: bool,
+) -> None:
+    """Inspect or explicitly repair cached management path metadata for one node."""
+    selected = sum(1 for value in (discover, advert, apply_path is not None) if value)
+    if selected > 1:
+        raise click.UsageError("choose only one of --discover, --advert, or --apply")
+
+    if discover or advert:
+        source = "advert" if advert else "discovery"
+        resp = _rpc(
+            ctx.obj["socket"],
+            {"cmd": "path_discover", "query": node, "source": source},
+            timeout=90,
+        )
+        data = _check(resp)
+        _render_path_candidate(data)
+        return
+
+    if apply_path is not None:
+        if not yes:
+            click.confirm(
+                f"Apply management path {apply_path!r} to {node!r} on the gateway contact?",
+                abort=True,
+            )
+        resp = _rpc(
+            ctx.obj["socket"],
+            {"cmd": "path_apply", "query": node, "path": apply_path},
+            timeout=90,
+        )
+        data = _check(resp)
+        click.echo("updated cached management path")
+        _render_path_status(data)
+        return
+
     resp = _rpc(ctx.obj["socket"], {"cmd": "path", "query": node})
     data = _check(resp)
     _render_path_status(data)
@@ -735,6 +794,19 @@ def _render_path_status(data: dict[str, Any]) -> None:
     click.echo(f"  out_path: {data.get('out_path') or '-'}")
     click.echo(f"  out_path_len: {path_len if path_len is not None else '-'}")
     click.echo(f"  out_path_hash_mode: {hash_mode if hash_mode is not None else '-'}")
+
+
+def _render_path_candidate(data: dict[str, Any]) -> None:
+    label = data.get("label") or "-"
+    name = data.get("name") or "-"
+    source = data.get("source") or "candidate"
+    click.echo(f"{data['pubkey'][:12]}  {label}  {name}")
+    click.echo(f"{source} path candidate:")
+    click.echo(f"  path: {data.get('path') or '-'}")
+    click.echo(f"  path_len: {data.get('path_len') if data.get('path_len') is not None else '-'}")
+    click.echo(f"  path_hash_mode: {data.get('path_hash_mode')}")
+    if data.get("apply_value"):
+        click.echo(f"  apply with: mch path {data['pubkey'][:12]} --apply {data['apply_value']}")
 
 
 def _render_issue_sections(

@@ -192,6 +192,17 @@ def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:
     gw.get_contacts = AsyncMock(return_value=contacts or [])
     gw.login = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text=cmd_text))
+    gw.discover_contact_path = AsyncMock(return_value={
+        "path": "e2605f6c",
+        "path_len": 2,
+        "path_hash_mode": 1,
+    })
+    gw.get_contact_advert_path = AsyncMock(return_value={
+        "path": "e260",
+        "path_len": 1,
+        "path_hash_mode": 1,
+    })
+    gw.change_contact_path = AsyncMock()
     gw.switch_radio_temporarily = AsyncMock(return_value=(915.800, 250, 10, 5))
     gw.restore_radio = AsyncMock()
     gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
@@ -1420,6 +1431,67 @@ async def test_management_path_status_marks_flood_as_repair_needed(db):
     assert status["route"] == "flood"
     assert status["cached_path"] == "flood"
     assert status["path_repair_needed"] is True
+
+
+async def test_management_path_discover_returns_candidate_without_applying(db):
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", label="TestNode")])
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="aabbccdd1122", name="TestNode", label="test")
+
+    candidate = await wq.discover_management_path(node)
+
+    assert candidate["path"] == "e260,5f6c"
+    assert candidate["path_hash_mode"] == 1
+    assert candidate["apply_value"] == "e260,5f6c:1"
+    assert contact["out_path_len"] == -1
+    gw.discover_contact_path.assert_awaited_once_with(contact)
+    gw.change_contact_path.assert_not_awaited()
+
+
+async def test_management_path_apply_updates_gateway_contact_and_logs(db):
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", label="TestNode")])
+    gw = _make_gateway(contacts=[contact])
+
+    async def _change_path(changed_contact, path, hash_mode):
+        changed_contact["out_path"] = path
+        changed_contact["out_path_len"] = 1
+        changed_contact["out_path_hash_mode"] = hash_mode
+
+    gw.change_contact_path.side_effect = _change_path
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="aabbccdd1122", name="TestNode", label="test")
+    await db.upsert_node(node)
+
+    status = await wq.apply_management_path(node, "e260:1")
+
+    assert status["route"] == "stored"
+    assert status["out_path"] == "e260"
+    assert status["out_path_hash_mode"] == 1
+    gw.change_contact_path.assert_awaited_once_with(contact, "e260", 1)
+    logs = await db.get_logs(node.pubkey)
+    assert "management path changed from flood to e260:1" in logs[0]["message"]
+
+
+async def test_management_path_apply_rejects_wrong_mode_length(db):
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
+    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", label="TestNode")])
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="aabbccdd1122", name="TestNode", label="test")
+
+    with pytest.raises(ValueError, match="multiple of 4"):
+        await wq.apply_management_path(node, "e2:1")
+
+    gw.change_contact_path.assert_not_awaited()
 
 
 async def test_run_node_odd_prefix_rejected(db):

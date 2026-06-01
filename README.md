@@ -348,8 +348,9 @@ Reachability and path behavior is deliberately conservative:
 - Scheduled syncs use the same rules as manual syncs. A node due once per `sync_interval_days`
   can therefore get one flood `ver` recovery probe per scheduled attempt when its stored path is
   failing, plus any manual syncs the operator explicitly requests.
-- Path repair is still explicit: use MeshCore path tools or future mch path controls to learn and
-  persist a better stored path, then rerun `mch sync <node>`.
+- Path repair is explicit: use `mch path <node> --discover` or `--advert` to learn a candidate,
+  then `mch path <node> --apply <path[:mode]>` to persist an operator-approved stored path on the
+  gateway contact. Rerun `mch sync <node>` after applying the path.
 
 ### Checking status in the field
 
@@ -462,6 +463,9 @@ mch validate --config <path>  Validate an explicit config file
 mch plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch plan <label|prefix>       Filter planned writes/audit drift/unknown values
 mch path <label|prefix>       Show cached gateway management route metadata for one node
+mch path <node> --discover    Learn a fresh path-discovery candidate without applying it
+mch path <node> --advert      Show the gateway's cached advert path candidate
+mch path <node> --apply P[:M] Apply an operator-approved replacement path to the gateway contact
 mch suggest                      Suggested txdelay for all nodes based on neighbour count
 mch suggest <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes

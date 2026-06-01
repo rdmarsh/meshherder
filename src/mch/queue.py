@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ from mch.models import (
 
 log = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], Awaitable[None]] | None
+_PATH_HEX_RE = re.compile(r"^[0-9a-fA-F,]+(?::[0-3])?$")
 
 
 async def _progress(callback: ProgressCallback, message: str) -> None:
@@ -92,6 +94,44 @@ def _flood_route_contact(contact: dict[str, Any]) -> dict[str, Any]:
     routed["out_path_len"] = -1
     routed["out_path_hash_mode"] = 0
     return routed
+
+
+def _clean_path_hex(path: str) -> str:
+    return path.replace(",", "").lower()
+
+
+def _format_path_hex(path: str, path_hash_mode: int) -> str:
+    cleaned = _clean_path_hex(path)
+    group = (path_hash_mode + 1) * 2
+    if not cleaned or group <= 0:
+        return cleaned
+    return ",".join(cleaned[i:i + group] for i in range(0, len(cleaned), group))
+
+
+def _parse_operator_path(raw: str, default_hash_mode: int | None = None) -> tuple[str, int]:
+    value = raw.strip()
+    if not value or not _PATH_HEX_RE.match(value):
+        raise ValueError("path must be hex hops, optionally comma-separated, with optional :mode")
+
+    path_part = value
+    hash_mode = default_hash_mode
+    if ":" in value:
+        path_part, mode_part = value.rsplit(":", 1)
+        hash_mode = int(mode_part)
+    if hash_mode is None:
+        hash_mode = 0
+    if not 0 <= hash_mode <= 3:
+        raise ValueError("path hash mode must be 0, 1, 2, or 3")
+
+    path = _clean_path_hex(path_part)
+    hop_hex_len = (hash_mode + 1) * 2
+    if len(path) == 0:
+        raise ValueError("path must not be empty")
+    if len(path) % hop_hex_len != 0:
+        raise ValueError(
+            f"path length must be a multiple of {hop_hex_len} hex characters for mode {hash_mode}"
+        )
+    return path, hash_mode
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +507,72 @@ class WorkQueue:
             "out_path_len": path_len,
             "out_path_hash_mode": contact.get("out_path_hash_mode"),
         }
+
+    async def discover_management_path(
+        self,
+        node: Node,
+        *,
+        source: str = "discovery",
+    ) -> dict[str, Any]:
+        """Learn a candidate management path without applying it to the gateway contact."""
+        async with self.operation(f"path {source} {node.pubkey[:8]}", wait=False):
+            contact = self._contact_for_pubkey(node.pubkey)
+            if contact is None:
+                raise ValueError(f"no gateway contact for {node.pubkey[:12]}")
+
+            if source == "discovery":
+                candidate = await self._gateway.discover_contact_path(contact)
+                path = candidate.get("path") or ""
+                path_len = candidate.get("path_len")
+                path_hash_mode = int(candidate.get("path_hash_mode", 0))
+            elif source == "advert":
+                candidate = await self._gateway.get_contact_advert_path(contact)
+                path = candidate.get("path") or ""
+                path_len = candidate.get("path_len")
+                path_hash_mode = int(candidate.get("path_hash_mode", 0))
+            else:
+                raise ValueError(f"unknown path source {source!r}")
+
+            formatted = _format_path_hex(path, path_hash_mode)
+            await self._db.write_log(
+                node.pubkey,
+                "INFO",
+                f"management path {source} candidate: {formatted or '-'}:{path_hash_mode}",
+            )
+            return {
+                "pubkey": node.pubkey,
+                "label": node.label,
+                "name": node.name,
+                "source": source,
+                "path": formatted,
+                "path_raw": _clean_path_hex(path),
+                "path_len": path_len,
+                "path_hash_mode": path_hash_mode,
+                "apply_value": f"{formatted}:{path_hash_mode}" if formatted else "",
+            }
+
+    async def apply_management_path(self, node: Node, raw_path: str) -> dict[str, Any]:
+        """Apply an operator-approved replacement path to the gateway contact."""
+        async with self.operation(f"path apply {node.pubkey[:8]}", wait=False):
+            contact = self._contact_for_pubkey(node.pubkey)
+            if contact is None:
+                raise ValueError(f"no gateway contact for {node.pubkey[:12]}")
+
+            default_hash_mode = contact.get("out_path_hash_mode")
+            if not isinstance(default_hash_mode, int):
+                default_hash_mode = 0
+            path, path_hash_mode = _parse_operator_path(raw_path, default_hash_mode)
+            previous = _describe_cached_management_path(contact)
+
+            await self._gateway.change_contact_path(contact, path, path_hash_mode)
+            refreshed = self.management_path_status(node)
+            applied = _format_path_hex(path, path_hash_mode)
+            await self._db.write_log(
+                node.pubkey,
+                "WARNING",
+                f"management path changed from {previous} to {applied}:{path_hash_mode}",
+            )
+            return refreshed
 
     def _contact_for_pubkey(self, pubkey: str) -> dict[str, Any] | None:
         return next(

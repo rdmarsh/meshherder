@@ -5,6 +5,12 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.11 - 2026-06-01
+
+- Added explicit `mch path` recovery controls: `--discover` asks the mesh for a fresh path
+  candidate, `--advert` shows the gateway's cached advert path, and `--apply <path[:mode]>`
+  applies an operator-approved replacement path to the gateway contact.
+
 ## 0.9.10 - 2026-06-01
 
 - Captured live region-command behavior from a Mac-attached Heltec V3 on MeshCore v1.15.0:
