@@ -739,6 +739,40 @@ def test_unknown_group_reference_raises(tmp_path):
         load(p)
 
 
+def test_group_operations_are_parsed(tmp_path):
+    p = _write_config(tmp_path, """\
+        groups:
+          - name: default
+            operations:
+              - command: clock sync
+                every_hours: 24
+        nodes:
+          - pubkey_prefix: aabbccdd
+            group: default
+    """)
+
+    cfg = load(p)
+
+    assert cfg.groups[0].operations[0].command == "clock sync"
+    assert cfg.groups[0].operations[0].every_hours == 24
+
+
+def test_global_operations_are_parsed(tmp_path):
+    p = _write_config(tmp_path, """\
+        global:
+          operations:
+            - command: clock sync
+              every_hours: 6
+        nodes:
+          - pubkey_prefix: aabbccdd
+    """)
+
+    cfg = load(p)
+
+    assert cfg.global_settings.operations[0].command == "clock sync"
+    assert cfg.global_settings.operations[0].every_hours == 6
+
+
 def test_example_config_omits_legacy_region_allowf():
     """The shipped example should match v1.15+ region command requirements."""
     example = Path(__file__).resolve().parents[1] / "examples" / "config.example.yaml"
