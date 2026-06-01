@@ -77,9 +77,7 @@ def _ago(iso: str | None) -> str:
     if not iso:
         return "never"
     try:
-        dt = datetime.fromisoformat(iso)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
+        dt = _parse_display_datetime(iso)
         secs = int((datetime.now(UTC) - dt).total_seconds())
         if secs < 0:
             return "just now"
@@ -94,11 +92,28 @@ def _ago(iso: str | None) -> str:
         return iso[:16].replace("T", " ")
 
 
+def _parse_display_datetime(iso: str) -> datetime:
+    dt = datetime.fromisoformat(iso)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
+
+
+def _local_ts(iso: str | None) -> str:
+    """Format an ISO timestamp in the operator's local timezone."""
+    if not iso:
+        return ""
+    try:
+        return _parse_display_datetime(iso).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return iso[:19].replace("T", " ")
+
+
 def _ago_with_ts(iso: str | None) -> str:
     """Format as 'YYYY-MM-DD HH:MM:SS (Xm ago)' for prose-style detail views."""
     if not iso:
         return "never"
-    ts = iso[:19].replace("T", " ")
+    ts = _local_ts(iso)
     return f"{ts} ({_ago(iso).lstrip()})"
 
 
@@ -391,12 +406,14 @@ def status(ctx: click.Context, query: str | None) -> None:
 
         row = "  {:<12}  {}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {}"
         click.echo(row.format(
-            "PUBKEY", f"{'STATE':<{state_w}}", _wpad("LABEL", label_w), "GROUP", _wpad("MESH NAME", name_w),
+            "PUBKEY", f"{'STATE':<{state_w}}", _wpad("LABEL", label_w),
+            "GROUP", _wpad("MESH NAME", name_w),
             "NBRS", "VER", "LAST SEEN",
             gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
         click.echo(row.format(
-            "------", f"{'-----':<{state_w}}", _wpad("-----", label_w), "-----", _wpad("---------", name_w),
+            "------", f"{'-----':<{state_w}}", _wpad("-----", label_w),
+            "-----", _wpad("---------", name_w),
             "----", "---", "---------",
             gw=group_w, nw=nbrs_w, vw=ver_w,
         ))
@@ -473,7 +490,7 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
         return
 
     for entry in reversed(data):
-        ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
+        ts = _local_ts(entry.get("timestamp"))
         age = _ago(entry.get("timestamp")).lstrip()
         if entry.get("node_pubkey"):
             identity = entry.get("label") or entry["node_pubkey"][:12]
@@ -560,7 +577,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     if logs:
         click.echo("recent activity:")
         for entry in reversed(logs[:10]):
-            ts = (entry.get("timestamp") or "")[:19].replace("T", " ")
+            ts = _local_ts(entry.get("timestamp"))
             level = entry["level"]
             age = _ago(entry.get("timestamp")).lstrip()
             click.echo(f"  [{level:<5}] {ts} ({age})  {entry['message']}")

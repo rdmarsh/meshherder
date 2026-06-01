@@ -13,6 +13,11 @@ and backlog history. Dates use the project repository's commit dates.
   contact had fallen back to flood. Manually restoring the stored path through qh-woldhuis
   (`out_path=2fd9`, two-byte hash mode) allowed management syncs to complete.
 
+## 0.9.3 - 2026-06-01
+
+- Render absolute timestamps in `mch logs` and node recent activity using the operator's local
+  timezone while preserving UTC-based relative ages.
+
 ## 0.9.2 - 2026-06-01
 
 - Renamed the node-detail settings result column to `STATUS` and replaced symbolic drift markers
