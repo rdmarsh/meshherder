@@ -276,6 +276,8 @@ nodes:
       # commands that should not be repeated in normal operation.
       # MeshCore v1.15.0 and newer do not need matching `region allowf`
       # commands; `region put` plus `region save` is enough.
+      # The default scope can be managed separately as a normal setting named
+      # `region.default` once verified on your firmware.
       - command: region put au
         every_hours: 87600   # 10 years
       - command: region put au-nsw

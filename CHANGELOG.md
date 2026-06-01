@@ -5,6 +5,15 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.9 - 2026-06-01
+
+- Fixed `mch admin` privilege handling: when the wrapper is run via `sudo`, systemd control can
+  remain privileged but the launched `meshcore-cli` process drops back to the invoking user and
+  groups instead of running the interactive serial session as root.
+- Added command metadata for MeshCore region operations (`region put`, `region save`) and
+  first-class setting keys for `region.home` and `region.default`; live verification is still
+  required before recommending region enforcement broadly.
+
 ## 0.9.8 - 2026-06-01
 
 - Added `mch path <node>` to show the daemon's cached gateway management route for one node

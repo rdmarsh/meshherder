@@ -243,6 +243,44 @@ _SPECS: tuple[CommandSpec, ...] = (
             "`*^ F`; `region list` and `region help` returned `Err - ??`."
         ),
     ),
+    CommandSpec(
+        "region put",
+        "operation",
+        min_firmware="1.10.0",
+        notes=(
+            "Create a region, optionally under a parent. Official MeshCore CLI docs describe "
+            "`region put <name> [parent_name]`. Current MeshCore guidance says newer firmware "
+            "defaults new regions to allow-flood, but live fleet behavior should still be checked."
+        ),
+    ),
+    CommandSpec(
+        "region save",
+        "operation",
+        min_firmware="1.10.0",
+        notes="Persist region changes made since reboot.",
+    ),
+    CommandSpec(
+        "region.home",
+        "setting",
+        read="region home",
+        write="region home {value}",
+        writable=True,
+        min_firmware="1.10.0",
+        notes="Home region command from the MeshCore region-management CLI.",
+    ),
+    CommandSpec(
+        "region.default",
+        "setting",
+        read="region default",
+        write="region default {value}",
+        writable=True,
+        min_firmware="1.15.0",
+        notes=(
+            "Default scope region for repeater/room-server-originated packets. MeshCore's "
+            "2026 default-scope note says this auto-creates the region if missing and performs "
+            "an implicit region save."
+        ),
+    ),
     CommandSpec("erase", "dangerous", dangerous=True, serial_only=True),
     CommandSpec(
         "set prv.key",

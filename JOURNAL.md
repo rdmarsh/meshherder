@@ -4,6 +4,21 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Admin Privilege Boundary And Region Metadata
+
+- `mch admin` originally ran `meshcore-cli` with the same privileges as the wrapper process. That
+  meant the practical workaround for polkit prompts (`sudo mch admin ...`) also made the
+  interactive serial session root-owned. Fixed the boundary so systemd control remains privileged
+  when needed, but `meshcore-cli` drops back to `SUDO_UID`/`SUDO_GID` plus the invoking user's
+  supplementary groups.
+- Region investigation result: current MeshCore docs describe `region put <name> [parent_name]`,
+  `region save`, `region home`, and v1.15+ `region default`. mch already supported raw region
+  setup through long-interval operations; added command metadata for `region put`/`region save`
+  operations and first-class setting keys `region.home` and `region.default`.
+- Do not claim region enforcement is field-proven yet. The next live step is to read/write
+  `region home` and `region default` on representative firmware, capture exact reply text, and
+  confirm whether the v1.15+ auto-allow/auto-save behavior is consistent across deployed boards.
+
 ## 2026-06-01 - Luna 0.9.8 Deployment
 
 - Released and deployed `0.9.8` to luna at commit `ec3d86d`. The production venv installed

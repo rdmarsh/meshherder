@@ -7,8 +7,10 @@ Talks to the daemon over its Unix socket.
 from __future__ import annotations
 
 import asyncio
+import grp
 import json
 import os
+import pwd
 import shlex
 import subprocess
 import unicodedata
@@ -221,6 +223,46 @@ def _meshcore_cli_command(config_path: Path, executable: str, extra_args: tuple[
     ]
 
 
+def _sudo_invoking_user() -> dict[str, Any]:
+    """Return subprocess kwargs that drop sudo back to the invoking user."""
+    if os.name != "posix" or os.geteuid() != 0:
+        return {}
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_gid = os.environ.get("SUDO_GID")
+    sudo_user = os.environ.get("SUDO_USER")
+    if not sudo_uid or not sudo_gid or not sudo_user or sudo_user == "root":
+        return {}
+
+    uid = int(sudo_uid)
+    gid = int(sudo_gid)
+    try:
+        pwent = pwd.getpwuid(uid)
+    except KeyError:
+        pwent = None
+
+    groups = [gid]
+    try:
+        groups.extend(
+            group.gr_gid
+            for group in grp.getgrall()
+            if sudo_user in group.gr_mem and group.gr_gid not in groups
+        )
+    except OSError:
+        pass
+
+    env = dict(os.environ)
+    env.update({"USER": sudo_user, "LOGNAME": sudo_user})
+    if pwent is not None:
+        env["HOME"] = pwent.pw_dir
+
+    return {
+        "user": uid,
+        "group": gid,
+        "extra_groups": groups,
+        "env": env,
+    }
+
+
 def _run_admin_session(
     *,
     config_path: Path,
@@ -238,7 +280,7 @@ def _run_admin_session(
     click.echo("running: " + " ".join(shlex.quote(part) for part in command))
     try:
         try:
-            result = subprocess.run(command)
+            result = subprocess.run(command, **_sudo_invoking_user())
         except FileNotFoundError:
             click.echo(f"error: {executable!r} not found", err=True)
             raise SystemExit(127) from None

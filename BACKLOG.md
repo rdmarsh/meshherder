@@ -31,6 +31,10 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Configuration And Radio Semantics
 
+- Live-test region management on representative firmware before recommending it for ordinary
+  enforcement: `region put`, `region save`, `region home`, and `region default`; confirm exact
+  read-back text for `region.home`/`region.default` and whether v1.15+ auto-allow/auto-save
+  behavior holds across deployed boards.
 - Keep desired node radio distinct from the radio used to reach it. Replacement commissioning
   currently consumes `via_radio` as the value to push with `set radio`; this becomes ambiguous
   if the node is being moved to a new radio.
@@ -125,7 +129,7 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   `reboot` preserved it on the Heltec V3.
 - Confirm boolean setting vocabulary on representative firmware; configuration currently
   normalizes YAML boolean-style `powersaving` values to `on`/`off`.
-- Confirm version-specific `region allowf` behavior before adding any region automation.
+- Confirm version-specific `region allowf` behavior before recommending legacy region workflows.
 
 ## Won't Do / Not Yet
 
