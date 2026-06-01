@@ -4,6 +4,15 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.20 Deployment
+
+- Released and deployed `0.9.20` to luna at commit `578adc7`, changing clock notes in
+  `mch status NODE` to use `within ±1m` for tolerated offsets and `clock fast by ...` /
+  `clock slow by ...` for actionable drift.
+- Installed `meshherder-0.9.20`, restarted `mchd`, and verified `mch --version` reported
+  `0.9.20`, both luna checkouts were at `578adc7`, and `mchd` was active.
+- Read-only smoke check on `mch status e2601d591517` showed the `clock` fact as `within ±1m`.
+
 ## 2026-06-02 - Luna 0.9.19 Deployment
 
 - Released and deployed `0.9.19` to luna at commit `15cc961`, changing near-zero clock drift
