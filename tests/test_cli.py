@@ -280,7 +280,7 @@ def test_version_options_report_source_version(flag: str):
 
 
 def test_current_release_version_is_0_9_6():
-    assert __version__ == "0.9.6"
+    assert __version__ == "0.9.7"
 
 
 def _run(args, rpc_response):
@@ -545,13 +545,16 @@ def test_validate_warns_for_unknown_fact_and_suggests_typo(tmp_path):
 
 # ------ status ------
 
-def _status_resp(nodes=None, drifted=None, bad_state=None, ghosts=None, open_nodes=None):
+def _status_resp(
+    nodes=None, drifted=None, bad_state=None, ghosts=None, unseen_nodes=None, open_nodes=None
+):
     """Build a status RPC response with empty defaults for all issue arrays."""
     return {"ok": True, "data": {
         "nodes": nodes or [],
         "drifted": drifted or [],
         "bad_state": bad_state or [],
         "ghosts": ghosts or [],
+        "unseen_nodes": unseen_nodes or [],
         "open_nodes": open_nodes or [],
     }}
 
@@ -575,9 +578,15 @@ def _detail(pubkey="aabbccdd" * 8, name="Tower", label="site-a", group=None,
 
 def _fleet_resp(nodes=None, plan=None):
     return {"ok": True, "data": {
-        "schema_version": 1,
+        "schema_version": 2,
         "nodes": nodes or [],
-        "issues": {"drifted": [], "bad_state": [], "ghosts": [], "open_nodes": []},
+        "issues": {
+            "drifted": [],
+            "bad_state": [],
+            "ghosts": [],
+            "unseen_nodes": [],
+            "open_nodes": [],
+        },
         "plan": plan or {"writes": [], "audits": [], "unknown": []},
     }}
 
@@ -716,6 +725,7 @@ def test_status_no_issues_no_sections():
     assert "drifted" not in result.output
     assert "problem states" not in result.output
     assert "ghost" not in result.output
+    assert "unseen" not in result.output
 
 
 def test_status_shows_drifted_section():
@@ -745,9 +755,24 @@ def test_status_shows_bad_state_section():
 
 def test_status_shows_ghosts_section():
     result = _run(["status"], _status_resp(ghosts=[
+        {
+            "pubkey": "deadbeef" * 8,
+            "label": "old-site",
+            "name": "Old Site",
+            "last_seen": None,
+        }
+    ]))
+    assert "ghost nodes" in result.output
+    assert "deadbeef" in result.output
+    assert "old-site" in result.output
+    assert "Old Site" in result.output
+
+
+def test_status_shows_unseen_config_nodes_section():
+    result = _run(["status"], _status_resp(unseen_nodes=[
         {"pubkey_prefix": "deadbeef", "label": "wrong"}
     ]))
-    assert "ghost" in result.output
+    assert "unseen config nodes" in result.output
     assert "deadbeef" in result.output
     assert "wrong" in result.output
 
