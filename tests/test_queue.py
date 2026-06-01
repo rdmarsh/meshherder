@@ -1344,7 +1344,13 @@ async def test_run_node_progress_describes_radio_switch_without_mesh_hop_wording
     assert "management radio: 916.575/62.5/SF7/CR8 (via_radio temporary switch)" in messages
     assert "cached management path: flood" in messages
     assert "switching gateway radio to 916.575/62.5/SF7/CR8" in messages
+    assert "restored gateway radio to 915.800/250/SF10/CR5" in messages
     assert not any("hop" in message for message in messages)
+
+    logs = await db.get_logs("aabbccdd1122")
+    log_messages = [entry["message"] for entry in logs]
+    assert "switching gateway radio to 916.575/62.5/SF7/CR8" in log_messages
+    assert "restored gateway radio to 915.800/250/SF10/CR5" in log_messages
 
 
 async def test_run_node_progress_describes_gateway_radio_and_direct_cached_path(db):

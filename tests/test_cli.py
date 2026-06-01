@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_15():
-    assert __version__ == "0.9.15"
+def test_current_release_version_is_0_9_16():
+    assert __version__ == "0.9.16"
 
 
 def _run(args, rpc_response):
@@ -1376,7 +1376,24 @@ def test_status_single_match_activity_includes_relative_age():
 
     assert "recent activity:" in result.output
     assert "ago)" in result.output
-    assert "( " not in result.output
+
+
+def test_status_single_match_activity_uses_logs_shape_without_node_columns():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(logs=[
+        {"node_pubkey": "aabbccdd" * 8, "label": "site-a", "level": "WARNING",
+         "timestamp": "2026-05-19T12:00:00", "message": "second event"},
+        {"node_pubkey": "aabbccdd" * 8, "label": "site-a", "level": "INFO",
+         "timestamp": "2026-05-19T10:00:00", "message": "first event"},
+    ])
+
+    with patch("mch.cli._ago", side_effect=["6h ago", "26m ago", "26m ago", "6h ago"]):
+        result = _run_multi(["status", "aabb"], status, detail)
+
+    assert result.exit_code == 0
+    assert "(26m ago) [INFO   ] first event" in result.output
+    assert "( 6h ago) [WARNING] second event" in result.output
+    assert "[aabbccddaabb]" not in result.output
 
 
 # ------ contacts ------
