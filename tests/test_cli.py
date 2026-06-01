@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_14():
-    assert __version__ == "0.9.14"
+def test_current_release_version_is_0_9_15():
+    assert __version__ == "0.9.15"
 
 
 def _run(args, rpc_response):
@@ -308,6 +308,27 @@ def test_rpc_timeout_shows_clean_error():
     assert result.exit_code != 0
     combined = result.output + (result.stderr or "")
     assert "timed out" in combined.lower()
+    assert "Traceback" not in combined
+
+
+def test_rpc_eof_shows_clean_error():
+    """A daemon restart during a foreground command reports EOF cleanly."""
+    runner = CliRunner()
+    mock_writer = MagicMock()
+    mock_writer.drain = AsyncMock()
+    mock_writer.close = MagicMock()
+    mock_reader = MagicMock()
+    mock_reader.readline = AsyncMock(return_value=b"")
+
+    async def fake_open_conn(*a, **kw):
+        return mock_reader, mock_writer
+
+    with patch("asyncio.open_unix_connection", fake_open_conn):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "status"])
+
+    assert result.exit_code != 0
+    combined = result.output + (result.stderr or "")
+    assert "daemon connection closed" in combined.lower()
     assert "Traceback" not in combined
 
 
