@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_5():
-    assert __version__ == "0.9.5"
+def test_current_release_version_is_0_9_6():
+    assert __version__ == "0.9.6"
 
 
 def _run(args, rpc_response):
@@ -1167,6 +1167,20 @@ def test_logs_align_level_and_node_columns():
     assert result.exit_code == 0
     assert "[INFO   ] [aabbccddaabb] [a         ] first event" in result.output
     assert "[WARNING] [112233441122] [long-label] second event" in result.output
+
+
+def test_logs_align_relative_age_column():
+    with patch("mch.cli._ago", side_effect=["6h ago", "26m ago", "26m ago", "6h ago"]):
+        result = _run(["logs"], {"ok": True, "data": [
+            {"node_pubkey": "11223344" * 8, "label": "long-label", "level": "WARNING",
+             "timestamp": "2026-05-19T12:00:00", "message": "second event"},
+            {"node_pubkey": "aabbccdd" * 8, "label": "a", "level": "INFO",
+             "timestamp": "2026-05-19T10:00:00", "message": "first event"},
+        ]})
+
+    assert result.exit_code == 0
+    assert "(26m ago) [INFO" in result.output
+    assert "( 6h ago) [WARNING" in result.output
 
 
 def test_logs_do_not_pad_global_entries_with_blank_node_columns():
