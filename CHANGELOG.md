@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.19 - 2026-06-02
+
+- Changed near-zero clock drift display in `mch status NODE` from `drift <1m` to
+  `within +-1m`, so clocks inside the useful tolerance are not presented as drift.
+
 ## 0.9.18 - 2026-06-02
 
 - Added `operations:` support on `global:` and `groups:` with Node > Group > Global precedence.
