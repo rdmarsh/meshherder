@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS operations (
 CREATE TABLE IF NOT EXISTS logs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     node_pubkey     TEXT,
+    display_pubkey  TEXT,
+    display_label   TEXT,
     timestamp       TEXT NOT NULL,
     level           TEXT NOT NULL,
     message         TEXT NOT NULL
@@ -104,6 +106,14 @@ class Database:
             await self._db.execute(
                 "ALTER TABLE settings ADD COLUMN update_attempts INTEGER NOT NULL DEFAULT 0"
             )
+        except aiosqlite.OperationalError:
+            pass  # column already exists
+        try:
+            await self._db.execute("ALTER TABLE logs ADD COLUMN display_pubkey TEXT")
+        except aiosqlite.OperationalError:
+            pass  # column already exists
+        try:
+            await self._db.execute("ALTER TABLE logs ADD COLUMN display_label TEXT")
         except aiosqlite.OperationalError:
             pass  # column already exists
         await self._db.commit()
@@ -352,11 +362,22 @@ class Database:
     # logs
     # ------------------------------------------------------------------
 
-    async def write_log(self, node_pubkey: str | None, level: str, message: str) -> None:
+    async def write_log(
+        self,
+        node_pubkey: str | None,
+        level: str,
+        message: str,
+        *,
+        display_pubkey: str | None = None,
+        display_label: str | None = None,
+    ) -> None:
         db = self._db_required()
         await db.execute(
-            "INSERT INTO logs (node_pubkey, timestamp, level, message) VALUES (?, ?, ?, ?)",
-            (node_pubkey, _dt(datetime.now(UTC)), level, message),
+            """
+            INSERT INTO logs (node_pubkey, display_pubkey, display_label, timestamp, level, message)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (node_pubkey, display_pubkey, display_label, _dt(datetime.now(UTC)), level, message),
         )
         await db.commit()
 

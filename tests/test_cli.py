@@ -20,7 +20,8 @@ from mch.cli import (
     _filter_drift,
     _filter_nodes,
     _local_ts,
-    _log_node_identity,
+    _log_node_label,
+    _log_node_pubkey,
     cli,
 )
 from mch.meshkey import derive_public_key
@@ -84,9 +85,20 @@ def test_local_ts_displays_utc_timestamp_in_local_timezone(monkeypatch):
             time.tzset()
 
 
-def test_log_node_identity_uses_pubkey_then_label():
+def test_log_node_identity_uses_separate_pubkey_and_label():
     entry = {"node_pubkey": "aabbccdd11223344", "label": "site-a"}
-    assert _log_node_identity(entry) == "aabbccdd1122/site-a"
+    assert _log_node_pubkey(entry) == "aabbccdd1122"
+    assert _log_node_label(entry) == "site-a"
+
+
+def test_log_node_identity_can_use_display_identity_without_db_node():
+    entry = {
+        "node_pubkey": None,
+        "display_pubkey": "deadbeef",
+        "display_label": "wrong",
+    }
+    assert _log_node_pubkey(entry) == "deadbeef"
+    assert _log_node_label(entry) == "wrong"
 
 
 def test_filter_contacts_no_query_returns_all():
@@ -267,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_4():
-    assert __version__ == "0.9.4"
+def test_current_release_version_is_0_9_5():
+    assert __version__ == "0.9.5"
 
 
 def _run(args, rpc_response):
@@ -1139,7 +1151,7 @@ def test_logs_shows_entries():
     assert result.exit_code == 0
     assert "synced ok" in result.output
     assert "INFO" in result.output
-    assert "[aabbccddaabb/site-a]" in result.output
+    assert "[aabbccddaabb] [site-a]" in result.output
     assert "ago)" in result.output
     assert "( " not in result.output
 
@@ -1153,8 +1165,35 @@ def test_logs_align_level_and_node_columns():
     ]})
 
     assert result.exit_code == 0
-    assert "[INFO   ] [aabbccddaabb/a         ] first event" in result.output
-    assert "[WARNING] [112233441122/long-label] second event" in result.output
+    assert "[INFO   ] [aabbccddaabb] [a         ] first event" in result.output
+    assert "[WARNING] [112233441122] [long-label] second event" in result.output
+
+
+def test_logs_do_not_pad_global_entries_with_blank_node_columns():
+    result = _run(["logs"], {"ok": True, "data": [
+        {"node_pubkey": "aabbccdd" * 8, "label": "a", "level": "WARNING",
+         "timestamp": "2026-05-19T12:00:00", "message": "node event"},
+        {"node_pubkey": None, "level": "WARNING",
+         "timestamp": "2026-05-19T10:00:00", "message": "global event"},
+    ]})
+
+    assert result.exit_code == 0
+    assert "[WARNING] global event" in result.output
+    assert "[WARNING]                            global event" not in result.output
+
+
+def test_logs_show_config_only_display_identity():
+    result = _run(["logs"], {"ok": True, "data": [
+        {"node_pubkey": None, "display_pubkey": "deadbeef", "display_label": "wrong",
+         "level": "WARNING", "timestamp": "2026-05-19T10:00:00",
+         "message": "config node not visible to gateway - cannot manage"},
+    ]})
+
+    assert result.exit_code == 0
+    assert (
+        "[WARNING] [deadbeef] [wrong] config node not visible to gateway - cannot manage"
+        in result.output
+    )
 
 
 def test_logs_newest_at_bottom():

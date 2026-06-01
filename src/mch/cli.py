@@ -117,12 +117,15 @@ def _ago_with_ts(iso: str | None) -> str:
     return f"{ts} ({_ago(iso).lstrip()})"
 
 
-def _log_node_identity(entry: dict[str, Any]) -> str:
-    pubkey = entry.get("node_pubkey")
-    if not pubkey:
+def _log_node_pubkey(entry: dict[str, Any]) -> str:
+    pubkey = entry.get("display_pubkey") or entry.get("node_pubkey")
+    return pubkey[:12] if pubkey else ""
+
+
+def _log_node_label(entry: dict[str, Any]) -> str:
+    if not _log_node_pubkey(entry):
         return ""
-    label = entry.get("label") or "-"
-    return f"{pubkey[:12]}/{label}"
+    return entry.get("display_label") or entry.get("label") or "-"
 
 
 async def _request(
@@ -498,17 +501,19 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
         return
 
     level_w = max(len(entry.get("level") or "") for entry in data)
-    node_w = max((_wlen(_log_node_identity(entry)) for entry in data), default=0)
+    pubkey_w = max((_wlen(_log_node_pubkey(entry)) for entry in data), default=0)
+    label_w = max((_wlen(_log_node_label(entry)) for entry in data), default=0)
 
     for entry in reversed(data):
         ts = _local_ts(entry.get("timestamp"))
         age = _ago(entry.get("timestamp")).lstrip()
         level = entry.get("level") or ""
-        identity = _log_node_identity(entry)
-        if identity:
-            node_label = f" [{_wpad(identity, node_w)}]"
+        pubkey = _log_node_pubkey(entry)
+        label = _log_node_label(entry)
+        if pubkey:
+            node_label = f" [{_wpad(pubkey, pubkey_w)}] [{_wpad(label, label_w)}]"
         else:
-            node_label = f" {' ' * (node_w + 2)}" if node_w else ""
+            node_label = ""
         click.echo(f"{ts} ({age}) [{level:<{level_w}}]{node_label} {entry['message']}")
 
 

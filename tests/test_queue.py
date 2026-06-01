@@ -2078,9 +2078,10 @@ async def test_seed_from_config_not_in_contacts_logs_warning(db, caplog):
     logs = await db.get_logs()
     assert len(logs) == 1
     assert logs[0]["node_pubkey"] is None
+    assert logs[0]["display_pubkey"] == "deadbeef"
+    assert logs[0]["display_label"] == "Ghost Node"
     assert logs[0]["level"] == "WARNING"
-    assert "Ghost Node" in logs[0]["message"]
-    assert "deadbeef" in logs[0]["message"]
+    assert logs[0]["message"] == "config node not visible to gateway - cannot manage"
 
 
 async def test_seed_from_config_non_rep_contact_ignored(db):

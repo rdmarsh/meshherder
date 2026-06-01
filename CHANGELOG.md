@@ -13,6 +13,11 @@ and backlog history. Dates use the project repository's commit dates.
   contact had fallen back to flood. Manually restoring the stored path through qh-woldhuis
   (`out_path=2fd9`, two-byte hash mode) allowed management syncs to complete.
 
+## 0.9.5 - 2026-06-01
+
+- Give config-only "not visible to gateway" log entries structured display identity, so they
+  render in `mch logs` as `[prefix] [label]` without embedding the prefix and label in prose.
+
 ## 0.9.4 - 2026-06-01
 
 - Render node identities in log output as `[pubkey/label]` and align the level and node columns
