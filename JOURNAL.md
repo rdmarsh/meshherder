@@ -4,6 +4,12 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Luna 0.9.10 Deployment
+
+- Released `0.9.10` so the deployed package version reflects the live region-command behavior
+  captured after the initial `0.9.9` release. The functional delta is region readback comparison
+  and documentation: no extra serial live test was run on luna.
+
 ## 2026-06-01 - Admin Privilege Boundary And Region Metadata
 
 - `mch admin` originally ran `meshcore-cli` with the same privileges as the wrapper process. That

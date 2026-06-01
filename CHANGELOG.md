@@ -5,16 +5,25 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.10 - 2026-06-01
+
+- Captured live region-command behavior from a Mac-attached Heltec V3 on MeshCore v1.15.0:
+  `region home` replies with `home is *`, `region default` replies with
+  `default scope is <null>`, and `region put <name>` creates flood-allowed regions by default.
+- Added field-aware comparison for `region.home` and `region.default` so their prose readbacks
+  compare against desired bare values without reporting false drift.
+- Clarified `mch exec` versus `mch admin` in the CLI reference: `exec` is a single remote command
+  through `mchd` over the mesh, while `admin` is a local serial `meshcore-cli` session after
+  stopping `mchd`.
+
 ## 0.9.9 - 2026-06-01
 
 - Fixed `mch admin` privilege handling: when the wrapper is run via `sudo`, systemd control can
   remain privileged but the launched `meshcore-cli` process drops back to the invoking user and
   groups instead of running the interactive serial session as root.
 - Added command metadata for MeshCore region operations (`region put`, `region save`) and
-  first-class setting keys for `region.home` and `region.default`, including field-aware
-  comparison for their prose readbacks. Mac-attached Heltec V3 / MeshCore v1.15.0 testing
-  confirmed `region put` creates flood-allowed regions by default and that unsaved test regions
-  can be removed.
+  first-class setting keys for `region.home` and `region.default`; live verification is still
+  required before recommending region enforcement broadly.
 
 ## 0.9.8 - 2026-06-01
 
