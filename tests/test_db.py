@@ -142,6 +142,10 @@ async def test_upsert_and_get_fact(db):
 
     facts = await db.get_facts("aabbcc")
     assert facts["ver"] == "v1.14.1"
+    records = await db.get_fact_records("aabbcc")
+    assert records[0].key == "ver"
+    assert records[0].value == "v1.14.1"
+    assert records[0].collected_at == fact.collected_at
 
 
 async def test_fact_upsert_updates_value(db):
@@ -151,6 +155,17 @@ async def test_fact_upsert_updates_value(db):
 
     facts = await db.get_facts("aabbcc")
     assert facts["ver"] == "v1.14.1"
+
+
+async def test_delete_fact_removes_single_fact(db):
+    await db.upsert_node(Node(pubkey="aabbcc", name="N"))
+    await db.upsert_fact(NodeFact(node_pubkey="aabbcc", key="ver", value="v1.14.1"))
+    await db.upsert_fact(NodeFact(node_pubkey="aabbcc", key="powersavings", value="on"))
+
+    await db.delete_fact("aabbcc", "powersavings")
+
+    facts = await db.get_facts("aabbcc")
+    assert facts == {"ver": "v1.14.1"}
 
 
 # ------------------------------------------------------------------

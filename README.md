@@ -481,6 +481,8 @@ mch logs <prefix>             Activity for one node
 mch contacts                  Repeater nodes visible to the gateway not yet in config
 mch prune                     List DB nodes no longer present in config.yaml
 mch prune --yes               Delete listed local DB state for retired nodes
+mch clean facts --all         List cached facts no longer present in facts:
+mch clean facts NODE --fact K Delete one stale fact key with --yes
 mch remove <label|prefix>     Delete one node's local DB state
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node; stream progress while waiting for the result
@@ -507,6 +509,11 @@ and `mch prune --yes` to delete their local facts, settings, operations, and log
 are allowed; operators may keep passwords or private keys there for replacement hardware.
 Use `mch remove <label|prefix>` to delete one retired node's local DB state. It refuses nodes still
 present in `config.yaml` unless `--force` is supplied.
+
+`mch clean facts` is also dry-run first. Use it after changing `facts:` to review cached fact rows
+that are no longer collected, then add `--yes` to delete them. It can be scoped to one node,
+`--group <name>`, or `--all`, and `--fact <key>` narrows the cleanup to a single key such as a
+misspelled `powersavings`.
 
 `mch sync <prefix>` runs that node immediately and waits, streaming progress because slow command
 replies are normal on a mesh network. It collects facts, checks and enforces settings, runs any

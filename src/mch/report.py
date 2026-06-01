@@ -31,7 +31,9 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
     for node in nodes:
         node_cfg = _node_config(node, config)
         group_cfg = groups.get(node_cfg.group) if node_cfg and node_cfg.group else None
-        facts = await db.get_facts(node.pubkey)
+        fact_records = await db.get_fact_records(node.pubkey)
+        facts = {fact.key: fact.value for fact in fact_records}
+        facts_collected_at = {fact.key: _iso(fact.collected_at) for fact in fact_records}
         known_settings = {setting.key: setting for setting in await db.get_settings(node.pubkey)}
         settings = _settings_report(
             node_cfg,
@@ -62,6 +64,7 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             },
             "fact_keys": list(config.facts),
             "facts": facts,
+            "facts_collected_at": facts_collected_at,
             "settings": settings,
         })
 
@@ -134,6 +137,8 @@ def legacy_node(node: dict[str, Any], config: Config) -> dict[str, Any]:
     """Adapt one canonical node report to the established detail RPC payload."""
     configured_facts: dict[str, str | None] = {key: "???" for key in config.facts}
     configured_facts.update(node["facts"])
+    configured_fact_times: dict[str, str | None] = {key: None for key in configured_facts}
+    configured_fact_times.update(node.get("facts_collected_at", {}))
     return {
         "pubkey": node["pubkey"],
         "name": node["name"],
@@ -146,6 +151,7 @@ def legacy_node(node: dict[str, Any], config: Config) -> dict[str, Any]:
         "auth_cached": node["auth"]["cached"],
         "passwd_known": node["auth"]["password_known"],
         "facts": configured_facts,
+        "facts_collected_at": configured_fact_times,
         "settings": [
             {
                 "key": setting["key"],

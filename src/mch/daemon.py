@@ -160,6 +160,44 @@ def _is_configured_node(pubkey: str, config: Config) -> bool:
     return any(pubkey.startswith(nc.pubkey_prefix) for nc in config.nodes)
 
 
+async def _stale_fact_candidates(
+    db: Database,
+    config: Config,
+    *,
+    query: str | None = None,
+    group: str | None = None,
+    fact_key: str | None = None,
+) -> list[dict[str, Any]]:
+    configured_facts = set(config.facts)
+    if query:
+        node = await _resolve_node(query, db)
+        if not node:
+            raise ValueError(f"node {query!r} not found")
+        nodes = [node]
+    else:
+        nodes = await db.get_all_nodes()
+        if group is not None:
+            nodes = [node for node in nodes if node.group == group]
+
+    candidates: list[dict[str, Any]] = []
+    for node in nodes:
+        for fact in await db.get_fact_records(node.pubkey):
+            if fact_key is not None and fact.key != fact_key:
+                continue
+            if fact.key in configured_facts:
+                continue
+            candidates.append({
+                "pubkey": node.pubkey,
+                "label": node.label,
+                "name": node.name,
+                "group": node.group,
+                "key": fact.key,
+                "value": fact.value,
+                "collected_at": fact.collected_at.isoformat(),
+            })
+    return candidates
+
+
 async def _dispatch(
     req: dict[str, Any],
     wq: WorkQueue,
@@ -342,6 +380,32 @@ async def _dispatch(
         if not dry_run:
             for node in candidate_nodes:
                 await db.delete_node(node.pubkey)
+        return {
+            "ok": True,
+            "data": {
+                "candidates": candidates,
+                "deleted": 0 if dry_run else len(candidates),
+            },
+        }
+
+    if cmd == "clean_facts":
+        dry_run = bool(req.get("dry_run", True))
+        query = req.get("query")
+        group = req.get("group")
+        fact_key = req.get("fact")
+        try:
+            candidates = await _stale_fact_candidates(
+                db,
+                config,
+                query=str(query) if query else None,
+                group=str(group) if group else None,
+                fact_key=str(fact_key) if fact_key else None,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not dry_run:
+            for candidate in candidates:
+                await db.delete_fact(candidate["pubkey"], candidate["key"])
         return {
             "ok": True,
             "data": {

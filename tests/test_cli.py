@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_16():
-    assert __version__ == "0.9.16"
+def test_current_release_version_is_0_9_17():
+    assert __version__ == "0.9.17"
 
 
 def _run(args, rpc_response):
@@ -686,12 +686,13 @@ def _summary(pubkey="aabbccdd" * 8, name="Tower", label="site-a",
 
 
 def _detail(pubkey="aabbccdd" * 8, name="Tower", label="site-a", group=None,
-            facts=None, settings=None, logs=None):
+            facts=None, fact_times=None, settings=None, logs=None):
     return {"ok": True, "data": {
         "pubkey": pubkey, "name": name, "label": label, "group": group,
         "state": "configured", "last_seen": None, "last_connected": None,
         "auth_required": False, "auth_cached": True, "passwd_known": True,
-        "facts": facts or {}, "settings": settings or [], "logs": logs or [],
+        "facts": facts or {}, "facts_collected_at": fact_times or {},
+        "settings": settings or [], "logs": logs or [],
     }}
 
 
@@ -770,7 +771,7 @@ def test_status_detail_renders_canonical_node_api_unknown_fact():
     result = _run_multi(["status", "site-a"], fleet, detail)
 
     assert result.exit_code == 0
-    assert "ver:" in result.output
+    assert "ver" in result.output
     assert "???" in result.output
 
 
@@ -948,6 +949,26 @@ def test_status_single_match_shows_detail():
     assert "passwd:" in result.output
 
 
+def test_status_single_match_facts_show_observed_time_and_clock_drift():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(
+        facts={"clock": "12:08 - 25/5/2026 UTC", "ver": "v1.14.1"},
+        fact_times={
+            "clock": "2026-06-01T23:11:00+00:00",
+            "ver": "2026-06-01T23:12:00+00:00",
+        },
+    )
+
+    result = _run_multi(["status", "aabb"], status, detail)
+
+    assert result.exit_code == 0
+    assert "KEY" in result.output
+    assert "OBSERVED" in result.output
+    assert "clock" in result.output
+    assert "2026-06-02" in result.output
+    assert "drift -" in result.output
+
+
 def test_status_single_match_activity_newest_at_bottom():
     """Single-match detail: oldest activity entry first, newest last."""
     status = _status_resp(nodes=[_summary()])
@@ -1107,6 +1128,57 @@ def test_prune_yes_reports_deleted_count():
     assert result.exit_code == 0
     assert "deleted 1 node(s)" in result.output
     assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+
+
+# ------ clean facts ------
+
+def _clean_facts_resp(candidates=None, deleted=0):
+    return {"ok": True, "data": {"candidates": candidates or [], "deleted": deleted}}
+
+
+def test_clean_facts_requires_scope():
+    result = CliRunner().invoke(cli, ["clean", "facts"])
+
+    assert result.exit_code != 0
+    assert "choose exactly one scope" in result.output
+
+
+def test_clean_facts_lists_candidates_without_deleting():
+    result = _run(["clean", "facts", "--all", "--fact", "powersavings"], _clean_facts_resp(
+        candidates=[{
+            "pubkey": "aabbccdd" * 8,
+            "label": "site-a",
+            "name": "Tower",
+            "group": "default",
+            "key": "powersavings",
+            "value": "on",
+            "collected_at": "2026-06-01T23:12:00+00:00",
+        }]
+    ))
+
+    assert result.exit_code == 0
+    assert "stale facts:" in result.output
+    assert "powersavings" in result.output
+    assert "site-a" in result.output
+    assert "run again with --yes" in result.output
+
+
+def test_clean_facts_yes_reports_deleted_count():
+    result = _run(["clean", "facts", "site-a", "--yes"], _clean_facts_resp(
+        candidates=[{
+            "pubkey": "aabbccdd" * 8,
+            "label": "site-a",
+            "name": "Tower",
+            "group": "default",
+            "key": "powersavings",
+            "value": "on",
+            "collected_at": "2026-06-01T23:12:00+00:00",
+        }],
+        deleted=1,
+    ))
+
+    assert result.exit_code == 0
+    assert "deleted 1 stale fact(s)" in result.output
 
 
 # ------ remove ------

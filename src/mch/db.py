@@ -344,6 +344,25 @@ class Database:
             rows = await cur.fetchall()
         return {r["key"]: r["value"] for r in rows}
 
+    async def get_fact_records(self, node_pubkey: str) -> list[NodeFact]:
+        """Return all facts for a node with collection timestamps."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM node_facts WHERE node_pubkey = ? ORDER BY key",
+            (node_pubkey,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_fact(r) for r in rows]
+
+    async def delete_fact(self, node_pubkey: str, key: str) -> None:
+        """Delete one collected fact from local DB state."""
+        db = self._db_required()
+        await db.execute(
+            "DELETE FROM node_facts WHERE node_pubkey = ? AND key = ?",
+            (node_pubkey, key),
+        )
+        await db.commit()
+
     # ------------------------------------------------------------------
     # operations
     # ------------------------------------------------------------------
@@ -479,6 +498,15 @@ def _row_to_setting(row: aiosqlite.Row) -> SettingRecord:
         last_set=_parse_dt(row["last_set"]),
         update_attempts=row["update_attempts"],
         drift=bool(row["drift"]),
+    )
+
+
+def _row_to_fact(row: aiosqlite.Row) -> NodeFact:
+    return NodeFact(
+        node_pubkey=row["node_pubkey"],
+        key=row["key"],
+        value=row["value"],
+        collected_at=_parse_dt(row["collected_at"]) or datetime.now(UTC),
     )
 
 

@@ -5,6 +5,16 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.17 - 2026-06-02
+
+- Added per-fact observation timestamps to node reports and `mch status NODE`, including a parsed
+  clock-drift note for MeshCore `clock` fact values.
+- Added `mch clean facts` for dry-run-first removal of cached facts that are no longer configured,
+  with node, group, or fleet scope plus `--fact <key>` narrowing for cases such as misspelled
+  `powersavings`.
+- Recorded the follow-up design note to support future global/group/node fact configuration
+  precedence; current fact configuration remains fleet-wide.
+
 ## 0.9.16 - 2026-06-01
 
 - Made `mch status NODE` recent activity use the same timestamp, relative-age, and level layout as
