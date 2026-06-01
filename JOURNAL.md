@@ -4,6 +4,22 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-01 - Acacia Flood-Route Partial Diagnosis
+
+- Acacia (`4d0385b9d942`) was staying `partial` because its last successful management pass was
+  over a flood-routed cached contact, not a stored repeater path. The node answered enough commands
+  to collect `ver`/`neighbors` and accept two enforced writes, but timed out on enforced reads for
+  `advert.interval`, `agc.reset.interval`, and `multi.acks`; the first two remain unobserved in
+  `mch status acacia`, so mch cannot prove the desired state is applied.
+- The live gateway evidence matches the older route note: Acacia's cached management path was
+  `flood`, while field knowledge says the useful route is via repeaters rather than flood. A manual
+  `mch exec acacia ver` on 2026-06-01 also timed out, so the current flood route is not a reliable
+  management path.
+- Fix: mch now treats an already flood-routed contact the same way qh-corbin taught us to treat
+  flood recovery. It sends at most reachability probes, records `path repair needed`, leaves a
+  reachable flood-routed node `partial`, and defers facts/settings/writes until the gateway has a
+  stored path. This avoids normalizing partial convergence and writes over flood.
+
 ## 2026-06-01 - qh-corbin Route Recovery And Flood Boundary
 
 - qh-corbin (`e2601d591517`) was not dead: `last_seen` continued to update from adverts, traces

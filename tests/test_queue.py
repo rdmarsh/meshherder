@@ -621,6 +621,58 @@ async def test_stored_path_failure_flood_probe_does_not_run_full_sync(db):
     assert any("path repair needed" in entry["message"] for entry in logs)
 
 
+async def test_flood_routed_contact_probe_defers_full_sync(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver", "board"]
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].reachable is True
+    assert results[0].error == "cached contact is flood-routed; path repair needed before full sync"
+    assert [c.args[1] for c in gw.send_command.await_args_list] == ["ver"]
+    assert gw.send_command.await_args_list[0].args[0]["out_path_len"] == -1
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.PARTIAL
+    settings = await db.get_settings("aabbccdd1122")
+    assert settings == []
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("path repair needed before full sync" in entry["message"] for entry in logs)
+
+
+async def test_flood_routed_contact_unreachable_skips_full_sync(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="on", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver", "board"]
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].reachable is False
+    assert [c.args[1] for c in gw.send_command.await_args_list] == ["ver", "ver"]
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.OFFLINE
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("node unreachable over flood" in entry["message"] for entry in logs)
+
+
 async def test_stored_path_read_retry_budget_applies_after_successful_probe(db):
     node_cfg = _node(
         pubkey="aabbcc",

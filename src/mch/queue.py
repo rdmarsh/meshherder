@@ -81,6 +81,10 @@ def _uses_stored_path(contact: dict[str, Any]) -> bool:
     return isinstance(path_len, int) and path_len > 0
 
 
+def _uses_flood_route(contact: dict[str, Any]) -> bool:
+    return contact.get("out_path_len") == -1
+
+
 def _flood_route_contact(contact: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of a contact that sends via MeshCore flood routing."""
     routed = dict(contact)
@@ -850,6 +854,47 @@ class WorkQueue:
                 saved_radio = await self._gateway.switch_radio_temporarily(
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
                 )
+
+            if _uses_flood_route(contact):
+                probe_result = await self._probe_reachable(
+                    contact, node, node_cfg, progress=progress
+                )
+                if probe_result is None:
+                    node.state = NodeState.OFFLINE
+                    await self._db.upsert_node(node)
+                    log.warning(
+                        "node %r (%s) is flood-routed and did not answer %d "
+                        "reachability probes - skipping sync this cycle",
+                        name, pubkey[:12], _PROBE_ATTEMPTS,
+                    )
+                    await self._db.write_log(
+                        pubkey, "WARNING",
+                        f"node unreachable over flood: no reply to {_PROBE_ATTEMPTS} "
+                        "reachability probes - skipped sync this cycle",
+                    )
+                    await _progress(progress, "node unreachable over flood - skipping sync")
+                    return result  # finally still runs to restore the gateway radio
+
+                result.reachable = True
+                result.error = "cached contact is flood-routed; path repair needed before full sync"
+                node.state = NodeState.PARTIAL
+                node.last_connected = datetime.now(UTC)
+                await self._db.upsert_node(node)
+                log.warning(
+                    "node %r (%s) is flood-routed; probe succeeded but full sync is "
+                    "deferred until path is repaired",
+                    name, pubkey[:12],
+                )
+                await self._db.write_log(
+                    pubkey,
+                    "WARNING",
+                    "flood-routed contact reached by probe; path repair needed before full sync",
+                )
+                await _progress(
+                    progress,
+                    "flood reached node but full sync is deferred until path is repaired",
+                )
+                return result  # finally still runs to restore the gateway radio
 
             # reachability probe — skip the full pass on a node that is not
             # answering this cycle rather than timing out on every read.

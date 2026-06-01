@@ -336,8 +336,8 @@ a marginal link does not keep losing the same trailing observations.
 Reachability and path behavior is deliberately conservative:
 
 - mch uses the gateway's cached MeshCore contact path for normal management. If that contact has a
-  stored repeater path, reads and writes use that path; if the contact is flood-routed, mch does
-  not invent a path by itself.
+  stored repeater path, reads and writes use that path. If the contact is flood-routed, mch sends
+  only a reachability probe and defers the full sync until the path is repaired.
 - On a stored path, isolated fact/setting read misses get a small retry budget for that node pass.
   This helps lossy links without retrying every command or increasing traffic without bound.
 - Enforced writes are not retried over flood after a stored-path failure. A missed write remains a
