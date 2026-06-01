@@ -484,6 +484,10 @@ mch restart                   Restart mchd via systemd
 can validate the group-readable config file but may need `sudo mch validate` to validate the
 mode-600 secrets file as well.
 
+`mch admin` may need privilege to stop/start `mchd`. When run through `sudo`, it drops the
+`meshcore-cli` process back to the invoking user so the interactive serial session is not run as
+root.
+
 `mch prune` is deliberately conservative: removing a node from `config.yaml` stops future syncs,
 but does not automatically delete historical DB state. Run `mch prune` to review retired DB nodes
 and `mch prune --yes` to delete their local facts, settings, operations, and logs. It does not edit

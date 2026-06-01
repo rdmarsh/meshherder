@@ -279,8 +279,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_8():
-    assert __version__ == "0.9.8"
+def test_current_release_version_is_0_9_9():
+    assert __version__ == "0.9.9"
 
 
 def _run(args, rpc_response):
@@ -1434,6 +1434,47 @@ nodes: []
         ["systemctl", "stop", "mchd"],
         ["meshcore-cli", "-s", "/dev/ttyUSB-admin", "-b", "115200"],
     ]
+
+
+def test_admin_drops_meshcore_cli_back_to_sudo_user(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("""\
+gateway:
+  device: /dev/ttyUSB-admin
+  baud: 115200
+nodes: []
+""")
+    runner = CliRunner()
+    ok = SimpleNamespace(returncode=0, stderr="")
+    pwent = SimpleNamespace(pw_dir="/home/rdm")
+    dialout = SimpleNamespace(gr_gid=20, gr_mem=["rdm"])
+
+    with patch("mch.cli.subprocess.run", return_value=ok) as run, \
+         patch("mch.cli.os.geteuid", return_value=0), \
+         patch.dict(
+             "mch.cli.os.environ",
+             {"SUDO_UID": "1000", "SUDO_GID": "1000", "SUDO_USER": "rdm"},
+             clear=False,
+         ), \
+         patch("mch.cli.pwd.getpwuid", return_value=pwent), \
+         patch("mch.cli.grp.getgrall", return_value=[dialout]):
+        result = runner.invoke(cli, ["admin", "--config", str(config)])
+
+    assert result.exit_code == 0
+    assert run.call_args_list[1].args[0] == [
+        "meshcore-cli",
+        "-s",
+        "/dev/ttyUSB-admin",
+        "-b",
+        "115200",
+    ]
+    assert run.call_args_list[1].kwargs["user"] == 1000
+    assert run.call_args_list[1].kwargs["group"] == 1000
+    assert run.call_args_list[1].kwargs["extra_groups"] == [1000, 20]
+    assert run.call_args_list[1].kwargs["env"]["USER"] == "rdm"
+    assert run.call_args_list[1].kwargs["env"]["HOME"] == "/home/rdm"
+    assert run.call_args_list[0].kwargs == {"capture_output": True, "text": True}
+    assert run.call_args_list[2].kwargs == {"capture_output": True, "text": True}
 
 
 # ------ suggest ------

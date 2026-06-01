@@ -91,6 +91,27 @@ def test_reboot_like_commands_and_region_allowf_are_marked_for_hardware_discover
     assert "Err - ??" in region_allowf.notes
 
 
+def test_region_commands_have_first_class_metadata():
+    region_put = get_spec("region put")
+    region_save = get_spec("region save")
+    region_home = get_spec("region.home")
+    region_default = get_spec("region.default")
+
+    assert region_put is not None
+    assert region_put.kind == "operation"
+    assert region_put.min_firmware == "1.10.0"
+    assert "region put <name>" in region_put.notes
+    assert region_save is not None
+    assert region_save.kind == "operation"
+    assert region_home is not None
+    assert region_home.read_command() == "region home"
+    assert region_home.write_command("au-nsw") == "region home au-nsw"
+    assert region_default is not None
+    assert region_default.read_command() == "region default"
+    assert region_default.write_command("au-nsw-syd") == "region default au-nsw-syd"
+    assert region_default.min_firmware == "1.15.0"
+
+
 def test_value_validation_for_known_keys():
     assert validate_value("powersaving", "on") is None
     assert validate_value("powersaving", "yes") == "must be 'on' or 'off'"
