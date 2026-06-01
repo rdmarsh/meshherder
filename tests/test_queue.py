@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,6 +16,7 @@ from mch.config import (
     NodeConfig,
     NodeSecrets,
     OperationConfig,
+    RadioConfig,
     SchedulerConfig,
     SettingConfig,
 )
@@ -33,6 +34,7 @@ from mch.queue import (
     WorkQueue,
     all_setting_keys,
     get_unfiled_contacts,
+    radio_recovery_candidates,
     resolve_desired,
     resolve_policy,
 )
@@ -1782,6 +1784,32 @@ async def test_cycle_observed_updated_after_set(db):
     assert ps.drift is False
 
 
+async def test_successful_enforcement_records_setting_history(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"radio": SettingConfig(desired="915.800,250,11,5", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.15.0"),
+        CommandResult(success=True, text="915.800,250,10,5"),
+        CommandResult(success=True, text="OK - reboot to apply"),
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    history = await db.get_setting_history("aabbccdd1122")
+    assert len(history) == 1
+    assert history[0]["key"] == "radio"
+    assert history[0]["previous"] == "915.800,250,10,5"
+    assert history[0]["new_value"] == "915.800,250,11,5"
+    assert history[0]["command"] == "set radio 915.800,250,11,5"
+
+
 async def test_unfiled_contacts_excludes_non_repeaters(db):
     """get_unfiled_contacts only returns REP contacts, not CLI."""
     cfg = _make_config()
@@ -1941,6 +1969,105 @@ async def test_node_no_radio_config_no_switch(db):
     await wq.run_cycle()
     gw.switch_radio_temporarily.assert_not_awaited()
     gw.restore_radio.assert_not_awaited()
+
+
+def test_radio_recovery_candidates_try_nearby_sf_before_other_config_radios():
+    node_cfg = _node(
+        pubkey="aabbcc",
+        settings={"radio": SettingConfig(desired="915.800,250,11,5")},
+    )
+    other = _node(pubkey="bbccdd", via_radio=RadioConfig(freq=916.575, bw=62.5, sf=7, cr=8))
+    cfg = _make_config(node_cfgs=[node_cfg, other])
+
+    candidates = radio_recovery_candidates(
+        cfg,
+        node_cfg,
+        None,
+        cfg.global_settings,
+        tried_channels={(915.075, 125.0, 9)},
+    )
+
+    assert [(c.freq, c.bw, c.sf, c.cr) for c in candidates] == [
+        (915.800, 250.0, 10, 5),
+        (915.800, 250.0, 12, 5),
+        (915.800, 250.0, 11, 5),
+    ]
+
+
+def test_radio_recovery_candidates_prefer_profile_presets_before_sf_guesses():
+    from mch.recommend import RadioPreset
+
+    node_cfg = _node(
+        pubkey="aabbcc",
+        settings={"radio": SettingConfig(desired="915.800,250,11,5")},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+
+    with patch(
+        "mch.recommend.load_radio_presets",
+        return_value=[
+            RadioPreset(
+                name="Bench SF10",
+                value="915.800,250,10,5",
+                description="Known bench radio",
+            )
+        ],
+    ):
+        candidates = radio_recovery_candidates(
+            cfg,
+            node_cfg,
+            None,
+            cfg.global_settings,
+            tried_channels={(915.075, 125.0, 9)},
+        )
+
+    assert [(c.freq, c.bw, c.sf, c.cr, c.source) for c in candidates[:2]] == [
+        (915.800, 250.0, 10, 5, "profile preset Bench SF10"),
+        (915.800, 250.0, 12, 5, "effective desired radio SF12 fallback"),
+    ]
+
+
+async def test_unreachable_node_tries_bounded_config_radio_fallback(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"radio": SettingConfig(desired="915.800,250,11,5")},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.info = {"radio_freq": 915.075, "radio_bw": 125, "radio_sf": 9, "radio_cr": 5}
+
+    radio_by_channel = (915.075, 125.0, 9)
+
+    async def _switch(freq, bw, sf, cr):
+        nonlocal radio_by_channel
+        previous = (*radio_by_channel, 5)
+        radio_by_channel = (round(freq, 3), float(bw), int(sf))
+        return previous
+
+    async def _restore(freq, bw, sf, cr):
+        nonlocal radio_by_channel
+        radio_by_channel = (round(freq, 3), float(bw), int(sf))
+
+    async def _send(contact, command, **kwargs):
+        if command == "ver" and radio_by_channel == (915.800, 250.0, 10):
+            return CommandResult(success=True, text="v1.15.0")
+        return CommandResult(success=False, error="timeout")
+
+    gw.switch_radio_temporarily = AsyncMock(side_effect=_switch)
+    gw.restore_radio = AsyncMock(side_effect=_restore)
+    gw.send_command = AsyncMock(side_effect=_send)
+    wq = WorkQueue(cfg, gw, db)
+
+    result = await wq.run_cycle()
+
+    assert result[0].reachable is True
+    gw.switch_radio_temporarily.assert_awaited_once_with(915.800, 250.0, 10, 5)
+    gw.restore_radio.assert_awaited_once_with(915.075, 125.0, 9, 5)
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("radio fallback reached node on 915.800/250/SF10/CR5" in e["message"] for e in logs)
 
 
 async def test_radio_restored_on_relogin_failure(db):

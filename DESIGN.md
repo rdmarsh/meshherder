@@ -216,9 +216,12 @@ can differ while radios still communicate. `via_radio` can be declared globally,
 on a node; precedence is node, then group, then global fallback. A global value should only be
 used when it applies to most managed devices because otherwise it moves home-radio devices
 unnecessarily. It is reachability-radio configuration, not a MeshCore path. Nodes
-that have moved radio without an
-updated management-radio value can repeatedly time out even though their desired settings are
-otherwise valid; recovery path inspection and historical-radio fallback remain future work.
+that have moved radio without an updated management-radio value can repeatedly time out even
+though their desired settings are otherwise valid. After normal reachability probes fail, mchd
+may make a bounded recovery attempt for nodes with configured radio context: profile radio
+presets are tried first, then nearby spreading-factor variants of the node's effective
+`via_radio` or desired `radio`. This is deliberately capped and logged so it can rescue a node
+without becoming a broad scan.
 
 The current command flow is path-capable and conservative: `send_command()` sends through the
 gateway's stored MeshCore contact, whose `out_path` may already contain repeater hops. Foreground
