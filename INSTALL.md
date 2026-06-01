@@ -179,14 +179,15 @@ mch --version
 systemctl status mchd --no-pager
 ```
 
-If root cannot fetch the Git remote, update the real operator checkout first and mirror it into
-`/opt/meshherder` while preserving the production virtualenv:
+If root cannot fetch the GitHub remote, keep `/opt/meshherder` pointed at the real operator
+checkout instead:
 
 ```bash
 cd ~/code/meshherder
 git pull --ff-only
-sudo rsync -a --delete --exclude .venv ~/code/meshherder/ /opt/meshherder/
 cd /opt/meshherder
+sudo git remote set-url origin ~/code/meshherder
+sudo git pull --ff-only
 sudo /opt/meshherder/.venv/bin/pip install .
 sudo systemctl restart mchd
 ```
