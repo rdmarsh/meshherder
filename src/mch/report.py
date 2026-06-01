@@ -147,6 +147,7 @@ def legacy_node(node: dict[str, Any], config: Config) -> dict[str, Any]:
         "state": node["state"],
         "last_seen": node["last_seen"],
         "last_connected": node["last_connected"],
+        "next_sync_at": node["next_sync_at"],
         "auth_required": node["auth"]["required"],
         "auth_cached": node["auth"]["cached"],
         "passwd_known": node["auth"]["password_known"],

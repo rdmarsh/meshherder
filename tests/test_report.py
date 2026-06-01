@@ -9,7 +9,7 @@ import pytest
 from mch.config import Config, NodeConfig, SettingConfig
 from mch.db import Database
 from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
-from mch.report import build_fleet_report
+from mch.report import build_fleet_report, build_node_report, legacy_node
 
 
 @pytest.fixture
@@ -86,6 +86,24 @@ async def test_fleet_report_classifies_node_health_settings_and_actions(db):
     assert settings["powersaving"]["action"] == "ignore"
     assert report["plan"]["writes"][0]["key"] == "name"
     assert report["plan"]["unknown"][0]["key"] == "owner.info"
+
+
+async def test_legacy_node_includes_next_sync_at(db):
+    next_sync_at = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        label="ridge",
+        name="Ridge",
+        state=NodeState.CONFIGURED,
+        next_sync_at=next_sync_at,
+    )
+    await db.upsert_node(node)
+    config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge")])
+
+    report = await build_node_report(db, config, node)
+    detail = legacy_node(report, config)
+
+    assert detail["next_sync_at"] == next_sync_at.isoformat()
 
 
 async def test_fleet_report_includes_configured_nodes_missing_from_observed_state(db):
