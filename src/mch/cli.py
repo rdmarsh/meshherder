@@ -155,7 +155,7 @@ def _clock_drift_text(value: str | None, observed_at: str | None) -> str:
         return ""
     drift = int((node_clock - observed).total_seconds())
     if abs(drift) < 60:
-        return "drift <1m"
+        return "within +-1m"
     sign = "+" if drift > 0 else "-"
     return f"drift {sign}{_duration_text(drift)}"
 
