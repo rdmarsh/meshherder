@@ -501,6 +501,7 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
         return
 
     level_w = max(len(entry.get("level") or "") for entry in data)
+    age_w = max((len(_ago(entry.get("timestamp")).lstrip()) for entry in data), default=0)
     pubkey_w = max((_wlen(_log_node_pubkey(entry)) for entry in data), default=0)
     label_w = max((_wlen(_log_node_label(entry)) for entry in data), default=0)
 
@@ -514,7 +515,7 @@ def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
             node_label = f" [{_wpad(pubkey, pubkey_w)}] [{_wpad(label, label_w)}]"
         else:
             node_label = ""
-        click.echo(f"{ts} ({age}) [{level:<{level_w}}]{node_label} {entry['message']}")
+        click.echo(f"{ts} ({age:>{age_w}}) [{level:<{level_w}}]{node_label} {entry['message']}")
 
 
 # ---------------------------------------------------------------------------
