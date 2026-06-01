@@ -52,8 +52,15 @@ _NODE_KEYS = {
     "operations",
     "via_radio",
 }
-_GROUP_KEYS = {"name", "default_policy", "settings", "setting_overrides", "via_radio"}
-_GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides", "via_radio"}
+_GROUP_KEYS = {
+    "name",
+    "default_policy",
+    "settings",
+    "setting_overrides",
+    "operations",
+    "via_radio",
+}
+_GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides", "operations", "via_radio"}
 _SETTING_KEYS = {"desired", "policy", "poll_hours"}
 _OPERATION_KEYS = {"command", "every_hours", "fire_and_forget"}
 _RADIO_KEYS = {"freq", "bw", "sf", "cr"}
@@ -188,6 +195,7 @@ class GroupConfig:
     settings: dict[str, SettingConfig] = field(default_factory=dict)
     # setting_overrides: policy-only overrides (no desired value required)
     setting_overrides: dict[str, SettingConfig] = field(default_factory=dict)
+    operations: list[OperationConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -561,12 +569,18 @@ def _parse_group(raw: Any, context: str = "group") -> GroupConfig:
         for k, v in overrides_raw.items()
     }
     _validate_settings(overrides, f"{context}.setting_overrides")
+    operations_raw = _list(raw.get("operations", []), f"{context}.operations")
+    operations = [
+        _parse_operation(op, f"{context}.operations[{i}]")
+        for i, op in enumerate(operations_raw)
+    ]
     return GroupConfig(
         name=raw["name"],
         default_policy=SettingPolicy(policy) if policy else None,
         via_radio=_parse_radio(raw.get("via_radio")),
         settings=settings,
         setting_overrides=overrides,
+        operations=operations,
     )
 
 
@@ -587,12 +601,18 @@ def _parse_global(raw: dict[str, Any]) -> GroupConfig:
         for k, v in overrides_raw.items()
     }
     _validate_settings(overrides, "global.setting_overrides")
+    operations_raw = _list(raw.get("operations", []), "global.operations")
+    operations = [
+        _parse_operation(op, f"global.operations[{i}]")
+        for i, op in enumerate(operations_raw)
+    ]
     return GroupConfig(
         name="global",
         default_policy=SettingPolicy(policy) if policy else None,
         via_radio=_parse_radio(raw.get("via_radio")),
         settings=settings,
         setting_overrides=overrides,
+        operations=operations,
     )
 
 

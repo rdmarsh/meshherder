@@ -65,6 +65,21 @@ def _format_radio_tuple(radio: tuple[float, float, int, int]) -> str:
     return _format_radio(*radio)
 
 
+def _resolve_operations(
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None,
+) -> list[OperationConfig]:
+    """Return operations with Node > Group > Global precedence by command."""
+    by_command: dict[str, OperationConfig] = {}
+    for source in (global_cfg, group_cfg, node_cfg):
+        if source is None:
+            continue
+        for op in source.operations:
+            by_command[op.command] = op
+    return list(by_command.values())
+
+
 def _describe_cached_management_path(contact: dict[str, Any]) -> str:
     path_len = contact.get("out_path_len")
     if path_len == -1:
@@ -1287,9 +1302,10 @@ class WorkQueue:
             result.enforced_settings_failed = enforce_failed
 
             # seed operations from config into DB, then run what's pending
-            await self._seed_operations(pubkey, node_cfg)
+            operations = _resolve_operations(node_cfg, group_cfg, global_cfg)
+            await self._seed_operations(pubkey, operations)
             op_run, op_failed = await self._run_operations(
-                pubkey, contact, node_cfg, node, progress=progress
+                pubkey, contact, node_cfg, node, operations, progress=progress
             )
             result.operations_run = op_run
             result.operations_failed = op_failed
@@ -1810,9 +1826,9 @@ class WorkQueue:
 
         return checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed
 
-    async def _seed_operations(self, pubkey: str, node_cfg: NodeConfig) -> None:
+    async def _seed_operations(self, pubkey: str, operations: list[OperationConfig]) -> None:
         """Queue any config operations that are due (never run, or past every_hours)."""
-        for op_cfg in node_cfg.operations:
+        for op_cfg in operations:
             last = await self._db.get_last_operation(pubkey, op_cfg.command)
             if last is None:
                 # never seen before — queue it
@@ -1840,6 +1856,7 @@ class WorkQueue:
         contact: dict[str, Any],
         node_cfg: NodeConfig,
         node: Node,
+        operations: list[OperationConfig],
         *,
         progress: ProgressCallback = None,
     ) -> tuple[int, int]:
@@ -1847,7 +1864,7 @@ class WorkQueue:
         run = failed = 0
         pending = await self._db.get_pending_operations(pubkey)
 
-        op_cfg_by_cmd = {o.command: o for o in node_cfg.operations}
+        op_cfg_by_cmd = {o.command: o for o in operations}
 
         for op in pending:
             log.info("  operation: %r", op.command)

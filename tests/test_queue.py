@@ -1055,6 +1055,24 @@ async def test_config_operations_seeded_on_first_run(db):
     assert results[0].operations_run == 1
 
 
+async def test_group_operations_seeded_for_member_node(db):
+    """Operations declared on a group are inherited by member nodes."""
+    op_cfg = OperationConfig(command="clock sync", every_hours=24)
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", group="g")
+    group_cfg = _group(operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg], group_cfgs=[group_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode", group="g"))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].operations_run == 1
+    assert any(call.args[1] == "clock sync" for call in gw.send_command.await_args_list)
+
+
 async def test_config_operations_not_reseeded_if_recent(db):
     """Operations that ran within every_hours are not re-queued."""
     op_cfg = OperationConfig(command="clock sync", every_hours=24)

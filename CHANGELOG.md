@@ -5,6 +5,12 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.18 - 2026-06-02
+
+- Added `operations:` support on `global:` and `groups:` with Node > Group > Global precedence.
+  This supports group-level recurring commands such as `clock sync` without duplicating the
+  operation on every node.
+
 ## 0.9.17 - 2026-06-02
 
 - Added per-fact observation timestamps to node reports and `mch status NODE`, including a parsed
