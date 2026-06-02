@@ -1206,6 +1206,39 @@ class WorkQueue:
                     contact, node, node_cfg, progress=progress
                 )
                 if probe_result is None:
+                    recovered = await self._try_radio_recovery(
+                        node_cfg,
+                        group_cfg,
+                        global_cfg,
+                        contact,
+                        node,
+                        tried_radio_channels,
+                        current_saved_radio=saved_radio,
+                        progress=progress,
+                    )
+                    if recovered is not None:
+                        probe_result, saved_radio = recovered
+                        result.reachable = True
+                        result.skipped_reason = "path repair needed before full sync"
+                        node.state = NodeState.PARTIAL
+                        node.last_connected = datetime.now(UTC)
+                        await self._db.upsert_node(node)
+                        await self._db.write_log(
+                            pubkey,
+                            "WARNING",
+                            (
+                                "radio fallback reached flood-routed contact; "
+                                "path repair needed before full sync"
+                            ),
+                        )
+                        await _progress(
+                            progress,
+                            "radio fallback reached flood-routed contact; "
+                            "path repair needed before full sync",
+                        )
+                        return result  # finally still runs to restore the gateway radio
+
+                    saved_radio = None
                     node.state = NodeState.UNREACHABLE
                     await self._db.upsert_node(node)
                     log.warning(

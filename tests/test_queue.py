@@ -687,6 +687,54 @@ async def test_flood_routed_contact_unreachable_skips_full_sync(db):
     assert any("node unreachable over flood" in entry["message"] for entry in logs)
 
 
+async def test_flood_routed_contact_tries_desired_radio_before_unreachable(db):
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"radio": SettingConfig(desired="915.800,250,10,5")},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver"]
+    contact = _contact("aabbccdd1122")
+    contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
+    gw = _make_gateway(contacts=[contact])
+    gw.info = {"radio_freq": 915.075, "radio_bw": 125, "radio_sf": 9, "radio_cr": 5}
+
+    radio_by_channel = (915.075, 125.0, 9)
+
+    async def _switch(freq, bw, sf, cr):
+        nonlocal radio_by_channel
+        previous = (*radio_by_channel, 5)
+        radio_by_channel = (round(freq, 3), float(bw), int(sf))
+        return previous
+
+    async def _restore(freq, bw, sf, cr):
+        nonlocal radio_by_channel
+        radio_by_channel = (round(freq, 3), float(bw), int(sf))
+
+    async def _send(contact, command, **kwargs):
+        if command == "ver" and radio_by_channel == (915.800, 250.0, 10):
+            return CommandResult(success=True, text="v1.15.0")
+        return CommandResult(success=False, error="timeout")
+
+    gw.switch_radio_temporarily = AsyncMock(side_effect=_switch)
+    gw.restore_radio = AsyncMock(side_effect=_restore)
+    gw.send_command = AsyncMock(side_effect=_send)
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].reachable is True
+    assert results[0].skipped_reason == "path repair needed before full sync"
+    assert gw.switch_radio_temporarily.await_args_list[-1].args == (915.800, 250.0, 10, 5)
+    assert radio_by_channel == (915.075, 125.0, 9)
+    node = await db.get_node("aabbccdd1122")
+    assert node.state == NodeState.PARTIAL
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("radio fallback reached node on 915.800/250/SF10/CR5" in e["message"] for e in logs)
+    assert any("radio fallback reached flood-routed contact" in e["message"] for e in logs)
+
+
 async def test_stored_path_read_retry_budget_applies_after_successful_probe(db):
     node_cfg = _node(
         pubkey="aabbcc",

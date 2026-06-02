@@ -5,6 +5,12 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.27 - 2026-06-02
+
+- When a flood-routed contact does not answer on the gateway's current radio, try the same
+  config-derived radio recovery candidates before marking it unreachable. This lets nodes whose
+  desired `radio` differs from the gateway radio be found on their declared channel.
+
 ## 0.9.26 - 2026-06-02
 
 - Treat MeshCore operation replies beginning with `ERR:` as operation failures, even when the
