@@ -939,20 +939,40 @@ def _render_discovery(data: dict[str, Any]) -> None:
         return
 
     type_w = max(len("TYPE"), max(len(str(node.get("node_type", "-"))) for node in nodes))
+    type_w = max(type_w, max(len(_discovery_type(node.get("node_type"))) for node in nodes))
     snr_w = max(len("SNR"), max(len(_discovery_snr(node.get("SNR_in"))) for node in nodes))
-    row = "  {:<12}  {:<64}  {:>{tw}}  {:>{sw}}"
-    click.echo(row.format("PREFIX", "PUBKEY", "TYPE", "SNR", tw=type_w, sw=snr_w))
-    click.echo(row.format("------", "------", "----", "---", tw=type_w, sw=snr_w))
+    status_w = max(len("STATUS"), max(len(str(node.get("status") or "-")) for node in nodes))
+    label_w = max(_wlen("LABEL"), max(_wlen(str(node.get("label") or "-")) for node in nodes))
+    row = "  {:<12}  {:<64}  {:<{tw}}  {:>{sw}}  {:<{stw}}  {}"
+    click.echo(row.format(
+        "PREFIX", "PUBKEY", "TYPE", "SNR", "STATUS", _wpad("LABEL", label_w),
+        tw=type_w, sw=snr_w, stw=status_w,
+    ))
+    click.echo(row.format(
+        "------", "------", "----", "---", "------", _wpad("-----", label_w),
+        tw=type_w, sw=snr_w, stw=status_w,
+    ))
     for node in nodes:
         pubkey = str(node.get("pubkey") or "")
         click.echo(row.format(
             pubkey[:12] or "-",
             pubkey or "-",
-            str(node.get("node_type", "-")),
+            _discovery_type(node.get("node_type")),
             _discovery_snr(node.get("SNR_in")),
+            str(node.get("status") or "-"),
+            _wpad(str(node.get("label") or "-"), label_w),
             tw=type_w,
             sw=snr_w,
+            stw=status_w,
         ))
+
+
+def _discovery_type(value: object) -> str:
+    names = {1: "cli", 2: "repeater", 3: "room"}
+    try:
+        return names.get(int(value), str(value))
+    except (TypeError, ValueError):
+        return "-"
 
 
 def _discovery_snr(value: object) -> str:
@@ -960,6 +980,25 @@ def _discovery_snr(value: object) -> str:
         return f"{float(value):.1f}"
     except (TypeError, ValueError):
         return "-"
+
+
+def _render_adopt_result(data: dict[str, Any]) -> None:
+    click.echo("adopted node")
+    click.echo(f"  pubkey: {data.get('pubkey')}")
+    click.echo(f"  label: {data.get('label') or '-'}")
+    click.echo(f"  group: {data.get('group') or '-'}")
+    radio = data.get("radio") or {}
+    click.echo(f"  discovered radio: {radio.get('text') or '-'}")
+    click.echo(f"  matched config: {'yes' if data.get('matched_config') else 'no'}")
+    click.echo(f"  gateway contact: {'added' if data.get('contact_added') else 'already present'}")
+    click.echo(f"  favourited: {'yes' if data.get('favourited') else 'already/no'}")
+    route = data.get("route") or "unknown"
+    if data.get("path_repair_needed"):
+        click.echo(f"  route: {route} (path repair needed)")
+    else:
+        click.echo(f"  route: {route}")
+    click.echo("")
+    click.echo(f"next: mch status {(data.get('label') or data.get('pubkey') or '')[:12]}")
 
 
 def _render_issue_sections(
@@ -1235,8 +1274,13 @@ def contacts(ctx: click.Context, query: str | None) -> None:
     type=click.FloatRange(min=0.1, max=30.0),
     help="Seconds to collect discovery responses after sending the request.",
 )
+@click.option(
+    "--unknown-only",
+    is_flag=True,
+    help="Hide fully managed nodes; keep config-only, DB-only, and unmanaged results.",
+)
 @click.pass_context
-def discover(ctx: click.Context, radio: str, dwell: float) -> None:
+def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -> None:
     """Actively discover MeshCore nodes on a temporary gateway radio.
 
     This sends a bounded discovery request, restores the gateway radio, and
@@ -1255,7 +1299,64 @@ def discover(ctx: click.Context, radio: str, dwell: float) -> None:
         on_progress=lambda msg: click.echo(f"  {msg}"),
     )
     data = _check(resp)
+    if unknown_only:
+        data = dict(data)
+        data["nodes"] = [
+            node for node in data.get("nodes", [])
+            if node.get("status") != "managed"
+        ]
     _render_discovery(data)
+
+
+@cli.command("adopt")
+@click.argument("pubkey")
+@click.option(
+    "--radio",
+    required=True,
+    metavar="FREQ,BW,SF,CR",
+    help="Radio where this node was discovered, e.g. 915.800,250,11,5.",
+)
+@click.option("--label", default=None, help="Local label to store in the DB.")
+@click.option("--yes", "-y", is_flag=True, help="Adopt without interactive confirmation.")
+@click.pass_context
+def adopt(ctx: click.Context, pubkey: str, radio: str, label: str | None, yes: bool) -> None:
+    """Adopt an already-running discovered repeater into local inventory.
+
+    This adds a DB node and a flood-routed gateway contact. It does not edit
+    config.yaml, secrets.yaml, or hardware settings.
+    """
+    error = validate_radio_tuple(radio)
+    if error:
+        raise click.UsageError(f"--radio {error}")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", pubkey):
+        raise click.UsageError("PUBKEY must be the full 64-character public key")
+    parsed = parse_radio_tuple(radio)
+    assert parsed is not None
+    freq, bw, sf, cr = parsed
+    clean_label = sanitize_node_label(label.strip()) if label else None
+    if label and clean_label != label.strip():
+        click.echo(f"local label must be config-safe; using {clean_label!r}")
+    if not yes:
+        click.echo("about to adopt discovered node")
+        click.echo(f"  pubkey: {pubkey.lower()}")
+        click.echo(f"  label:  {clean_label or '-'}")
+        click.echo(f"  radio:  {radio}")
+        click.echo("")
+        click.echo("This adds local DB state and a flood-routed gateway contact.")
+        click.echo("It does not prove the physical device identity beyond the pubkey.")
+        click.confirm("Adopt this node?", abort=True)
+    resp = _rpc(
+        ctx.obj["socket"],
+        {
+            "cmd": "adopt",
+            "pubkey": pubkey.lower(),
+            "radio": [float(freq), float(bw), int(sf), int(cr)],
+            "label": clean_label,
+        },
+        timeout=60,
+    )
+    data = _check(resp)
+    _render_adopt_result(data)
 
 
 @cli.command()

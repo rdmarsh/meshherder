@@ -317,6 +317,35 @@ async def _dispatch(
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
 
+    if cmd == "adopt":
+        pubkey = req.get("pubkey", "")
+        raw_radio = req.get("radio")
+        label = req.get("label")
+        if not isinstance(raw_radio, list | tuple) or len(raw_radio) != 4:
+            return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
+        try:
+            radio = (
+                float(raw_radio[0]),
+                float(raw_radio[1]),
+                int(raw_radio[2]),
+                int(raw_radio[3]),
+            )
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "radio must be numeric"}
+        try:
+            return {
+                "ok": True,
+                "data": await wq.adopt_node(
+                    pubkey,
+                    radio=radio,
+                    label=label if isinstance(label, str) and label else None,
+                ),
+            }
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
     if cmd == "sync":
         prefix = req.get("prefix")
         if prefix:

@@ -33,10 +33,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Configuration And Radio Semantics
 
-- Add `mch adopt` for already-running nodes found by active discovery. It should take a discovered
-  full pubkey or unique prefix, add/update the local DB inventory, add a flood-routed gateway
-  contact from the discovery response, favourite it, and clearly report that path/radio repair may
-  still be needed before normal management is reliable.
+- Extend `mch adopt` beyond the initial DB/contact seed: retain the discovery evidence used for
+  adoption, expose adopted-radio/path caveats in status, and make follow-up path/radio repair
+  steps explicit.
 - Store discovered/adopted management radios in the DB. Active discovery on a non-home radio proves
   the node answered there, but config-only `via_radio` is too clumsy for ad hoc recovery and
   adoption; the DB should retain the radio evidence with source and timestamp.

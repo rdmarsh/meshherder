@@ -206,6 +206,16 @@ def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:
     })
     gw.change_contact_path = AsyncMock()
     gw.discover = AsyncMock(return_value=[])
+    gw.add_commission_contact = AsyncMock(side_effect=lambda node_info: {
+        "public_key": node_info["pubkey"],
+        "type": node_info.get("node_type", 2),
+        "flags": 0,
+        "out_path": "",
+        "out_path_len": -1,
+        "out_path_hash_mode": 0,
+        "adv_name": "",
+    })
+    gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.switch_radio_temporarily = AsyncMock(return_value=(915.800, 250, 10, 5))
     gw.restore_radio = AsyncMock()
     gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
@@ -1628,6 +1638,61 @@ async def test_discover_nodes_runs_bounded_gateway_discovery(db):
         "discovering on 915.800/250/SF10/CR5 for 3s",
         "discovered 1 node(s)",
     ]
+
+
+async def test_discover_nodes_annotates_config_and_managed_matches(db):
+    managed_pubkey = "75ab85174506" + "0" * 52
+    config_only_pubkey = "8e4a0d73ab61" + "0" * 52
+    await db.upsert_node(Node(
+        pubkey=managed_pubkey,
+        name="Known",
+        label="qh-test",
+        state=NodeState.CONFIGURED,
+    ))
+    cfg = _make_config(node_cfgs=[
+        _node(pubkey="75ab85174506", label="qh-test"),
+        _node(pubkey="8e4a0d73", label="faulkland"),
+    ])
+    gw = _make_gateway()
+    gw.discover.return_value = [
+        {"pubkey": config_only_pubkey, "node_type": 2, "SNR_in": 6.8},
+        {"pubkey": managed_pubkey, "node_type": 2, "SNR_in": 6.2},
+    ]
+    wq = WorkQueue(cfg, gw, db)
+
+    result = await wq.discover_nodes((915.8, 250.0, 11, 5), dwell=3.0)
+    by_prefix = {node["pubkey"][:12]: node for node in result["nodes"]}
+
+    assert by_prefix["8e4a0d73ab61"]["status"] == "config-only"
+    assert by_prefix["8e4a0d73ab61"]["label"] == "faulkland"
+    assert by_prefix["75ab85174506"]["status"] == "managed"
+    assert by_prefix["75ab85174506"]["label"] == "qh-test"
+
+
+async def test_adopt_node_adds_db_node_and_flood_contact(db):
+    pubkey = "8e4a0d73ab61" + "0" * 52
+    cfg = _make_config(node_cfgs=[_node(pubkey="8e4a0d73", label="faulkland")])
+    gw = _make_gateway()
+    wq = WorkQueue(cfg, gw, db)
+
+    result = await wq.adopt_node(pubkey, radio=(915.8, 250.0, 11, 5))
+
+    node = await db.get_node(pubkey)
+    assert node is not None
+    assert node.label == "faulkland"
+    assert result["matched_config"] is True
+    assert result["contact_added"] is True
+    assert result["favourited"] is True
+    assert result["path_repair_needed"] is True
+    gw.add_commission_contact.assert_awaited_once()
+    gw.set_contact_favourite.assert_awaited_once()
+
+
+async def test_adopt_node_requires_full_pubkey(db):
+    wq = WorkQueue(_make_config(), _make_gateway(), db)
+
+    with pytest.raises(ValueError, match="full 64-character"):
+        await wq.adopt_node("8e4a0d73ab61", radio=(915.8, 250.0, 11, 5))
 
 
 async def test_management_path_discover_returns_candidate_without_applying(db):

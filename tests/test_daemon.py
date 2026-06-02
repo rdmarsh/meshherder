@@ -52,6 +52,7 @@ def wq():
         "dwell": 5.0,
         "nodes": [],
     })
+    m.adopt_node = AsyncMock(return_value={"pubkey": "8e4a0d73" + "0" * 56})
     return m
 
 
@@ -207,6 +208,29 @@ async def test_discover_dispatch_rejects_invalid_dwell(db, wq, config):
     assert resp["ok"] is False
     assert "dwell" in resp["error"]
     wq.discover_nodes.assert_not_awaited()
+
+
+async def test_adopt_dispatch_adds_discovered_node(db, wq, config):
+    pubkey = "8e4a0d73" + "0" * 56
+
+    resp = await _dispatch(
+        {
+            "cmd": "adopt",
+            "pubkey": pubkey,
+            "radio": [915.8, 250, 11, 5],
+            "label": "faulkland",
+        },
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    wq.adopt_node.assert_awaited_once_with(
+        pubkey,
+        radio=(915.8, 250.0, 11, 5),
+        label="faulkland",
+    )
 
 
 async def test_path_apply_dispatch_resolves_node_and_applies_path(db, wq, config):
