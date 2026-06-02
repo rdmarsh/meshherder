@@ -5,6 +5,16 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.28 - 2026-06-02
+
+- Removed `profiles.yaml` presets from automatic radio recovery; fallback now stays within radios
+  declared in `config.yaml`.
+- Radio recovery now tries the exact effective configured radio before nearby SF variants.
+- Radio hunts now restore the gateway's home radio once at the end of an exhausted hunt instead of
+  restoring between each failed candidate.
+- Added backlog notes for `mch probe`, known-good radio history with expiry, observed-radio
+  recovery candidates, and deferred nearby bandwidth variants.
+
 ## 0.9.27 - 2026-06-02
 
 - When a flood-routed contact does not answer on the gateway's current radio, try the same

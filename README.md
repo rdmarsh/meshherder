@@ -348,9 +348,8 @@ Reachability and path behavior is deliberately conservative:
   does not continue the full sync over flood.
 - If normal reachability fails for a node with configured radio context, including a flood-routed
   contact that does not answer on the gateway's current radio, mch may try up to three radio
-  recovery candidates. Profile radio presets are tried first, then nearby spreading-factor variants
-  of the node's effective `via_radio` or desired `radio`. Each attempt is logged and the gateway
-  radio is restored afterward.
+  recovery candidates from configured radios. The exact effective `via_radio` or desired `radio`
+  is tried before nearby spreading-factor variants. The gateway radio is restored afterward.
 - Successful enforced setting writes are recorded in the local `setting_history` table with the
   previous observed value and the command used, giving a rollback breadcrumb for radio and other
   managed settings.
