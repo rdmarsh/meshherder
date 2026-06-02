@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.30 - 2026-06-02
+
+- Added cached management path context to `mch status NODE`, including stored path metadata and
+  `path repair needed` marking for flood-routed or missing gateway contacts.
+
 ## 0.9.29 - 2026-06-02
 
 - Made radio recovery SF bounds explicit as SF5 through SF12, so nearby SF fallback never emits

@@ -109,6 +109,31 @@ def test_node_detail_view_preserves_next_sync_at():
     assert detail["next_sync_at"] == "2026-06-02T15:10:07+00:00"
 
 
+def test_node_detail_view_preserves_management_path():
+    detail = _node_detail_view({
+        "pubkey": "aabbccdd" * 8,
+        "name": "Tower",
+        "label": "site-a",
+        "group": None,
+        "state": "configured",
+        "last_seen": None,
+        "last_connected": None,
+        "next_sync_at": None,
+        "auth": {"cached": True, "password_known": True},
+        "fact_keys": [],
+        "facts": {},
+        "facts_collected_at": {},
+        "settings": [],
+        "logs": [],
+        "management_path": {
+            "cached_path": "stored (out_path=e260; out_path_len=1; hash-mode=1)",
+            "path_repair_needed": False,
+        },
+    })
+
+    assert detail["management_path"]["cached_path"].startswith("stored")
+
+
 def test_local_ts_displays_utc_timestamp_in_local_timezone(monkeypatch):
     old_tz = os.environ.get("TZ")
     monkeypatch.setenv("TZ", "Australia/Sydney")
@@ -319,8 +344,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_29():
-    assert __version__ == "0.9.29"
+def test_current_release_version_is_0_9_30():
+    assert __version__ == "0.9.30"
 
 
 def _run(args, rpc_response):
@@ -781,6 +806,30 @@ def test_status_renders_canonical_fleet_api_response():
     assert "site-a" in result.output
     assert "v1.15.0" in result.output
     assert "4" in result.output
+
+
+def test_status_node_renders_known_path_from_detail_response():
+    detail = _detail()
+    detail["data"]["management_path"] = {
+        "cached_path": "stored (out_path=e260; out_path_len=1; hash-mode=1)",
+        "path_repair_needed": False,
+    }
+    result = _run_multi(["status", "site-a"], _status_resp(nodes=[_summary()]), detail)
+
+    assert result.exit_code == 0
+    assert "known path:  stored (out_path=e260; out_path_len=1; hash-mode=1)" in result.output
+
+
+def test_status_node_marks_known_path_repair_needed():
+    detail = _detail()
+    detail["data"]["management_path"] = {
+        "cached_path": "flood",
+        "path_repair_needed": True,
+    }
+    result = _run_multi(["status", "site-a"], _status_resp(nodes=[_summary()]), detail)
+
+    assert result.exit_code == 0
+    assert "known path:  flood (path repair needed)" in result.output
 
 
 def test_status_detail_renders_canonical_node_api_unknown_fact():
