@@ -5,6 +5,14 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.25 - 2026-06-02
+
+- Fixed recurring operations that previously failed, such as `clock sync`, so they are retried
+  after their configured `every_hours` retry window instead of staying failed forever.
+- After a successful `clock sync`, re-read the `clock` fact so `mch status NODE` shows the
+  corrected clock in the same sync.
+- Added `get pwrmgt.support` to the backlog for board/firmware capability investigation.
+
 ## 0.9.24 - 2026-06-02
 
 - Fixed the canonical `fleet_node` detail projection used by `mch status NODE` to preserve

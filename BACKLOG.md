@@ -45,6 +45,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   24 with location. Do not add a suffix because truncation can create an enforcement loop.
 - Expand field-aware validation and operator-facing setting descriptions where registry metadata
   is incomplete, including enumerated settings such as `path.hash.mode`.
+- Investigate `get pwrmgt.support` across deployed boards and firmware. Decide whether it should
+  become a collected fact, a capability annotation for powersaving behavior, or just a diagnostic
+  command documented for manual investigation.
 - Decide whether future command-registry metadata should remain Python-defined or move to a
   versioned data file while preserving fallback handling for unknown firmware commands.
 - Decide where configurable stale/lost thresholds belong (`status` versus `scheduler`).

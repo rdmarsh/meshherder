@@ -1838,8 +1838,15 @@ class WorkQueue:
                 if datetime.now(UTC) < due_after:
                     continue  # ran recently, not due yet
                 # past the window — fall through to queue a new run
+            elif last.status == OperationStatus.PENDING:
+                continue  # already queued
+            elif last.run_at is not None:
+                due_after = last.run_at + timedelta(hours=op_cfg.every_hours)
+                if datetime.now(UTC) < due_after:
+                    continue  # failed recently, wait for the next retry window
+                # past the retry window — fall through to queue a new run
             else:
-                continue  # pending or failed — already in queue, don't add again
+                continue  # malformed historical row without run_at; leave it alone
 
             await self._db.upsert_operation(OperationRecord(
                 node_pubkey=pubkey,
@@ -1884,6 +1891,10 @@ class WorkQueue:
                     )
                 else:
                     await self._db.write_log(pubkey, "INFO", f"operation ok: {op.command!r}")
+                    if op.command == "clock sync":
+                        await self._refresh_clock_fact_after_sync(
+                            pubkey, contact, node, node_cfg, progress=progress
+                        )
             else:
                 op.status = OperationStatus.FAILED
                 failed += 1
@@ -1894,6 +1905,28 @@ class WorkQueue:
             await self._db.update_operation(op)
 
         return run, failed
+
+    async def _refresh_clock_fact_after_sync(
+        self,
+        pubkey: str,
+        contact: dict[str, Any],
+        node: Node,
+        node_cfg: NodeConfig,
+        *,
+        progress: ProgressCallback = None,
+    ) -> None:
+        await _progress(progress, "reading fact: clock")
+        res = await self._send_authed(contact, "clock", node, node_cfg)
+        if res.success and res.text:
+            await self._db.upsert_fact(NodeFact(
+                node_pubkey=pubkey,
+                key="clock",
+                value=res.text.strip(),
+            ))
+        else:
+            error = res.error or "no response"
+            await self._db.write_log(pubkey, "WARNING", f"fact clock refresh failed: {error}")
+            await _progress(progress, f"fact clock refresh failed: {error}")
 
 
 # ---------------------------------------------------------------------------
