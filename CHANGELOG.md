@@ -5,6 +5,12 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.33 - 2026-06-02
+
+- Added discovery result annotations (`STATUS` and `LABEL`), `mch discover --unknown-only`, and
+  `mch adopt PUBKEY --radio ...` for explicitly adopting an already-running discovered repeater
+  into the local DB and gateway contacts.
+
 ## 0.9.32 - 2026-06-02
 
 - Hid the low-level discovery request tag from `mch discover` output, leaving only operator-useful

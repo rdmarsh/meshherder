@@ -344,8 +344,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_32():
-    assert __version__ == "0.9.32"
+def test_current_release_version_is_0_9_33():
+    assert __version__ == "0.9.33"
 
 
 def _run(args, rpc_response):
@@ -544,6 +544,8 @@ def test_discover_command_renders_active_discovery_results():
                 "node_type": 2,
                 "SNR_in": 12.5,
                 "tag": "81ca8751",
+                "status": "config-only",
+                "label": "faulkland",
             }],
         },
     })
@@ -551,9 +553,43 @@ def test_discover_command_renders_active_discovery_results():
     assert result.exit_code == 0
     assert "discovery radio: 915.800/250/SF10/CR5" in result.output
     assert "8e4a0d73" in result.output
+    assert "repeater" in result.output
     assert "12.5" in result.output
+    assert "config-only" in result.output
+    assert "faulkland" in result.output
     assert "TAG" not in result.output
     assert "81ca8751" not in result.output
+
+
+def test_discover_command_unknown_only_hides_managed_nodes():
+    result = _run(["discover", "--radio", "915.800,250,10,5", "--unknown-only"], {
+        "ok": True,
+        "data": {
+            "radio": {"text": "915.800/250/SF10/CR5"},
+            "dwell": 5.0,
+            "nodes": [
+                {
+                    "pubkey": "8e4a0d73" + "0" * 56,
+                    "node_type": 2,
+                    "SNR_in": 12.5,
+                    "status": "config-only",
+                    "label": "faulkland",
+                },
+                {
+                    "pubkey": "75ab8517" + "0" * 56,
+                    "node_type": 2,
+                    "SNR_in": 10.0,
+                    "status": "managed",
+                    "label": "qh-test",
+                },
+            ],
+        },
+    })
+
+    assert result.exit_code == 0
+    assert "faulkland" in result.output
+    assert "qh-test" not in result.output
+    assert "75ab8517" not in result.output
 
 
 def test_discover_command_rejects_invalid_radio_before_rpc():
@@ -566,6 +602,52 @@ def test_discover_command_rejects_invalid_radio_before_rpc():
 
     assert result.exit_code != 0
     assert "radio spreading factor" in result.output
+    rpc.assert_not_called()
+
+
+def test_adopt_command_confirms_and_renders_result():
+    pubkey = "8e4a0d73" + "0" * 56
+    runner = CliRunner()
+    with patch("mch.cli._rpc", return_value={
+            "ok": True,
+            "data": {
+                "pubkey": pubkey,
+                "label": "faulkland",
+                "group": None,
+                "radio": {"text": "915.800/250/SF11/CR5"},
+                "matched_config": True,
+                "contact_added": True,
+                "favourited": True,
+                "route": "flood",
+                "path_repair_needed": True,
+            },
+        }):
+        result = runner.invoke(
+            cli,
+            [
+                "--socket", "/fake.sock", "adopt", pubkey,
+                "--radio", "915.800,250,11,5", "--label", "faulkland",
+            ],
+            input="y\n",
+        )
+
+    assert result.exit_code == 0
+    assert "about to adopt discovered node" in result.output
+    assert "adopted node" in result.output
+    assert "faulkland" in result.output
+    assert "route: flood (path repair needed)" in result.output
+
+
+def test_adopt_command_rejects_short_pubkey_before_rpc():
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "adopt", "8e4a0d73", "--radio", "915.800,250,11,5"],
+        )
+
+    assert result.exit_code != 0
+    assert "full 64-character" in result.output
     rpc.assert_not_called()
 
 

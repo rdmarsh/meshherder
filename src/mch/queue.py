@@ -646,6 +646,7 @@ class WorkQueue:
                 radio_text = _format_radio_tuple(radio)
                 await _progress(progress, f"discovering on {radio_text} for {dwell:g}s")
                 nodes = await self._gateway.discover(factory_freq=radio, dwell=dwell)
+                nodes = await self._annotate_discovered_nodes(nodes)
                 await _progress(progress, f"discovered {len(nodes)} node(s)")
                 return {
                     "radio": {
@@ -660,6 +661,127 @@ class WorkQueue:
                 }
             finally:
                 self.resume()
+
+    async def _annotate_discovered_nodes(
+        self,
+        nodes: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        db_nodes = await self._db.get_all_nodes()
+        annotated: list[dict[str, Any]] = []
+        for raw in nodes:
+            node = dict(raw)
+            pubkey = str(node.get("pubkey") or "").lower()
+            db_node = next((known for known in db_nodes if known.pubkey == pubkey), None)
+            node_cfg = next(
+                (cfg for cfg in self._config.nodes if pubkey.startswith(cfg.pubkey_prefix)),
+                None,
+            )
+
+            if db_node is not None and node_cfg is not None:
+                status = "managed"
+                label = db_node.label or node_cfg.label
+            elif db_node is not None:
+                status = "db-only"
+                label = db_node.label
+            elif node_cfg is not None:
+                status = "config-only"
+                label = node_cfg.label
+            else:
+                status = "unmanaged"
+                label = ""
+
+            node["status"] = status
+            node["label"] = label or ""
+            annotated.append(node)
+        return annotated
+
+    async def adopt_node(
+        self,
+        pubkey: str,
+        *,
+        radio: tuple[float, float, int, int],
+        label: str | None = None,
+    ) -> dict[str, Any]:
+        """Adopt an already-running discovered node into local DB and gateway contacts."""
+        pubkey = pubkey.lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", pubkey):
+            raise ValueError("adopt requires a full 64-character public key")
+
+        async with self.operation(f"adopt {pubkey[:12]}", wait=False):
+            existing = await self._db.get_node(pubkey)
+            node_cfg = next(
+                (cfg for cfg in self._config.nodes if pubkey.startswith(cfg.pubkey_prefix)),
+                None,
+            )
+            node_label = label or (node_cfg.label if node_cfg else "") or (
+                existing.label if existing else ""
+            )
+            node_group = (node_cfg.group if node_cfg else None) or (
+                existing.group if existing else None
+            )
+            node_name = existing.name if existing else ""
+            node = Node(
+                pubkey=pubkey,
+                name=node_name,
+                label=node_label,
+                group=node_group,
+                state=existing.state if existing else NodeState.UNKNOWN,
+                last_seen=existing.last_seen if existing else None,
+                last_connected=existing.last_connected if existing else None,
+                auth_required=existing.auth_required if existing else False,
+                auth_cached=existing.auth_cached if existing else False,
+                next_sync_at=existing.next_sync_at if existing else None,
+            )
+            await self._db.upsert_node(node)
+
+            contact = self._contact_for_pubkey(pubkey)
+            contact_added = False
+            if contact is None:
+                contact = await self._gateway.add_commission_contact({
+                    "pubkey": pubkey,
+                    "node_type": CONTACT_TYPE_REPEATER,
+                })
+                self._contacts.append(contact)
+                contact_added = True
+
+            favourited = False
+            if contact.get("flags", 0) & 1 == 0:
+                favourited = await self._gateway.set_contact_favourite(contact)
+
+            radio_text = _format_radio_tuple(radio)
+            await self._db.write_log(
+                pubkey,
+                "INFO",
+                f"adopted discovered node on {radio_text}",
+            )
+            path_len = contact.get("out_path_len")
+            if path_len == -1:
+                route = "flood"
+            elif path_len == 0:
+                route = "direct"
+            elif isinstance(path_len, int) and path_len > 0:
+                route = "stored"
+            else:
+                route = "unknown"
+
+            return {
+                "pubkey": pubkey,
+                "label": node.label,
+                "group": node.group,
+                "radio": {
+                    "freq": radio[0],
+                    "bw": radio[1],
+                    "sf": radio[2],
+                    "cr": radio[3],
+                    "text": radio_text,
+                },
+                "matched_config": node_cfg is not None,
+                "contact_added": contact_added,
+                "contact_present": contact is not None,
+                "favourited": favourited,
+                "route": route,
+                "path_repair_needed": route == "flood",
+            }
 
     def management_path_status(self, node: Node) -> dict[str, Any]:
         """Return cached gateway route metadata for a managed node without mesh traffic."""

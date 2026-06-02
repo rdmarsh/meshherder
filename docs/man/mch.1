@@ -150,11 +150,22 @@ Apply an operator-approved replacement path to the gateway contact. Re-run
 for the node after applying. A wrong path can make management less reachable
 until repaired again.
 .TP
-.B discover \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-dwell \fISECONDS\fR]
+.B discover \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-dwell \fISECONDS\fR] [\-\-unknown\-only]
 Temporarily switch the gateway radio, send an active MeshCore discovery request,
 collect responses for a bounded dwell period, then restore the gateway radio.
-This prints discovered public keys and signal metadata. It does not add DB nodes,
-gateway contacts, secrets, or config entries.
+This prints discovered public keys, type, SNR, status, and matching label. It
+does not add DB nodes, gateway contacts, secrets, or config entries. With
+.B \-\-unknown\-only ,
+fully managed nodes are hidden while config-only, DB-only, and unmanaged nodes
+remain visible.
+.TP
+.B adopt \fIPUBKEY\fR \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-label \fILABEL\fR]
+Adopt an already-running discovered repeater by full 64-character public key.
+This adds/updates the local DB node and adds a flood-routed gateway contact, then
+favourites it. It does not edit
+.IR config.yaml ,
+.IR secrets.yaml ,
+or hardware settings.
 .TP
 .B exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
 Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked

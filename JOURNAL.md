@@ -4,6 +4,15 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.33 Discovery Adoption
+
+- Released `0.9.33` to annotate active discovery results with `STATUS` and `LABEL`, add
+  `mch discover --unknown-only`, and add explicit `mch adopt PUBKEY --radio ...` for adopting an
+  already-running discovered repeater into the local DB and gateway contacts.
+- Adoption intentionally requires the full public key and an explicit discovered radio. It adds a
+  flood-routed contact and reports path repair needs; it does not edit config, secrets, or node
+  hardware settings.
+
 ## 2026-06-02 - Luna 0.9.32 Discovery Output And Busy Labels
 
 - Released `0.9.32` to hide the low-level MeshCore discovery request tag from `mch discover`

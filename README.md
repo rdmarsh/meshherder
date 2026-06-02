@@ -433,6 +433,32 @@ contacts. It only proves which nodes answer on that radio and prints their full 
 and SNR. Use it before a future adopt/contact-seeding step, or when checking whether a node is
 alive on a non-home radio.
 
+Discovery also annotates each result:
+
+- `managed`: known in both DB and config.
+- `db-only`: known in DB but not config.
+- `config-only`: matches a configured prefix but is not in DB yet.
+- `unmanaged`: not known in DB or config.
+
+Use `--unknown-only` to hide fully managed nodes while keeping `config-only`, `db-only`, and
+`unmanaged` results:
+
+```bash
+mch discover --radio 915.800,250,11,5 --unknown-only
+```
+
+After identifying the full public key, `mch adopt` can add a running repeater to local inventory
+and the gateway contact store without recommissioning it:
+
+```bash
+mch adopt 8e4a0d73ab612e8cc08cec29aa0df62e46c76614ab0449901de8e0dd3b5fef95 \
+  --label faulkland \
+  --radio 915.800,250,11,5
+```
+
+Adopt initially creates or uses a flood-routed gateway contact. That makes the node addressable,
+but path/radio repair may still be needed before normal management is reliable.
+
 ### Checking status in the field
 
 Authorised MeshCore devices can send a DM to the gateway for lightweight status while away from the
@@ -548,6 +574,8 @@ mch path <node> --discover    Learn a fresh path-discovery candidate without app
 mch path <node> --advert      Show the gateway's cached advert path candidate
 mch path <node> --apply P[:M] Apply an operator-approved replacement path to the gateway contact
 mch discover --radio R        Actively discover nodes on a temporary radio; no DB/contact writes
+mch discover --radio R --unknown-only  Hide fully managed discovery results
+mch adopt PUBKEY --radio R    Add a discovered running node to DB and gateway contacts
 mch suggest                      Suggested txdelay for all nodes based on neighbour count
 mch suggest <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes
