@@ -5,6 +5,15 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.32 - 2026-06-02
+
+- Hid the low-level discovery request tag from `mch discover` output, leaving only operator-useful
+  prefix, full public key, node type, and SNR columns.
+- Improved scheduled-sync busy messages to prefer configured node labels when DB labels are
+  missing, so errors identify the node more clearly.
+- Added backlog notes for active-discovery adoption, DB-primary inventory, config export, radio
+  memory, and protected secret storage.
+
 ## 0.9.31 - 2026-06-02
 
 - Added `mch discover --radio FREQ,BW,SF,CR`, a bounded active MeshCore discovery command that

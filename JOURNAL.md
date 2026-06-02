@@ -4,6 +4,15 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.32 Discovery Output And Busy Labels
+
+- Released `0.9.32` to hide the low-level MeshCore discovery request tag from `mch discover`
+  output and keep the table focused on prefix, full public key, type, and SNR.
+- Scheduled-sync busy messages now prefer the configured local label when the DB node label is
+  missing, so errors such as `busy: scheduled sync ...` identify the node more clearly.
+- Added backlog notes for `mch adopt`, DB-primary fleet inventory, config export, discovered radio
+  memory, protected secrets handling, and pubkey display/input conventions.
+
 ## 2026-06-02 - Luna 0.9.31 Active Radio Discovery
 
 - Released `0.9.31` to add standalone active discovery with

@@ -940,10 +940,9 @@ def _render_discovery(data: dict[str, Any]) -> None:
 
     type_w = max(len("TYPE"), max(len(str(node.get("node_type", "-"))) for node in nodes))
     snr_w = max(len("SNR"), max(len(_discovery_snr(node.get("SNR_in"))) for node in nodes))
-    tag_w = max(len("TAG"), max(len(str(node.get("tag") or "-")) for node in nodes))
-    row = "  {:<12}  {:<64}  {:>{tw}}  {:>{sw}}  {:<{gw}}"
-    click.echo(row.format("PREFIX", "PUBKEY", "TYPE", "SNR", "TAG", tw=type_w, sw=snr_w, gw=tag_w))
-    click.echo(row.format("------", "------", "----", "---", "---", tw=type_w, sw=snr_w, gw=tag_w))
+    row = "  {:<12}  {:<64}  {:>{tw}}  {:>{sw}}"
+    click.echo(row.format("PREFIX", "PUBKEY", "TYPE", "SNR", tw=type_w, sw=snr_w))
+    click.echo(row.format("------", "------", "----", "---", tw=type_w, sw=snr_w))
     for node in nodes:
         pubkey = str(node.get("pubkey") or "")
         click.echo(row.format(
@@ -951,10 +950,8 @@ def _render_discovery(data: dict[str, Any]) -> None:
             pubkey or "-",
             str(node.get("node_type", "-")),
             _discovery_snr(node.get("SNR_in")),
-            str(node.get("tag") or "-"),
             tw=type_w,
             sw=snr_w,
-            gw=tag_w,
         ))
 
 

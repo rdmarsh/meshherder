@@ -429,9 +429,9 @@ mch discover --radio 915.800,250,10,5 --dwell 5
 ```
 
 This is not an advert wait and it does not edit `config.yaml`, seed the DB, or add gateway
-contacts. It only proves which nodes answer on that radio and prints their full public keys,
-type, SNR, and discovery tag. Use it before a future adopt/contact-seeding step, or when checking
-whether a node is alive on a non-home radio.
+contacts. It only proves which nodes answer on that radio and prints their full public keys, type,
+and SNR. Use it before a future adopt/contact-seeding step, or when checking whether a node is
+alive on a non-home radio.
 
 ### Checking status in the field
 
