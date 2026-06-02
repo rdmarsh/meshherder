@@ -24,6 +24,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   model is visible and reviewable.
 - Allow an operator-requested `commission` or `exec` to preempt scheduled sync at a safe
   between-command boundary rather than repeatedly returning `busy`.
+- Make daemon shutdown cancel or bound in-flight gateway calls cleanly. During the 0.9.29 luna
+  deploy, `systemctl restart mchd` remained in `deactivating` after a config reload hit
+  `get_contacts` timeout and required systemd SIGKILL before the new daemon could start.
 - Investigate safe remediation for fast node clocks. Live Wold testing showed `clock sync` can
   return `ERR: clock cannot go backwards`, so the ordinary clock-sync operation only fixes slow
   clocks. Any fallback such as reboot/clkreboot must be board/firmware tested before automation.

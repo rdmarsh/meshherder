@@ -4,6 +4,17 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.29 Radio Recovery SF Bounds
+
+- Released and deployed `0.9.29` at commit `109b575`, making radio recovery explicitly bound SF
+  variants to MeshCore's valid SF5 through SF12 range.
+- The focused regression test covers exact SF5/SF12 configured radios and confirms recovery keeps
+  valid neighbor variants while never emitting invalid SF4/SF13 candidates.
+- During deployment, `systemctl restart mchd` hung while the old daemon was already stopping after a
+  config reload `get_contacts` timeout. Clearing the stuck process with systemd SIGKILL allowed the
+  new daemon to start cleanly on `0.9.29`; graceful shutdown while gateway calls are blocked should
+  be investigated.
+
 ## 2026-06-02 - Luna 0.9.28 Radio Recovery Policy
 
 - Released and deployed `0.9.28` at commit `7b0b99f`, removing `profiles.yaml` presets from
