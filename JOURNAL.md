@@ -4,6 +4,13 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.30 Status Known Path
+
+- Released `0.9.30` to add cached management path context to `mch status NODE`. The detail view
+  now shows `known path:` using the same read-only gateway contact metadata as `mch path NODE`,
+  and marks flood or missing contacts as `path repair needed`.
+- Full local test suite passed before commit.
+
 ## 2026-06-02 - Luna 0.9.29 Radio Recovery SF Bounds
 
 - Released and deployed `0.9.29` at commit `109b575`, making radio recovery explicitly bound SF

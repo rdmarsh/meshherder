@@ -512,6 +512,7 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
         "next_sync_at": node.get("next_sync_at"),
         "auth_cached": node["auth"]["cached"],
         "passwd_known": node["auth"]["password_known"],
+        "management_path": node.get("management_path"),
         "facts": facts,
         "facts_collected_at": fact_times,
         "settings": [
@@ -765,6 +766,12 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     click.echo(f"next sync:   {_next_sync_text(data.get('next_sync_at'))}")
     click.echo(f"pubkey:      {_pk(data.get('pubkey'))}")
     click.echo(f"pubkey full: {data['pubkey']}")
+    path = data.get("management_path")
+    if path:
+        path_text = path.get("cached_path") or "unknown"
+        if path.get("path_repair_needed"):
+            path_text = f"{path_text} (path repair needed)"
+        click.echo(f"known path:  {path_text}")
     click.echo(f"authed:      {'yes' if data.get('auth_cached') else 'no'}")
     click.echo(f"passwd:      {'yes' if data.get('passwd_known') else 'no'}")
     click.echo("")

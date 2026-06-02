@@ -129,6 +129,22 @@ async def test_node_dispatch_passwd_known_true_when_default_secret(db, wq, confi
     assert resp["data"]["passwd_known"] is True
 
 
+async def test_fleet_node_dispatch_includes_management_path(db, wq, config):
+    node = await _seed_node_with_facts(db)
+    wq.management_path_status.return_value = {
+        "pubkey": node.pubkey,
+        "cached_path": "stored (out_path=e260; out_path_len=1; hash-mode=1)",
+        "route": "stored",
+        "path_repair_needed": False,
+    }
+
+    resp = await _dispatch({"cmd": "fleet_node", "query": "test"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["management_path"]["cached_path"].startswith("stored")
+    wq.management_path_status.assert_called_once_with(node)
+
+
 async def test_path_dispatch_resolves_node_and_returns_cached_path_status(db, wq, config):
     node = await _seed_node_with_facts(db)
     wq.management_path_status.return_value = {

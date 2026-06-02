@@ -219,7 +219,9 @@ async def _dispatch(
             return {"ok": False, "error": str(exc)}
         if not node:
             return {"ok": False, "error": f"node {query!r} not found"}
-        return {"ok": True, "data": await build_node_report(db, config, node)}
+        report = await build_node_report(db, config, node)
+        report["management_path"] = wq.management_path_status(node)
+        return {"ok": True, "data": report}
 
     if cmd == "status":
         return {"ok": True, "data": legacy_status(await build_fleet_report(db, config))}
