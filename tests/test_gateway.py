@@ -302,6 +302,31 @@ async def test_advert_zerohop_calls_send_advert_not_flood():
 
 
 # ---------------------------------------------------------------------------
+# get_contacts
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_contacts_times_out_when_gateway_hangs():
+    """A hung meshcore get_contacts must raise GatewayError, not block forever.
+
+    Regression guard: an unbounded get_contacts() in the config-reload path could
+    leave `systemctl restart mchd` stuck in `deactivating` until SIGKILL (observed
+    during the 0.9.29 luna deploy). The call must be bounded by a timeout.
+    """
+    fake_mc = MagicMock()
+    gw = make_connected_gateway(fake_mc)
+
+    # Real sleep so wait_for's timeout callback gets a chance to fire (a plain
+    # AsyncMock would resolve synchronously and starve the timeout).
+    async def _hang(*_a, **_kw):
+        await asyncio.sleep(10)
+    fake_mc.commands.get_contacts = _hang
+
+    with pytest.raises(GatewayError, match="timeout"):
+        await gw.get_contacts(timeout=0.3)
+
+
+# ---------------------------------------------------------------------------
 # discover
 # ---------------------------------------------------------------------------
 

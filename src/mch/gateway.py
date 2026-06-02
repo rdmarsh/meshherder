@@ -44,6 +44,13 @@ class GatewayError(Exception):
     pass
 
 
+# Bound the local serial round-trip to the attached gateway. Normally this returns
+# in well under a second, but a locked-up serial port can hang it indefinitely. An
+# unbounded await here blocked config reload and left shutdown stuck in `deactivating`
+# until SIGKILL during the 0.9.29 luna deploy; the timeout turns that into a clean error.
+_GET_CONTACTS_TIMEOUT = 30.0
+
+
 class Gateway:
     """
     Wraps the meshcore_py connection.
@@ -210,6 +217,7 @@ class Gateway:
         self,
         managed_only: bool = True,
         include_pending: bool = True,
+        timeout: float = _GET_CONTACTS_TIMEOUT,
     ) -> list[dict[str, Any]]:
         """
         Return contacts from the gateway.
@@ -222,7 +230,12 @@ class Gateway:
                                 since they have no flags set yet.
         """
         mc = self._require_connected()
-        result = await mc.commands.get_contacts()
+        try:
+            result = await asyncio.wait_for(mc.commands.get_contacts(), timeout=timeout)
+        except TimeoutError as exc:
+            raise GatewayError(
+                f"get_contacts timeout — no response from gateway within {timeout:g}s"
+            ) from exc
         if result.type == EventType.ERROR:
             raise GatewayError(f"get_contacts failed: {result.payload}")
         stored = result.payload or {}

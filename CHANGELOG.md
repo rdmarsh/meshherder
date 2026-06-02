@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Bounded the gateway `get_contacts` serial round-trip with a timeout (default 30s). An unbounded
+  await here could hang config reload and leave `systemctl restart mchd` stuck in `deactivating`
+  until SIGKILL (observed during the 0.9.29 luna deploy). A locked-up gateway now raises a clean
+  `GatewayError` instead of blocking the daemon indefinitely.
+
 ## 0.9.33 - 2026-06-02
 
 - Added discovery result annotations (`STATUS` and `LABEL`), `mch discover --unknown-only`, and
