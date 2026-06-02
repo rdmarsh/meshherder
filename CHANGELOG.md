@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.34 - 2026-06-03
+
 - Bounded the gateway `get_contacts` serial round-trip with a timeout (default 30s). An unbounded
   await here could hang config reload and leave `systemctl restart mchd` stuck in `deactivating`
   until SIGKILL (observed during the 0.9.29 luna deploy). A locked-up gateway now raises a clean
