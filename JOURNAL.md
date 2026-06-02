@@ -4,6 +4,17 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.28 Radio Recovery Policy
+
+- Released and deployed `0.9.28` at commit `7b0b99f`, removing `profiles.yaml` presets from
+  automatic radio recovery so fallback stays within radios declared in `config.yaml`.
+- Radio recovery now tries the exact effective configured radio before nearby SF variants, and an
+  exhausted hunt restores the gateway home radio once at the end instead of between candidates.
+- Live `mch sync wip06` on luna tried `915.800/250/SF10/CR5`, then `SF9`, then `SF11`, and logged
+  one restore to `915.075/125/SF9/CR5` after exhaustion. WIP06 still did not answer from luna.
+- Added backlog notes for future `mch probe`, known-good radio history with expiry, observed-radio
+  recovery candidates, and deferred nearby bandwidth variants.
+
 ## 2026-06-02 - Luna 0.9.27 Flood Radio Recovery
 
 - WIP06 was known by configuration to want `radio: 915.800,250,10,5`, but the cached gateway
