@@ -344,8 +344,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_31():
-    assert __version__ == "0.9.31"
+def test_current_release_version_is_0_9_32():
+    assert __version__ == "0.9.32"
 
 
 def _run(args, rpc_response):
@@ -543,7 +543,7 @@ def test_discover_command_renders_active_discovery_results():
                 "pubkey": "8e4a0d73" + "0" * 56,
                 "node_type": 2,
                 "SNR_in": 12.5,
-                "tag": "00000000",
+                "tag": "81ca8751",
             }],
         },
     })
@@ -552,6 +552,8 @@ def test_discover_command_renders_active_discovery_results():
     assert "discovery radio: 915.800/250/SF10/CR5" in result.output
     assert "8e4a0d73" in result.output
     assert "12.5" in result.output
+    assert "TAG" not in result.output
+    assert "81ca8751" not in result.output
 
 
 def test_discover_command_rejects_invalid_radio_before_rpc():

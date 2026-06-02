@@ -33,6 +33,13 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Configuration And Radio Semantics
 
+- Add `mch adopt` for already-running nodes found by active discovery. It should take a discovered
+  full pubkey or unique prefix, add/update the local DB inventory, add a flood-routed gateway
+  contact from the discovery response, favourite it, and clearly report that path/radio repair may
+  still be needed before normal management is reliable.
+- Store discovered/adopted management radios in the DB. Active discovery on a non-home radio proves
+  the node answered there, but config-only `via_radio` is too clumsy for ad hoc recovery and
+  adoption; the DB should retain the radio evidence with source and timestamp.
 - Live-test region management on representative firmware before recommending it for ordinary
   enforcement: `region put`, `region save`, `region home`, and `region default`; Heltec V3
   v1.15.0 has been checked, but the same read-back text and v1.15+ auto-allow/auto-save behavior
@@ -67,6 +74,18 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### CLI And Reporting
 
+- Move toward DB-primary fleet inventory. Config should describe desired policy/defaults and remain
+  exportable as a backup/import format, while DB owns discovered full pubkeys, labels, mesh names,
+  observed radios, known paths, facts, and scheduling state.
+- Add `mch export config` and related backup commands once DB-primary inventory exists. Exports
+  should produce reviewable YAML, avoid lossy shorthand such as literal `...`, and distinguish
+  inventory from desired policy.
+- Decide how secrets fit a DB-primary model. Passwords and private keys probably stay in
+  `secrets.yaml` or move to a protected/encrypted secrets store rather than ordinary DB tables;
+  export/import must preserve replacement private keys without accidentally exposing them.
+- Standardize pubkey display and input conventions: accept labels, unique prefixes, and full
+  pubkeys; store full pubkeys in DB and gateway-contact operations; prefer 12-character display
+  prefixes in tables; keep shorter prefixes acceptable in config only when unique.
 - Allow `facts:` to be configured at global, group, and node scope with Node > Group > Global
   precedence. Current behavior is one fleet-wide fact list, so stale-fact cleanup can scope which
   nodes are cleaned but not yet compute different desired fact sets per group/node.
