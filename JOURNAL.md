@@ -12,6 +12,9 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   restores the gateway radio without adding DB rows, gateway contacts, secrets, or config entries.
 - Clarified `mch path` docs/help after live use showed the required `NODE` argument and route
   fields were confusing.
+- Deployed `0.9.31` to luna at commit `b4ef06e`. Verified `mch --version` reported `0.9.31`,
+  both luna checkouts were at `b4ef06e`, `mchd` was active, and `mch discover --help` showed the
+  new bounded-discovery command.
 
 ## 2026-06-02 - Luna 0.9.30 Status Known Path
 
