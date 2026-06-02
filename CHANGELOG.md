@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.35 - 2026-06-03
+
+- Skip config-derived radio recovery when a node's radio is already confirmed (its observed
+  `radio` matches desired). The node is on the radio we expect, so a reachability failure is a
+  path/availability problem, not a radio one - hunting nearby spreading-factor variants is wasted
+  mesh traffic. The node is marked unreachable instead, and the skip is logged.
+
 ## 0.9.34 - 2026-06-03
 
 - Bounded the gateway `get_contacts` serial round-trip with a timeout (default 30s). An unbounded

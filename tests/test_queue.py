@@ -28,6 +28,7 @@ from mch.models import (
     OperationRecord,
     OperationStatus,
     SettingPolicy,
+    SettingRecord,
 )
 from mch.queue import (
     OperationBusyError,
@@ -2389,6 +2390,41 @@ async def test_radio_recovery_exhaustion_restores_home_once(db):
         (915.800, 250.0, 11, 5),
     ]
     gw.restore_radio.assert_awaited_once_with(915.075, 125.0, 9, 5)
+
+
+async def test_radio_recovery_skipped_when_radio_confirmed(db):
+    """A node whose observed radio already matches desired is on the radio we
+    expect, so a reachability failure is a path issue - don't hunt SF variants.
+    """
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"radio": SettingConfig(desired="915.075,125,9,5")},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    contact = _contact("aabbccdd1122")
+    gw = _make_gateway(contacts=[contact])
+    gw.info = {"radio_freq": 915.075, "radio_bw": 125, "radio_sf": 9, "radio_cr": 5}
+    gw.switch_radio_temporarily = AsyncMock(return_value=(915.075, 125.0, 9, 5))
+    gw.restore_radio = AsyncMock()
+    gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
+
+    # Seed a confirmed radio observation: observed matches desired within tolerance
+    # (the firmware float form 915.0750122 == 915.075), so the radio is known-good.
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="", label="TestNode"))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey="aabbccdd1122", key="radio", desired="915.075,125,9,5",
+        policy=SettingPolicy.ENFORCE, observed="915.0750122,125,9,5",
+    ))
+
+    wq = WorkQueue(cfg, gw, db)
+    results = await wq.run_cycle()
+
+    assert results[0].reachable is False
+    gw.switch_radio_temporarily.assert_not_awaited()
+    logs = await db.get_logs("aabbccdd1122")
+    assert any("radio confirmed" in e["message"] for e in logs)
 
 
 async def test_radio_restored_on_relogin_failure(db):

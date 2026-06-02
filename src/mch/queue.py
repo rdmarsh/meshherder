@@ -1628,6 +1628,28 @@ class WorkQueue:
         current_saved_radio: tuple[float, float, int, int] | None,
         progress: ProgressCallback = None,
     ) -> tuple[CommandResult, tuple[float, float, int, int]] | None:
+        # If the node's radio is already confirmed (a stored observation matches
+        # desired), the node is on the radio we expect, so a reachability failure
+        # is a path/availability problem - hunting SF variants is wasted mesh
+        # traffic. Skip recovery and let the node be marked unreachable.
+        desired_radio = resolve_desired("radio", node_cfg, group_cfg, global_cfg)
+        if desired_radio is not None:
+            settings = await self._db.get_settings(node.pubkey)
+            observed_radio = next(
+                (s.observed for s in settings if s.key == "radio"), None
+            )
+            if observed_radio and compare_setting("radio", desired_radio, observed_radio).equal:
+                await self._db.write_log(
+                    node.pubkey,
+                    "INFO",
+                    "radio confirmed (observed matches desired); skipping radio "
+                    "recovery - reachability failure is a path issue, not radio",
+                )
+                await _progress(
+                    progress, "radio confirmed; skipping radio recovery (path issue)"
+                )
+                return None
+
         candidates = radio_recovery_candidates(
             self._config, node_cfg, group_cfg, global_cfg, tried_channels
         )
