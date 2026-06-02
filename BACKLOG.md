@@ -27,6 +27,12 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 - Make daemon shutdown cancel or bound in-flight gateway calls cleanly. During the 0.9.29 luna
   deploy, `systemctl restart mchd` remained in `deactivating` after a config reload hit
   `get_contacts` timeout and required systemd SIGKILL before the new daemon could start.
+  Partially addressed (Unreleased): `Gateway.get_contacts` is now bounded by a timeout, which
+  removes the specific unbounded await that caused the observed hang. Residual hardening still
+  open: (a) the SIGHUP-triggered `_reload_config` runs as a detached task that `_shutdown` never
+  tracks/cancels (daemon.py); (b) other gateway round-trips (e.g. `send_command` paths) rely on
+  per-call timeouts rather than shutdown-driven cancellation. Decide whether `_shutdown` should
+  cancel/await the reload task and bound the remaining gateway calls.
 - Investigate safe remediation for fast node clocks. Live Wold testing showed `clock sync` can
   return `ERR: clock cannot go backwards`, so the ordinary clock-sync operation only fixes slow
   clocks. Any fallback such as reboot/clkreboot must be board/firmware tested before automation.
@@ -156,6 +162,18 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Research / Live-Test
 
+- Validate (and probably correct) the `txdelay` vs neighbour-count direction in `profiles.yaml`.
+  The current presets use more neighbours -> *lower* txdelay (tower 20+ -> 0.3, mobile 0 -> 2.0).
+  The MeshCore community discussion (https://github.com/meshcore-dev/MeshCore/discussions/2053)
+  leans the *opposite* way: txdelay scales the random flood-retransmit backoff
+  (`delay = random(0, 5*t+1)`, `t = airtime * txdelay`), so denser areas need *more* backoff to
+  cut collisions, giving more neighbours -> *higher* txdelay (their table: 0->~0.05, 5->1.5,
+  12->3.6, via `base + neighbours * 0.3`). This means profiles.yaml may be backwards. The thread
+  is itself inconclusive: a simulator recommended txdelay=0 everywhere, but real-world testing
+  showed zero delay made error rates worse. Required result: a defensible direction and formula
+  validated against real delivery/collision behaviour before mch recommends txdelay confidently.
+  Until then, treat `mch suggest` txdelay output as provisional. Note the CLI caps txdelay at 2.0
+  (firmware 1.14.1+ may accept higher).
 - Confirm optional-CR behavior for `via_radio`.
   - Current behavior: CR is displayed when a complete radio setting is transmitted/restored, but
     CR alone does not trigger a reachability switch.
@@ -181,6 +199,10 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 - Do not place dangerous identity/reset operations in ordinary desired-state enforcement.
 - Do not turn mesh DM control into a general messaging client or enable writes by default.
 - Do not add vanity key generation until ordinary commissioning and replacement are stable.
+- Do not attempt to onboard a node that is both unknown to the gateway (no mesh contact / no route)
+  and out of direct radio range. With no contact, no route, and no way for local discovery to
+  reach it, there is nothing to work with. Onboarding is scoped to nodes that are either already
+  routable via mesh contacts or in direct radio range (bench) so a route can be established.
 
 ## Done Recently
 
