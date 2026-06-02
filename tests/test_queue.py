@@ -1233,6 +1233,31 @@ async def test_clock_sync_success_refreshes_clock_fact(db):
     assert facts["clock"] == "09:57 - 2/6/2026 UTC"
 
 
+async def test_operation_err_reply_counts_as_failure(db):
+    """MeshCore ERR replies are delivered as text but should fail the operation."""
+    op_cfg = OperationConfig(command="clock sync", every_hours=24, fire_and_forget=False)
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),
+        CommandResult(success=True, text="ERR: clock cannot go backwards"),
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].operations_run == 0
+    assert results[0].operations_failed == 1
+    last = await db.get_last_operation("aabbccdd1122", "clock sync")
+    assert last is not None
+    assert last.status == OperationStatus.FAILED
+    assert last.response == "ERR: clock cannot go backwards"
+
+
 async def test_cycle_runs_pending_operations(db):
     node_cfg = _node(pubkey="aabbcc", label="TestNode")
     cfg = _make_config(node_cfgs=[node_cfg])
