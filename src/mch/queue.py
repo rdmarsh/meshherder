@@ -49,6 +49,8 @@ from mch.models import (
 log = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], Awaitable[None]] | None
 _PATH_HEX_RE = re.compile(r"^[0-9a-fA-F,]+(?::[0-3])?$")
+_MIN_RECOVERY_SF = 5
+_MAX_RECOVERY_SF = 12
 
 
 async def _progress(callback: ProgressCallback, message: str) -> None:
@@ -310,7 +312,7 @@ def _append_radio_candidate(
     seen_channels: set[tuple[float, float, int]],
     candidate: _RadioCandidate | None,
 ) -> None:
-    if candidate is None or not 7 <= candidate.sf <= 12:
+    if candidate is None or not _MIN_RECOVERY_SF <= candidate.sf <= _MAX_RECOVERY_SF:
         return
     if candidate.channel in seen_channels:
         return

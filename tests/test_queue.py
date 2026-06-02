@@ -2169,6 +2169,36 @@ def test_radio_recovery_candidates_ignore_profile_presets():
     ]
 
 
+def test_radio_recovery_candidates_keep_sf_within_meshcore_bounds():
+    low_cfg = _node(
+        pubkey="aabbcc",
+        settings={"radio": SettingConfig(desired="915.800,250,5,5")},
+    )
+    high_cfg = _node(
+        pubkey="bbccdd",
+        settings={"radio": SettingConfig(desired="915.800,250,12,5")},
+    )
+    cfg = _make_config(node_cfgs=[low_cfg, high_cfg])
+
+    low_candidates = radio_recovery_candidates(
+        cfg, low_cfg, None, cfg.global_settings, tried_channels={(915.075, 125.0, 9)}
+    )
+    high_candidates = radio_recovery_candidates(
+        cfg, high_cfg, None, cfg.global_settings, tried_channels={(915.075, 125.0, 9)}
+    )
+
+    assert [(c.sf, c.source) for c in low_candidates[:2]] == [
+        (5, "effective desired radio"),
+        (6, "effective desired radio SF6 fallback"),
+    ]
+    assert all(c.sf != 4 for c in low_candidates)
+    assert [(c.sf, c.source) for c in high_candidates[:2]] == [
+        (12, "effective desired radio"),
+        (11, "effective desired radio SF11 fallback"),
+    ]
+    assert all(c.sf != 13 for c in high_candidates)
+
+
 async def test_unreachable_node_tries_bounded_config_radio_fallback(db):
     node_cfg = _node(
         pubkey="aabbcc",

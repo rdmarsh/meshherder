@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.29 - 2026-06-02
+
+- Made radio recovery SF bounds explicit as SF5 through SF12, so nearby SF fallback never emits
+  invalid SF4/SF13 while allowing valid SF5/SF6 candidates.
+
 ## 0.9.28 - 2026-06-02
 
 - Removed `profiles.yaml` presets from automatic radio recovery; fallback now stays within radios
