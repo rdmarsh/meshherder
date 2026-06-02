@@ -23,6 +23,8 @@ Think Ansible for your nodes, running continuously in the background.
       * [Building a node on the bench](#building-a-node-on-the-bench)
       * [Day-to-day checks](#day-to-day-checks)
       * [Forcing a sync](#forcing-a-sync)
+      * [Inspecting and repairing management paths](#inspecting-and-repairing-management-paths)
+      * [Active discovery on another radio](#active-discovery-on-another-radio)
       * [Checking status in the field](#checking-status-in-the-field)
       * [Read-only fleet API](#read-only-fleet-api)
       * [Changing a setting fleet-wide](#changing-a-setting-fleet-wide)
@@ -308,6 +310,7 @@ mch validate                # validate /etc/meshherder/config.yaml
 mch suggest                    # suggested txdelay for every node based on neighbour count
 mch suggest <label|prefix>     # full suggestions + paste-ready config block
 mch contacts                # nodes visible to the gateway but not yet in config
+mch discover --radio F,B,S,C  # active bounded scan on a temporary gateway radio
 ```
 
 `mch validate` also warns about unrecognised names in `facts:` and suggests close known
@@ -359,6 +362,76 @@ Reachability and path behavior is deliberately conservative:
 - Path repair is explicit: use `mch path <node> --discover` or `--advert` to learn a candidate,
   then `mch path <node> --apply <path[:mode]>` to persist an operator-approved stored path on the
   gateway contact. Rerun `mch sync <node>` after applying the path.
+
+### Inspecting and repairing management paths
+
+`mch path NODE` is the read-only route inspection tool. `NODE` is required and may be a local
+label, mesh name substring, or pubkey prefix:
+
+```bash
+mch path wip06
+mch path c041a906d246
+```
+
+The command reads the gateway's cached MeshCore contact metadata. It does not send a probe to the
+node and it does not prove the route works right now.
+
+Example output:
+
+```text
+c041a906d246  wip06  wip 06
+cached path: flood
+route: flood (path repair needed)
+gateway contact:
+  name: wip 06
+  type: 2
+  flags: 1
+  out_path: -
+  out_path_len: -1
+  out_path_hash_mode: -1
+```
+
+Interpret the fields as follows:
+
+- `cached path`: human-readable summary of the gateway contact route.
+- `route`: `direct`, `stored`, `flood`, `missing`, or `unknown`.
+- `path repair needed`: normal management will not run a full sync over this cached route.
+- `out_path`: repeater path hash(es) used for a stored route; `-` means none is stored.
+- `out_path_len`: `0` means direct, a positive number means stored repeater hops, and `-1` means
+  flood routing.
+- `out_path_hash_mode`: MeshCore path hash mode to preserve when applying a replacement path.
+
+For a flood-routed or stale route, inspect candidates first:
+
+```bash
+mch path wip06 --discover
+mch path wip06 --advert
+```
+
+Both commands print a candidate and an `apply with:` line when they find one. Review the candidate,
+then persist it only if it is the route you want the gateway to use:
+
+```bash
+mch path wip06 --apply 2fd9:1
+mch sync wip06
+```
+
+Use `--apply` carefully: it changes the gateway's cached contact path. A wrong path can make normal
+management less reachable until repaired again.
+
+### Active discovery on another radio
+
+`mch discover --radio FREQ,BW,SF,CR` sends a bounded MeshCore discovery request on a temporary
+gateway radio and restores the gateway radio afterward:
+
+```bash
+mch discover --radio 915.800,250,10,5 --dwell 5
+```
+
+This is not an advert wait and it does not edit `config.yaml`, seed the DB, or add gateway
+contacts. It only proves which nodes answer on that radio and prints their full public keys,
+type, SNR, and discovery tag. Use it before a future adopt/contact-seeding step, or when checking
+whether a node is alive on a non-home radio.
 
 ### Checking status in the field
 
@@ -470,10 +543,11 @@ mch validate                  Validate /etc/meshherder/config.yaml
 mch validate --config <path>  Validate an explicit config file
 mch plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch plan <label|prefix>       Filter planned writes/audit drift/unknown values
-mch path <label|prefix>       Show cached gateway management route metadata for one node
+mch path <label|prefix>       Show cached gateway management route metadata; no mesh probe
 mch path <node> --discover    Learn a fresh path-discovery candidate without applying it
 mch path <node> --advert      Show the gateway's cached advert path candidate
 mch path <node> --apply P[:M] Apply an operator-approved replacement path to the gateway contact
+mch discover --radio R        Actively discover nodes on a temporary radio; no DB/contact writes
 mch suggest                      Suggested txdelay for all nodes based on neighbour count
 mch suggest <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes

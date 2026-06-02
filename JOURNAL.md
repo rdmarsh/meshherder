@@ -4,6 +4,15 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.31 Active Radio Discovery
+
+- Released `0.9.31` to add standalone active discovery with
+  `mch discover --radio FREQ,BW,SF,CR --dwell SECONDS`. The command temporarily switches the
+  gateway radio, sends MeshCore active discovery, prints full public keys and signal metadata, and
+  restores the gateway radio without adding DB rows, gateway contacts, secrets, or config entries.
+- Clarified `mch path` docs/help after live use showed the required `NODE` argument and route
+  fields were confusing.
+
 ## 2026-06-02 - Luna 0.9.30 Status Known Path
 
 - Released `0.9.30` to add cached management path context to `mch status NODE`. The detail view

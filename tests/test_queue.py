@@ -205,6 +205,7 @@ def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:
         "path_hash_mode": 1,
     })
     gw.change_contact_path = AsyncMock()
+    gw.discover = AsyncMock(return_value=[])
     gw.switch_radio_temporarily = AsyncMock(return_value=(915.800, 250, 10, 5))
     gw.restore_radio = AsyncMock()
     gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
@@ -1574,6 +1575,32 @@ async def test_management_path_status_marks_flood_as_repair_needed(db):
     assert status["route"] == "flood"
     assert status["cached_path"] == "flood"
     assert status["path_repair_needed"] is True
+
+
+async def test_discover_nodes_runs_bounded_gateway_discovery(db):
+    cfg = _make_config()
+    gw = _make_gateway()
+    gw.discover.return_value = [{
+        "pubkey": "8e4a0d73" + "0" * 56,
+        "node_type": 2,
+        "SNR_in": 12.5,
+        "tag": "00000000",
+    }]
+    wq = WorkQueue(cfg, gw, db)
+    messages: list[str] = []
+
+    async def progress(message: str) -> None:
+        messages.append(message)
+
+    result = await wq.discover_nodes((915.8, 250.0, 10, 5), dwell=3.0, progress=progress)
+
+    assert result["radio"]["text"] == "915.800/250/SF10/CR5"
+    assert result["nodes"][0]["pubkey"].startswith("8e4a0d73")
+    gw.discover.assert_awaited_once_with(factory_freq=(915.8, 250.0, 10, 5), dwell=3.0)
+    assert messages == [
+        "discovering on 915.800/250/SF10/CR5 for 3s",
+        "discovered 1 node(s)",
+    ]
 
 
 async def test_management_path_discover_returns_candidate_without_applying(db):

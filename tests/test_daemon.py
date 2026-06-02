@@ -47,6 +47,11 @@ def wq():
     m.management_path_status = MagicMock(return_value={"route": "stored"})
     m.discover_management_path = AsyncMock(return_value={"path": "e260", "path_hash_mode": 1})
     m.apply_management_path = AsyncMock(return_value={"route": "stored"})
+    m.discover_nodes = AsyncMock(return_value={
+        "radio": {"text": "915.800/250/SF10/CR5"},
+        "dwell": 5.0,
+        "nodes": [],
+    })
     return m
 
 
@@ -173,6 +178,35 @@ async def test_path_discover_dispatch_resolves_node_and_returns_candidate(db, wq
     assert resp["ok"] is True
     assert resp["data"]["path"] == "e260"
     wq.discover_management_path.assert_awaited_once_with(node, source="advert")
+
+
+async def test_discover_dispatch_runs_bounded_radio_discovery(db, wq, config):
+    resp = await _dispatch(
+        {"cmd": "discover", "radio": [915.8, 250, 10, 5], "dwell": 4},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    wq.discover_nodes.assert_awaited_once_with(
+        (915.8, 250.0, 10, 5),
+        dwell=4.0,
+        progress=None,
+    )
+
+
+async def test_discover_dispatch_rejects_invalid_dwell(db, wq, config):
+    resp = await _dispatch(
+        {"cmd": "discover", "radio": [915.8, 250, 10, 5], "dwell": 31},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is False
+    assert "dwell" in resp["error"]
+    wq.discover_nodes.assert_not_awaited()
 
 
 async def test_path_apply_dispatch_resolves_node_and_applies_path(db, wq, config):

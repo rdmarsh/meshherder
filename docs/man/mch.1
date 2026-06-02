@@ -122,6 +122,40 @@ applies.
 Sync one node immediately while streaming fact reads, setting checks, enforcement
 actions, operations, and timeout failures as they occur.
 .TP
+.B path \fILABEL_OR_PREFIX\fR
+Show the gateway's cached management route metadata for one node without probing
+the mesh. Routes may be
+.BR direct ,
+.BR stored ,
+.BR flood ,
+or
+.BR missing .
+.B flood
+and
+.B missing
+are marked
+.B "path repair needed"
+because full management syncs avoid flood-routed contacts.
+.TP
+.B path \fILABEL_OR_PREFIX\fR \-\-discover
+Ask MeshCore for a fresh path-discovery candidate and print the value to review.
+The gateway contact is not changed.
+.TP
+.B path \fILABEL_OR_PREFIX\fR \-\-advert
+Print the gateway's cached advert path candidate without changing the contact.
+.TP
+.B path \fILABEL_OR_PREFIX\fR \-\-apply \fIPATH[:MODE]\fR
+Apply an operator-approved replacement path to the gateway contact. Re-run
+.B sync
+for the node after applying. A wrong path can make management less reachable
+until repaired again.
+.TP
+.B discover \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-dwell \fISECONDS\fR]
+Temporarily switch the gateway radio, send an active MeshCore discovery request,
+collect responses for a bounded dwell period, then restore the gateway radio.
+This prints discovered public keys and signal metadata. It does not add DB nodes,
+gateway contacts, secrets, or config entries.
+.TP
 .B exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
 Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked
 or require confirmation.

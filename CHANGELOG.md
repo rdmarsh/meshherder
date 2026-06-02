@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.31 - 2026-06-02
+
+- Added `mch discover --radio FREQ,BW,SF,CR`, a bounded active MeshCore discovery command that
+  temporarily switches the gateway radio, sends a discovery request, prints discovered public keys
+  and signal metadata, and restores the gateway radio without DB/contact/config writes.
+- Expanded `mch path` documentation and help with field meanings and the path repair flow.
+
 ## 0.9.30 - 2026-06-02
 
 - Added cached management path context to `mch status NODE`, including stored path metadata and
