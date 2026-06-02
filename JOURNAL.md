@@ -4,6 +4,21 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-02 - Luna 0.9.25/0.9.26 Clock Sync Retry
+
+- Wold manual sync showed the `clock` fact still `fast by 4h 8m` even though `clock sync` was
+  configured. Inspecting luna's operations table showed an old failed `clock sync` from
+  2026-05-24; failed recurring operations were never re-queued because `_seed_operations()` treated
+  failed rows as already handled.
+- Released and deployed `0.9.25` at commit `b1dca55`, retrying failed recurring operations after
+  their configured `every_hours` window and re-reading `clock` after a successful `clock sync`.
+- Live Wold smoke sync retried `clock sync`, then the node replied `ERR: clock cannot go
+  backwards`; this means the clock was actually fast and MeshCore refused to move it backward.
+- Released and deployed `0.9.26` at commit `dd55bb0`, treating operation replies beginning with
+  `ERR:` as failures instead of successes. Corrected the historical Wold operation row from
+  `success` to `failed` because its response was `ERR: clock cannot go backwards`.
+- Added backlog items to investigate `get pwrmgt.support` and safe remediation for fast clocks.
+
 ## 2026-06-02 - Luna 0.9.22/0.9.24 Next Sync Status
 
 - Released and deployed `0.9.22` to add an approximate `next sync` line to `mch status NODE`,

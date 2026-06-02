@@ -24,6 +24,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   model is visible and reviewable.
 - Allow an operator-requested `commission` or `exec` to preempt scheduled sync at a safe
   between-command boundary rather than repeatedly returning `busy`.
+- Investigate safe remediation for fast node clocks. Live Wold testing showed `clock sync` can
+  return `ERR: clock cannot go backwards`, so the ordinary clock-sync operation only fixes slow
+  clocks. Any fallback such as reboot/clkreboot must be board/firmware tested before automation.
 
 ### Configuration And Radio Semantics
 
