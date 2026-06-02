@@ -80,6 +80,11 @@ def _resolve_operations(
     return list(by_command.values())
 
 
+def _operation_succeeded(res: CommandResult) -> bool:
+    text = (res.text or "").strip()
+    return res.success and not text.startswith("ERR:")
+
+
 def _describe_cached_management_path(contact: dict[str, Any]) -> str:
     path_len = contact.get("out_path_len")
     if path_len == -1:
@@ -1881,10 +1886,11 @@ class WorkQueue:
             op.run_at = datetime.now(UTC)
             op.response = res.text or res.error
 
-            if res.success or faf:
+            success = _operation_succeeded(res)
+            if success or faf:
                 op.status = OperationStatus.SUCCESS
                 run += 1
-                if faf and not res.success:
+                if faf and not success:
                     log.info("  operation sent (fire-and-forget): %r", op.command)
                     await self._db.write_log(
                         pubkey, "INFO", f"operation sent (fire-and-forget): {op.command!r}"
@@ -1898,8 +1904,9 @@ class WorkQueue:
             else:
                 op.status = OperationStatus.FAILED
                 failed += 1
+                error = res.error or res.text or "no response"
                 await self._db.write_log(
-                    pubkey, "ERROR", f"operation failed: {op.command!r}: {res.error}"
+                    pubkey, "ERROR", f"operation failed: {op.command!r}: {error}"
                 )
 
             await self._db.update_operation(op)

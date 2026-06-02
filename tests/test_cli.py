@@ -319,8 +319,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_25():
-    assert __version__ == "0.9.25"
+def test_current_release_version_is_0_9_26():
+    assert __version__ == "0.9.26"
 
 
 def _run(args, rpc_response):

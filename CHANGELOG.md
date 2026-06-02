@@ -5,6 +5,12 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.9.26 - 2026-06-02
+
+- Treat MeshCore operation replies beginning with `ERR:` as operation failures, even when the
+  gateway delivered the reply as command text. This correctly reports cases such as
+  `ERR: clock cannot go backwards`.
+
 ## 0.9.25 - 2026-06-02
 
 - Fixed recurring operations that previously failed, such as `clock sync`, so they are retried
