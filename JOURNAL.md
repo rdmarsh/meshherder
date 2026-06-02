@@ -4,6 +4,61 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-03 - Onboarding reachability: the difficulty axis is routability, not location
+
+- Investigated a configured node that would not sync: scheduled sync reported "unreachable over
+  flood", the config-derived radio recovery hunt tried the effective desired radio and nearby SF
+  variants, and all reachability probes failed. Yet active discovery on the node's radio answered
+  immediately at strong SNR.
+- Key finding: **broadcast discovery succeeding does not mean a directed command will succeed.**
+  `mch discover` is a path-less broadcast advert exchange; the reachability probe is a directed
+  `ver` that must flood-route there and back. A flood-routed directed command can fail to complete
+  even when the radio link is plainly good both ways. Discovery also does not install a route - the
+  contact stayed flood (`out_path_len = -1`) after a successful discover.
+- This reframed the onboarding model (see ROADMAP.md): the variable that actually decides
+  difficulty is **whether the gateway has a usable route to the node**, not bench-vs-wild. Routable
+  nodes (real `out_path`) already work via config + sync. The hard case is a known contact with no
+  usable route; bench is just the one situation where we can manufacture a route via direct
+  discovery. A node unknown to the gateway and out of direct range is out of *remote* scope.
+- Open, load-bearing assumption: install a direct (zero-hop) route on the radio where discovery
+  succeeded, then directed commands work. Discovery is proven; the direct-route fix is not. The
+  bench node is the test that confirms or kills that branch of the model.
+- Also confirmed `mch adopt` only seeds a flood contact today - it does not persist the discovered
+  radio or install a route, so it does not currently make a node manageable. Minimal-first next
+  step is to extend it to do both.
+
+## 2026-06-03 - txdelay vs neighbour count is contested; presets may be backwards
+
+- Reviewed the MeshCore community discussion on txdelay (discussion 2053). txdelay scales the
+  random backoff before a repeater retransmits a flood (`delay = random(0, 5*t+1)`,
+  `t = airtime * txdelay`), so it is a collision-avoidance knob, not a "right of way" priority.
+- The community lean is density-based backoff: more neighbours -> *higher* txdelay. Our bundled
+  `profiles.yaml` does the opposite (more neighbours -> lower txdelay), so it may be backwards.
+- The thread is itself inconclusive: a simulator recommended txdelay=0 everywhere, but real-world
+  testing showed zero delay made error rates worse. Conclusion: treat `mch suggest` txdelay output
+  as provisional and validate direction/slope against real delivery/collision behaviour before
+  trusting it. Logged as a BACKLOG live-test item.
+
+## 2026-06-03 - Bounded gateway get_contacts to stop a shutdown hang
+
+- The meshcore `get_contacts()` serial round-trip had no timeout. Because it runs in the
+  config-reload path, an unbounded await left `systemctl restart mchd` stuck in `deactivating`
+  until SIGKILL during the 0.9.29 luna deploy.
+- Fix: wrap the call in `asyncio.wait_for` (default 30s, overridable) and raise a clean
+  `GatewayError` on timeout, centralised in `Gateway.get_contacts` so all call sites benefit.
+  Matches how `send_command` already bounds its wait. Regression test added.
+- Residual shutdown-cancellation hardening is still open (SIGHUP reload runs as a detached task
+  `_shutdown` never cancels; other gateway calls rely on per-call timeouts) - parked in BACKLOG.
+
+## 2026-06-03 - Process: ROADMAP.md added; memory journal retired
+
+- Added `ROADMAP.md` as the forward-looking north star (the 14 target capabilities, the
+  routability onboarding model, DB-primary inventory direction, CLI/API share-the-model stance,
+  derived-setting recommendations, and the unreliable-mesh operating reality).
+- The separate point-in-time memory journal had fallen ~9 days / 100+ commits behind and was
+  retired; the repo docs (`CHANGELOG.md`, `BACKLOG.md`, this `JOURNAL.md`, `DESIGN.md`) are the
+  canonical running record going forward.
+
 ## 2026-06-02 - Luna 0.9.33 Discovery Adoption
 
 - Released `0.9.33` to annotate active discovery results with `STATUS` and `LABEL`, add
