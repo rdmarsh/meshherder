@@ -24,7 +24,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mch.command_registry import command_timeout, read_command_for_key, write_command_for_key
@@ -346,27 +345,8 @@ def radio_recovery_candidates(
     if not effective:
         return []
 
-    profile_candidates: list[_RadioCandidate | None] = []
-    try:
-        from mch.recommend import load_radio_presets
-
-        profiles_file = Path(config.profiles_file) if config.profiles_file else None
-        profile_candidates.extend(
-            _radio_from_setting(preset.value, f"profile preset {preset.name}")
-            for preset in load_radio_presets(
-                profiles_url=config.profiles_url,
-                profiles_file=profiles_file,
-            )
-        )
-    except Exception as exc:
-        log.warning("could not load profile radio presets for fallback: %s", exc)
-
-    for candidate in profile_candidates:
-        _append_radio_candidate(candidates, seen_channels, candidate)
-        if len(candidates) >= _RADIO_FALLBACK_MAX_CANDIDATES:
-            return candidates
-
     for base in effective:
+        _append_radio_candidate(candidates, seen_channels, base)
         for delta in (-1, 1):
             sf = base.sf + delta
             _append_radio_candidate(
@@ -374,7 +354,6 @@ def radio_recovery_candidates(
                 seen_channels,
                 _candidate_with_sf(base, sf, f"{base.source} SF{sf} fallback"),
             )
-        _append_radio_candidate(candidates, seen_channels, base)
 
     configured: list[_RadioCandidate | None] = [
         _radio_from_config(config.gateway.radio, "gateway.radio"),
@@ -1513,24 +1492,30 @@ class WorkQueue:
                 f"{len(candidates)} config-derived radio fallback(s)"
             ),
         )
-        for candidate in candidates:
-            saved_radio: tuple[float, float, int, int] | None = None
-            reached = False
-            candidate_text = _format_radio(
-                candidate.freq, candidate.bw, candidate.sf, candidate.cr
-            )
-            await _progress(progress, f"trying radio fallback: {candidate_text}")
-            await self._db.write_log(
-                node.pubkey,
-                "WARNING",
-                f"trying radio fallback {candidate_text} ({candidate.source})",
-            )
-            try:
-                saved_radio = await self._gateway.switch_radio_temporarily(
+        hunt_saved_radio: tuple[float, float, int, int] | None = None
+        reached = False
+        try:
+            for candidate in candidates:
+                candidate_text = _format_radio(
                     candidate.freq, candidate.bw, candidate.sf, candidate.cr
                 )
+                await _progress(progress, f"trying radio fallback: {candidate_text}")
+                await self._db.write_log(
+                    node.pubkey,
+                    "WARNING",
+                    f"trying radio fallback {candidate_text} ({candidate.source})",
+                )
+                if hunt_saved_radio is None:
+                    hunt_saved_radio = await self._gateway.switch_radio_temporarily(
+                        candidate.freq, candidate.bw, candidate.sf, candidate.cr
+                    )
+                else:
+                    await self._gateway.switch_radio_temporarily(
+                        candidate.freq, candidate.bw, candidate.sf, candidate.cr
+                    )
                 probe = await self._probe_reachable(contact, node, node_cfg, progress=progress)
                 if probe is not None:
+                    assert hunt_saved_radio is not None
                     reached = True
                     await self._db.write_log(
                         node.pubkey,
@@ -1538,22 +1523,22 @@ class WorkQueue:
                         f"radio fallback reached node on {candidate_text} ({candidate.source})",
                     )
                     await _progress(progress, f"radio fallback reached node: {candidate_text}")
-                    return probe, saved_radio
-            finally:
-                if saved_radio is not None and not reached:
-                    await self._gateway.restore_radio(*saved_radio)
-                    await self._db.write_log(
-                        node.pubkey,
-                        "INFO",
-                        f"restored gateway radio to {_format_radio_tuple(saved_radio)}",
-                    )
+                    return probe, hunt_saved_radio
 
-        await self._db.write_log(
-            node.pubkey,
-            "WARNING",
-            f"radio fallback exhausted ({len(candidates)} candidate(s))",
-        )
-        return None
+            await self._db.write_log(
+                node.pubkey,
+                "WARNING",
+                f"radio fallback exhausted ({len(candidates)} candidate(s))",
+            )
+            return None
+        finally:
+            if hunt_saved_radio is not None and not reached:
+                await self._gateway.restore_radio(*hunt_saved_radio)
+                await self._db.write_log(
+                    node.pubkey,
+                    "INFO",
+                    f"restored gateway radio to {_format_radio_tuple(hunt_saved_radio)}",
+                )
 
     async def _probe_reachable(
         self,

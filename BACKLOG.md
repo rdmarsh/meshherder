@@ -39,10 +39,17 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   if the node is being moved to a new radio.
 - Decide whether `via_radio.cr` should be optional. A CR difference alone does not prevent
   reception, but commissioning currently needs a complete `freq,bw,sf,cr` transmit setting.
-- Review whether radio recovery should use `profiles.yaml` radio presets automatically. Presets
-  are region-specific and a fetched or shared profile can contain frequencies that are illegal for
-  the current country; recovery may need an explicit operator-approved region/band allow-list
-  before trying profile-derived radios.
+- Add `mch probe NODE --radio freq,bw,sf,cr` for reachability-only investigation. It should switch
+  temporarily, send a cheap probe such as `ver`, restore the gateway radio, and optionally record
+  successful radios as known-good evidence.
+- Store known-good management radios in the DB with source, success/failure counts, and
+  `last_success_at` / `last_failure_at`; use them as radio-recovery candidates after configured
+  radios. Add an expiry or decay policy so stale bench/test evidence ages out naturally.
+- Consider observed-radio recovery candidates from successful DB observations, especially `radio`
+  setting reads, while excluding factory/commissioning defaults unless they succeeded for a
+  managed node during a normal/probe path.
+- Consider nearby bandwidth variants for radio recovery only after known-good radio history is in
+  place; SF variants are already speculative enough for the current bounded hunt.
 - Decide the node-name-prefix design. If `name_prefix` is added it should use Node > Group >
   Global precedence and respect the advertised-name byte limits: 32 bytes without location and
   24 with location. Do not add a suffix because truncation can create an enforcement loop.
