@@ -1115,6 +1115,27 @@ async def test_config_operations_reseeded_when_due(db):
     assert results[0].operations_run == 1
 
 
+async def test_failed_config_operations_reseeded_when_retry_due(db):
+    """Failed recurring operations are retried after their every_hours window."""
+    op_cfg = OperationConfig(command="clock sync", every_hours=24)
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    op = OperationRecord(
+        node_pubkey="aabbccdd1122", command="clock sync", every_hours=24,
+        status=OperationStatus.FAILED, run_at=datetime.now(UTC) - timedelta(hours=25),
+    )
+    await db.upsert_operation(op)
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].operations_run == 1
+
+
 async def test_operation_row_updated_not_duplicated(db):
     """Running a pending op updates the original row in-place — no duplicate INSERT."""
     node_cfg = _node(pubkey="aabbcc", label="TestNode")
@@ -1187,6 +1208,29 @@ async def test_fire_and_forget_false_still_fails_on_timeout(db):
     results = await wq.run_cycle()
     assert results[0].operations_run == 0
     assert results[0].operations_failed == 1
+
+
+async def test_clock_sync_success_refreshes_clock_fact(db):
+    """After clock sync succeeds, re-read clock so status reflects the corrected value."""
+    op_cfg = OperationConfig(command="clock sync", every_hours=24, fire_and_forget=False)
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),                 # reachability probe
+        CommandResult(success=True, text="OK - clock set"),          # clock sync
+        CommandResult(success=True, text="09:57 - 2/6/2026 UTC"),    # refreshed clock
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].operations_run == 1
+    facts = await db.get_facts("aabbccdd1122")
+    assert facts["clock"] == "09:57 - 2/6/2026 UTC"
 
 
 async def test_cycle_runs_pending_operations(db):
