@@ -651,7 +651,16 @@ def path(
     apply_path: str | None,
     yes: bool,
 ) -> None:
-    """Inspect or explicitly repair cached management path metadata for one node."""
+    """Inspect or explicitly repair the cached management path for NODE.
+
+    NODE is a label or pubkey prefix. With no option, this prints the gateway's
+    cached contact route only; it does not probe the mesh. A flood route is
+    marked "path repair needed" because normal management will avoid full syncs
+    over flood.
+
+    Repair flow: run --discover or --advert to print a candidate, then apply an
+    operator-approved value with --apply PATH[:MODE].
+    """
     selected = sum(1 for value in (discover, advert, apply_path is not None) if value)
     if selected > 1:
         raise click.UsageError("choose only one of --discover, --advert, or --apply")
@@ -917,6 +926,45 @@ def _render_path_candidate(data: dict[str, Any]) -> None:
         click.echo(f"  apply with: mch path {data['pubkey'][:12]} --apply {data['apply_value']}")
 
 
+def _render_discovery(data: dict[str, Any]) -> None:
+    radio = data.get("radio", {})
+    radio_text = radio.get("text") or "unknown"
+    dwell = data.get("dwell")
+    nodes = data.get("nodes", [])
+    click.echo(f"discovery radio: {radio_text}")
+    click.echo(f"dwell: {dwell:g}s" if isinstance(dwell, int | float) else f"dwell: {dwell}")
+
+    if not nodes:
+        click.echo("no nodes discovered")
+        return
+
+    type_w = max(len("TYPE"), max(len(str(node.get("node_type", "-"))) for node in nodes))
+    snr_w = max(len("SNR"), max(len(_discovery_snr(node.get("SNR_in"))) for node in nodes))
+    tag_w = max(len("TAG"), max(len(str(node.get("tag") or "-")) for node in nodes))
+    row = "  {:<12}  {:<64}  {:>{tw}}  {:>{sw}}  {:<{gw}}"
+    click.echo(row.format("PREFIX", "PUBKEY", "TYPE", "SNR", "TAG", tw=type_w, sw=snr_w, gw=tag_w))
+    click.echo(row.format("------", "------", "----", "---", "---", tw=type_w, sw=snr_w, gw=tag_w))
+    for node in nodes:
+        pubkey = str(node.get("pubkey") or "")
+        click.echo(row.format(
+            pubkey[:12] or "-",
+            pubkey or "-",
+            str(node.get("node_type", "-")),
+            _discovery_snr(node.get("SNR_in")),
+            str(node.get("tag") or "-"),
+            tw=type_w,
+            sw=snr_w,
+            gw=tag_w,
+        ))
+
+
+def _discovery_snr(value: object) -> str:
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
 def _render_issue_sections(
     drifted: list[dict[str, Any]],
     bad_state: list[dict[str, Any]],
@@ -1174,6 +1222,43 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
         click.echo("# secrets.yaml — append to the 'nodes:' section:")
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
+
+
+@cli.command("discover")
+@click.option(
+    "--radio",
+    required=True,
+    metavar="FREQ,BW,SF,CR",
+    help="Temporary gateway radio for active discovery, e.g. 915.800,250,10,5.",
+)
+@click.option(
+    "--dwell",
+    default=5.0,
+    show_default=True,
+    type=click.FloatRange(min=0.1, max=30.0),
+    help="Seconds to collect discovery responses after sending the request.",
+)
+@click.pass_context
+def discover(ctx: click.Context, radio: str, dwell: float) -> None:
+    """Actively discover MeshCore nodes on a temporary gateway radio.
+
+    This sends a bounded discovery request, restores the gateway radio, and
+    prints responses. It does not add nodes to the DB or gateway contacts.
+    """
+    error = validate_radio_tuple(radio)
+    if error:
+        raise click.UsageError(f"--radio {error}")
+    parsed = parse_radio_tuple(radio)
+    assert parsed is not None
+    freq, bw, sf, cr = parsed
+    resp = _rpc(
+        ctx.obj["socket"],
+        {"cmd": "discover", "radio": [float(freq), float(bw), int(sf), int(cr)], "dwell": dwell},
+        timeout=dwell + 30,
+        on_progress=lambda msg: click.echo(f"  {msg}"),
+    )
+    data = _check(resp)
+    _render_discovery(data)
 
 
 @cli.command()

@@ -344,8 +344,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_9_30():
-    assert __version__ == "0.9.30"
+def test_current_release_version_is_0_9_31():
+    assert __version__ == "0.9.31"
 
 
 def _run(args, rpc_response):
@@ -531,6 +531,40 @@ def test_path_command_rejects_multiple_mutating_options():
 
     assert result.exit_code != 0
     assert "choose only one" in result.output
+
+
+def test_discover_command_renders_active_discovery_results():
+    result = _run(["discover", "--radio", "915.800,250,10,5", "--dwell", "3"], {
+        "ok": True,
+        "data": {
+            "radio": {"text": "915.800/250/SF10/CR5"},
+            "dwell": 3.0,
+            "nodes": [{
+                "pubkey": "8e4a0d73" + "0" * 56,
+                "node_type": 2,
+                "SNR_in": 12.5,
+                "tag": "00000000",
+            }],
+        },
+    })
+
+    assert result.exit_code == 0
+    assert "discovery radio: 915.800/250/SF10/CR5" in result.output
+    assert "8e4a0d73" in result.output
+    assert "12.5" in result.output
+
+
+def test_discover_command_rejects_invalid_radio_before_rpc():
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "discover", "--radio", "915.800,250,99,5"],
+        )
+
+    assert result.exit_code != 0
+    assert "radio spreading factor" in result.output
+    rpc.assert_not_called()
 
 
 # ------ validate ------

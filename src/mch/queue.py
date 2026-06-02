@@ -632,6 +632,35 @@ class WorkQueue:
         """Return visible repeater contacts that are not yet in config."""
         return await get_unfiled_contacts(self._config, self._gateway)
 
+    async def discover_nodes(
+        self,
+        radio: tuple[float, float, int, int],
+        *,
+        dwell: float,
+        progress: ProgressCallback = None,
+    ) -> dict[str, Any]:
+        """Run a bounded active MeshCore discovery on a temporary gateway radio."""
+        async with self.operation("discover", wait=False):
+            self.pause()
+            try:
+                radio_text = _format_radio_tuple(radio)
+                await _progress(progress, f"discovering on {radio_text} for {dwell:g}s")
+                nodes = await self._gateway.discover(factory_freq=radio, dwell=dwell)
+                await _progress(progress, f"discovered {len(nodes)} node(s)")
+                return {
+                    "radio": {
+                        "freq": radio[0],
+                        "bw": radio[1],
+                        "sf": radio[2],
+                        "cr": radio[3],
+                        "text": radio_text,
+                    },
+                    "dwell": dwell,
+                    "nodes": nodes,
+                }
+            finally:
+                self.resume()
+
     def management_path_status(self, node: Node) -> dict[str, Any]:
         """Return cached gateway route metadata for a managed node without mesh traffic."""
         contact = self._contact_for_pubkey(node.pubkey)

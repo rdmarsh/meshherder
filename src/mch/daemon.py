@@ -279,6 +279,44 @@ async def _dispatch(
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
 
+    if cmd == "discover":
+        raw_radio = req.get("radio")
+        if not isinstance(raw_radio, list | tuple) or len(raw_radio) != 4:
+            return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
+        try:
+            radio = (
+                float(raw_radio[0]),
+                float(raw_radio[1]),
+                int(raw_radio[2]),
+                int(raw_radio[3]),
+            )
+            dwell = float(req.get("dwell", 5.0))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "radio and dwell must be numeric"}
+        if dwell <= 0 or dwell > 30:
+            return {"ok": False, "error": "dwell must be between 0 and 30 seconds"}
+        discover_progress_cb = None
+        if writer is not None:
+            async def discover_progress_cb(msg: str) -> None:
+                try:
+                    writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
+                    await writer.drain()
+                except (ConnectionResetError, BrokenPipeError):
+                    raise ClientDisconnected("discover client disconnected") from None
+        try:
+            return {
+                "ok": True,
+                "data": await wq.discover_nodes(
+                    radio,
+                    dwell=dwell,
+                    progress=discover_progress_cb,
+                ),
+            }
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
     if cmd == "sync":
         prefix = req.get("prefix")
         if prefix:
