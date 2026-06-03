@@ -4,6 +4,29 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## >>> RESUME HERE (paused 2026-06-04) - update or clear this block when you pick up <<<
+
+**Deploy state:** luna's running daemon is `ce23e82` (reach-on-own-radio fix). Origin is ahead at
+`63717a7` - it includes the `ver`-fact-from-probe fix (`e3c5b4e`) which is committed/pushed but
+**NOT deployed** (held deliberately). luna source == installed, so it's clean. Next deploy is a
+full one (git pull both checkouts -> `pip install .` -> restart `mchd`); see the deploy memory.
+
+**faulkland is stranded** and will not self-recover: it's physically on SF11, but mch enforced
+`set radio` to SF10, recorded observed=SF10, and the "radio confirmed -> skip recovery" rule now
+blocks the SF11 hunt -> "unreachable". To un-strand (out-of-band, mch can't send the reboot):
+`mch probe faulkland --radio 915.800,250,11,5 --login` to confirm it's on SF11, then reboot it
+(physically / meshcore-cli on SF11) -> it comes up on SF10 -> mch manages it on SF10 normally.
+
+**Headline next task:** fix enforced `radio` changes so they don't strand - `set radio` must be
+followed by a reboot, don't optimistically mark observed=desired for reboot-required settings until
+re-confirmed after reboot (gateway following to the new radio), and prefer the `tempradio` safe-
+migration trick (auto-reverts on failed confirmation). High-priority BACKLOG item; full evidence in
+the dated entry just below. Until fixed, treat `radio` as audit-only / bench-change.
+
+**Then:** deploy (ver-fact + the radio fix together) and retest faulkland. Other parked work in
+BACKLOG: hunt redesign (SF+-1 & BW+-1 + fleet-in-use radios), anonymous presence probe, and the
+startup-wedge-on-`get_contacts` robustness fix.
+
 ## 2026-06-04 - faulkland came under management end-to-end - and exposed a radio-reboot strand
 
 - **Milestone:** faulkland's scheduled sync (with the reach-on-own-radio + proactive-login fixes
