@@ -14,6 +14,23 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Operation Safety And Reachability
 
+- **Enforcing `radio` strands the node: `set radio` needs a reboot, and observed is recorded
+  optimistically.** Live evidence 2026-06-03/04: faulkland's first managed sync enforced `radio`
+  SF11->SF10; the node ACKed but `set radio` only takes effect after a reboot (firmware returns
+  "OK - reboot to apply"), so the node stayed physically on SF11. mch then set `observed = desired`
+  optimistically (`queue.py` ~line 2282, no read-back), so it believed SF10. Next sync probed the
+  reach radio SF10, got no answer, and the 0.9.35 "radio confirmed -> skip recovery" rule (observed
+  == desired == SF10) blocked the SF11 hunt -> permanently "unreachable". Commissioning (`mch new`)
+  already does `set radio -> reboot`; ordinary enforcement does not. Fix needs care:
+  (a) follow an enforced `radio` write with a reboot so it actually applies;
+  (b) do NOT optimistically mark `observed = desired` for reboot-required settings until
+      re-confirmed after the node comes back, and have the gateway *follow* to the new radio to
+      confirm;
+  (c) prefer the `tempradio <target>,<minutes>` safe-migration trick (node moves temporarily, the
+      gateway confirms reachability on the new radio, then commits; if confirmation fails the node
+      auto-reverts after the timeout) instead of a bare `set radio` that can strand on a bad value.
+  Until fixed, consider `radio` an audit-only setting in practice, or change it on the bench.
+  Related: the `tempradio` live-test item and "keep desired node radio distinct from reach radio".
 - **Proactively log in to auth-required nodes that silently drop unauthenticated commands.**
   (Confirmed root cause of the faulkland "unreachable" saga - see JOURNAL 2026-06-03 RESOLVED.)
   faulkland (v1.15.0) drops a directed command from a peer not in its ACL with no reply and no
