@@ -23,6 +23,13 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   before/instead of relying on the bare probe, so the gateway enters the node ACL at least once.
   `mch probe --login` already exercises the gateway side. Decide where this slots into the
   reachability-probe/sync flow and how it interacts with the offline/skip decision.
+- Consider an anonymous request (`SEND_ANON_REQ`, owner/basic) as the reachability/presence probe
+  instead of (or before) the bare `ver`. It returns clock/name/flags **without login or ACL
+  membership**, so it cleanly separates "node present but gateway not in its ACL" from "truly
+  unreachable" - the exact ambiguity that misdiagnosed faulkland - and yields the remote clock for
+  free. `tools/query_node_info.py` already implements the wire format; it needs lifting into the
+  Gateway class. Note firmware exposes no anonymous version, so `ver` as a *fact* still needs
+  login/guest. Pairs with the proactive-login item above.
 - Make daemon startup tolerate a `get_contacts` failure instead of wedging. After the 0.9.34
   timeout bound, a `get_contacts` timeout at work-queue startup (`queue.py`) now raises out of the
   work-queue task and leaves the daemon half-alive: control socket up, work queue dead, every
