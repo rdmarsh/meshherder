@@ -701,6 +701,7 @@ class WorkQueue:
         *,
         radio: tuple[float, float, int, int],
         label: str | None = None,
+        progress: ProgressCallback = None,
     ) -> dict[str, Any]:
         """Adopt an already-running discovered node into local DB and gateway contacts."""
         pubkey = pubkey.lower()
@@ -770,11 +771,14 @@ class WorkQueue:
                 "INFO",
                 "installed direct (zero-hop) route on gateway contact",
             )
+            await _progress(progress, "installed direct (zero-hop) route on gateway contact")
 
             # Confirm probe: the keystone is unproven, so verify a directed command
             # actually completes over the new direct route. The node is on a non-home
             # radio, so switch to the discovery radio for the probe and always restore.
-            confirm = await self._confirm_direct_route(pubkey, contact, radio)
+            confirm = await self._confirm_direct_route(
+                pubkey, contact, radio, progress=progress
+            )
 
             path_len = contact.get("out_path_len")
             if path_len == -1:
@@ -811,6 +815,8 @@ class WorkQueue:
         pubkey: str,
         contact: dict[str, Any],
         radio: tuple[float, float, int, int],
+        *,
+        progress: ProgressCallback = None,
     ) -> dict[str, Any]:
         """Send one directed `ver` over the new direct route on the node's radio.
 
@@ -818,10 +824,15 @@ class WorkQueue:
         directed command complete once a direct route is installed? Always
         restores the gateway radio afterwards.
         """
+        radio_text = _format_radio_tuple(radio)
+        await _progress(progress, f"switching gateway radio to {radio_text} for confirm probe")
         saved_radio = await self._gateway.switch_radio_temporarily(*radio)
         try:
+            await _progress(progress, "sending directed `ver` over the direct route...")
             result = await self._gateway.send_command(contact, "ver", timeout=30)
         finally:
+            saved_text = _format_radio_tuple(saved_radio)
+            await _progress(progress, f"restoring gateway radio to {saved_text}")
             await self._gateway.restore_radio(*saved_radio)
 
         if _operation_succeeded(result):
@@ -831,6 +842,7 @@ class WorkQueue:
                 "INFO",
                 f"direct-route confirm probe succeeded: ver -> {response!r}",
             )
+            await _progress(progress, f"confirm probe ok: ver -> {response}")
             return {"sent": True, "ok": True, "response": response}
 
         response = (result.text or result.error or "no response").strip()
@@ -839,6 +851,7 @@ class WorkQueue:
             "WARNING",
             f"direct-route confirm probe failed: {response}",
         )
+        await _progress(progress, f"confirm probe FAILED: {response}")
         return {"sent": True, "ok": False, "response": response}
 
     def management_path_status(self, node: Node) -> dict[str, Any]:

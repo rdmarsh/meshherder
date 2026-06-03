@@ -1363,6 +1363,7 @@ def adopt(ctx: click.Context, pubkey: str, radio: str, label: str | None, yes: b
             "radio": [float(freq), float(bw), int(sf), int(cr)],
             "label": clean_label,
         },
+        on_progress=lambda msg: click.echo(f"  {msg}"),
         timeout=60,
     )
     data = _check(resp)
