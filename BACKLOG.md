@@ -30,15 +30,20 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   free. `tools/query_node_info.py` already implements the wire format; it needs lifting into the
   Gateway class. Note firmware exposes no anonymous version, so `ver` as a *fact* still needs
   login/guest. Pairs with the proactive-login item above.
-- Fix the 0.9.35 "radio confirmed -> skip recovery" optimization for nodes on a non-home radio
-  without `via_radio`. The skip assumes the just-failed probe was sent on the node's radio, so a
-  failure must be a path issue. But with no `via_radio`, the probe goes out on the gateway *home*
-  radio, which cannot reach a node on a different frequency/bandwidth at all (e.g. faulkland on
-  915.800 vs home 915.075). Once such a node's observed radio matches desired, the skip fires, the
-  hunt is never run, and the node is wrongly marked unreachable - a steady-state strand. Either
-  require `via_radio` for off-home-radio nodes (and document it), or make the skip aware of whether
-  the failed probe actually used the node's desired radio (home == desired, or via_radio == desired)
-  before concluding "path, not radio".
+- Default the probe/management reach radio to the node's desired `settings->radio`, not the gateway
+  home radio. Today `_process_node` switches the gateway radio only when `via_radio` is set
+  (`resolve_via_radio`); the node's desired `radio` is consulted *only* as a recovery-hunt candidate.
+  So a node whose desired radio differs from the home radio (e.g. faulkland on 915.800 vs home
+  915.075) is never probed on its own radio directly - it is reachable only via the recovery hunt,
+  and once its observed radio matches desired the 0.9.35 "radio confirmed -> skip recovery" rule
+  disables the hunt and the node is wrongly marked unreachable (steady-state strand). Correct model
+  (per operator): the reach radio for a node *is* its `settings->radio` in the normal case; switch
+  to it for the probe. `via_radio` is the OVERRIDE for split-mesh / bridged reachability, where the
+  gateway must sit on a *different* radio than the node's own to reach it - so `via_radio` should be
+  redundant whenever it equals `settings->radio`. With the primary probe on the node's own radio,
+  the 0.9.35 skip becomes correct (a failure there really is a path/availability issue), and
+  `via_radio` is reserved for true bridging. Skip the switch when the node's radio already equals
+  the gateway's current radio (the existing `switch_required` equality check).
 - Make daemon startup tolerate a `get_contacts` failure instead of wedging. After the 0.9.34
   timeout bound, a `get_contacts` timeout at work-queue startup (`queue.py`) now raises out of the
   work-queue task and leaves the daemon half-alive: control socket up, work queue dead, every
