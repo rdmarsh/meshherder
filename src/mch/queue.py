@@ -1950,6 +1950,41 @@ class WorkQueue:
                 "reachability probe %d/%d failed for %s: %s",
                 attempt, _PROBE_ATTEMPTS, node.pubkey[:12], res.error or "no response",
             )
+
+        # An auth-required node silently DROPS an unauthenticated directed command -
+        # no reply, no permission error, just a timeout - so the bare probe above
+        # cannot distinguish "needs login" from "unreachable", and _send_authed only
+        # re-authenticates on an explicit permission error that never arrives. If a
+        # password is configured and we have not authenticated this session, log in
+        # once (which enters the node's ACL) and re-probe before giving up. We do this
+        # only after the bare probe fails so a node already in our ACL keeps the cheap
+        # no-login path. Confirmed necessary on faulkland v1.15.0 (JOURNAL 2026-06-03).
+        if not node.auth_cached:
+            password = self._password_for_node(node)
+            if password:
+                await _progress(
+                    progress, "bare probe failed; logging in (node may just need ACL)"
+                )
+                login_ok = await self._gateway.login(contact, password)
+                if login_ok:
+                    node.auth_cached = True
+                    await self._db.upsert_node(node)
+                    await self._db.write_log(
+                        node.pubkey,
+                        "INFO",
+                        "proactive login succeeded; entered node ACL after bare probe timed out",
+                    )
+                    res = await self._send_authed(contact, _PROBE_COMMAND, node, node_cfg)
+                    if res.success:
+                        await _progress(progress, "reachable after login")
+                        return res
+                else:
+                    await self._db.write_log(
+                        node.pubkey,
+                        "WARNING",
+                        "proactive login failed after bare probe timed out",
+                    )
+
         if stored_path_failed:
             await _progress(progress, "stored path failed; checking flood reachability once")
             flood_contact = _flood_route_contact(contact)
