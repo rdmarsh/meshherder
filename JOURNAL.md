@@ -4,6 +4,29 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-04 - faulkland came under management end-to-end - and exposed a radio-reboot strand
+
+- **Milestone:** faulkland's scheduled sync (with the reach-on-own-radio + proactive-login fixes
+  deployed) reached it, authenticated, enforced all 12 predeployed settings (name, owner.info,
+  lat/lon, agc/flood.advert intervals, multi.acks, radio, etc.), ran `clock sync`, and collected
+  `ver`/`neighbors`/`clock`. Case #3 - the node "unreachable" all saga - is fully managed. The
+  whole auth+reach model works.
+- **But enforcing `radio` stranded it.** mch sent `set radio 915.800,250,10,5` (SF11->SF10); the
+  node ACKed, but `set radio` needs a reboot to apply (firmware "OK - reboot to apply"), so the node
+  stayed physically on SF11. mch recorded `observed = desired` optimistically (`queue.py` ~2282, no
+  read-back), so it believed SF10. The next sync probed the reach radio SF10, got nothing (node on
+  SF11), and the 0.9.35 "radio confirmed -> skip recovery" rule blocked the SF11 hunt -> permanent
+  "unreachable". Three compounding causes: no reboot after an enforced `set radio`; optimistic
+  observed update for a deferred-effect setting; and the skip then blocking recovery.
+- Recovery: faulkland is physically on SF11; a reboot brings it up on SF10 (the saved value), after
+  which mch reaches it on SF10 normally. mch cannot send that reboot itself (the skip blocks the
+  SF11 hunt), so reboot it out-of-band (or reach it on SF11 manually first). Confirm it is still on
+  SF11 with `mch probe faulkland --radio 915.800,250,11,5 --login`.
+- Fix direction (next session, not done): enforce `radio` -> reboot; don't confirm observed for
+  reboot-required settings until re-read after reboot with the gateway following to the new radio;
+  prefer the `tempradio` safe-migration trick (auto-revert on failed confirmation) over a bare
+  `set radio` that can strand. Logged in BACKLOG as high priority.
+
 ## 2026-06-03 - Fixes shipped from the faulkland session: proactive login + reach-on-own-radio
 
 - **Proactive login in the reachability probe.** When the bare `ver` probe fails, a password is
