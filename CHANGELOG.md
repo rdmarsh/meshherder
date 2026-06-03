@@ -5,6 +5,15 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- `mch adopt` now installs a direct (zero-hop) route on the new gateway contact and sends one
+  directed `ver` on the discovered radio to confirm the route carries a command, restoring the
+  gateway radio afterwards. This is the minimal-first step of the routability-onboarding work: a
+  flood-routed directed command can fail even at strong SNR (the faulkland case), so adopt converts
+  the contact to a direct route and reports whether a directed command actually completes. The
+  confirm probe result is shown in the command output and recorded in `mch logs`. DB persistence of
+  the discovered reach-radio is deliberately deferred until the keystone (direct route -> directed
+  command works) is confirmed on a real node.
+
 ## 0.9.35 - 2026-06-03
 
 - Skip config-derived radio recovery when a node's radio is already confirmed (its observed

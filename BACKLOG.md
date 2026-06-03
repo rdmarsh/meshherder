@@ -41,7 +41,10 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 - Extend `mch adopt` beyond the initial DB/contact seed: retain the discovery evidence used for
   adoption, expose adopted-radio/path caveats in status, and make follow-up path/radio repair
-  steps explicit.
+  steps explicit. (Partially done, Unreleased: adopt now installs a direct zero-hop route and runs
+  a directed-`ver` confirm probe on the discovered radio. Still open: *persisting* the discovered
+  reach-radio so scheduled sync can reach the node without a config `via_radio` - deferred until the
+  routability keystone is confirmed on a real node, see ROADMAP.)
 - Store discovered/adopted management radios in the DB. Active discovery on a non-home radio proves
   the node answered there, but config-only `via_radio` is too clumsy for ad hoc recovery and
   adoption; the DB should retain the radio evidence with source and timestamp.

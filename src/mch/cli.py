@@ -997,6 +997,13 @@ def _render_adopt_result(data: dict[str, Any]) -> None:
         click.echo(f"  route: {route} (path repair needed)")
     else:
         click.echo(f"  route: {route}")
+    confirm = data.get("confirm") or {}
+    if confirm.get("sent"):
+        if confirm.get("ok"):
+            click.echo(f"  confirm probe: ok - directed ver -> {confirm.get('response') or '-'}")
+        else:
+            click.echo(f"  confirm probe: FAILED - {confirm.get('response') or 'no response'}")
+            click.echo("    (direct route did not carry a directed command on this radio)")
     click.echo("")
     click.echo(f"next: mch status {(data.get('label') or data.get('pubkey') or '')[:12]}")
 
@@ -1322,8 +1329,10 @@ def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -
 def adopt(ctx: click.Context, pubkey: str, radio: str, label: str | None, yes: bool) -> None:
     """Adopt an already-running discovered repeater into local inventory.
 
-    This adds a DB node and a flood-routed gateway contact. It does not edit
-    config.yaml, secrets.yaml, or hardware settings.
+    This adds a DB node and a gateway contact, installs a direct (zero-hop)
+    route on that contact, then sends one directed `ver` on the discovered
+    radio to confirm the route carries a command. It does not edit config.yaml,
+    secrets.yaml, or hardware settings.
     """
     error = validate_radio_tuple(radio)
     if error:
@@ -1342,7 +1351,8 @@ def adopt(ctx: click.Context, pubkey: str, radio: str, label: str | None, yes: b
         click.echo(f"  label:  {clean_label or '-'}")
         click.echo(f"  radio:  {radio}")
         click.echo("")
-        click.echo("This adds local DB state and a flood-routed gateway contact.")
+        click.echo("This adds local DB state, a gateway contact with a direct route,")
+        click.echo("and sends one directed `ver` on the radio above to confirm it.")
         click.echo("It does not prove the physical device identity beyond the pubkey.")
         click.confirm("Adopt this node?", abort=True)
     resp = _rpc(

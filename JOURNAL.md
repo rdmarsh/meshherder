@@ -4,6 +4,30 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-03 - mch adopt installs a direct route + confirm probe (keystone now runnable)
+
+- Implemented the minimal-first onboarding step from ROADMAP: `mch adopt` now (1) installs a
+  zero-hop direct route on the new gateway contact via `change_contact_path(contact, "", 0)`, then
+  (2) switches to the discovered radio, sends one directed `ver`, restores the gateway radio, and
+  reports whether the directed command completed.
+- Two findings that shaped the scope:
+  - A direct (zero-hop) route is just `out_path=""`, `out_path_len=0`. Traced meshcore_py
+    `update_contact` (`commands/contact.py`): `change_contact_path(contact, "", 0)` sets exactly
+    that and writes it to the gateway over serial - no radio needed to install the route itself.
+  - The keystone was *not* testable with the shipped CLI: `mch path --apply` rejects an empty path
+    (`_parse_operator_path`, "path must not be empty"), so there was no way to install a direct
+    route before this change.
+- Deliberately split the handoff's "install a direct route + persist the reach-radio" into two
+  steps. Only the direct route is needed to confirm-or-kill the keystone; DB radio persistence is
+  downstream plumbing that is worthless if the keystone fails and drags in a schema decision (the
+  `nodes` table has no radio columns, no migration framework yet). The confirm probe uses the
+  `--radio` adopt already takes, so no persistence is needed for the test. Persistence deferred to
+  a follow-up once the model holds. `via_radio` in config remains the stopgap for ongoing sync.
+- **Still unproven.** This makes the keystone test *runnable*; it does not confirm it. The
+  confirm-or-kill is a live faulkland bench test from the gateway that can hear it. Unit tests
+  cover route install, probe success, and probe-failure-still-restores-radio, but the real question
+  (does a directed command complete over a direct route where flood failed?) needs hardware.
+
 ## 2026-06-03 - Onboarding reachability: the difficulty axis is routability, not location
 
 - Investigated a configured node that would not sync: scheduled sync reported "unreachable over

@@ -1670,10 +1670,10 @@ async def test_discover_nodes_annotates_config_and_managed_matches(db):
     assert by_prefix["75ab85174506"]["label"] == "qh-test"
 
 
-async def test_adopt_node_adds_db_node_and_flood_contact(db):
+async def test_adopt_node_adds_db_node_direct_route_and_confirms(db):
     pubkey = "8e4a0d73ab61" + "0" * 52
     cfg = _make_config(node_cfgs=[_node(pubkey="8e4a0d73", label="faulkland")])
-    gw = _make_gateway()
+    gw = _make_gateway(cmd_text="v1.14.1")
     wq = WorkQueue(cfg, gw, db)
 
     result = await wq.adopt_node(pubkey, radio=(915.8, 250.0, 11, 5))
@@ -1684,9 +1684,45 @@ async def test_adopt_node_adds_db_node_and_flood_contact(db):
     assert result["matched_config"] is True
     assert result["contact_added"] is True
     assert result["favourited"] is True
-    assert result["path_repair_needed"] is True
+    # The flood contact is converted to a zero-hop direct route (the keystone).
+    assert result["route"] == "direct"
+    assert result["path_repair_needed"] is False
     gw.add_commission_contact.assert_awaited_once()
     gw.set_contact_favourite.assert_awaited_once()
+    # Direct (zero-hop) route installed: empty path, hash mode 0.
+    gw.change_contact_path.assert_awaited_once()
+    assert gw.change_contact_path.await_args.args[1] == ""
+    assert gw.change_contact_path.await_args.args[2] == 0
+    # Confirm probe runs on the discovered radio, then restores the home radio.
+    gw.switch_radio_temporarily.assert_awaited_once_with(915.8, 250.0, 11, 5)
+    gw.restore_radio.assert_awaited_once_with(915.800, 250, 10, 5)
+    probe = gw.send_command.await_args
+    assert probe.args[1] == "ver"
+    # The directed probe must use the now-direct contact, not flood.
+    assert probe.args[0]["out_path_len"] == 0
+    assert result["confirm"]["sent"] is True
+    assert result["confirm"]["ok"] is True
+    assert result["confirm"]["response"] == "v1.14.1"
+
+
+async def test_adopt_node_confirm_probe_failure_still_restores_radio(db):
+    pubkey = "8e4a0d73ab61" + "0" * 52
+    cfg = _make_config(node_cfgs=[_node(pubkey="8e4a0d73", label="faulkland")])
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(
+        return_value=CommandResult(success=False, error="timeout — no response from node")
+    )
+    wq = WorkQueue(cfg, gw, db)
+
+    result = await wq.adopt_node(pubkey, radio=(915.8, 250.0, 11, 5))
+
+    # Route is still installed even if the confirming probe fails.
+    assert result["route"] == "direct"
+    assert result["confirm"]["sent"] is True
+    assert result["confirm"]["ok"] is False
+    assert "timeout" in result["confirm"]["response"]
+    # Radio is always restored, even on probe failure.
+    gw.restore_radio.assert_awaited_once_with(915.800, 250, 10, 5)
 
 
 async def test_adopt_node_requires_full_pubkey(db):

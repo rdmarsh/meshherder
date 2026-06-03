@@ -754,6 +754,28 @@ class WorkQueue:
                 "INFO",
                 f"adopted discovered node on {radio_text}",
             )
+
+            # Keystone: install a zero-hop direct route on the gateway contact.
+            # A flood-routed directed command can fail to complete even at strong
+            # SNR (the faulkland case), while a one-hop direct route should route
+            # reliably. change_contact_path("", 0) clears the path so out_path_len
+            # becomes 0 (direct). We set the local contact fields explicitly rather
+            # than relying on meshcore_py mutating the dict in place.
+            await self._gateway.change_contact_path(contact, "", 0)
+            contact["out_path"] = ""
+            contact["out_path_len"] = 0
+            contact["out_path_hash_mode"] = 0
+            await self._db.write_log(
+                pubkey,
+                "INFO",
+                "installed direct (zero-hop) route on gateway contact",
+            )
+
+            # Confirm probe: the keystone is unproven, so verify a directed command
+            # actually completes over the new direct route. The node is on a non-home
+            # radio, so switch to the discovery radio for the probe and always restore.
+            confirm = await self._confirm_direct_route(pubkey, contact, radio)
+
             path_len = contact.get("out_path_len")
             if path_len == -1:
                 route = "flood"
@@ -781,7 +803,43 @@ class WorkQueue:
                 "favourited": favourited,
                 "route": route,
                 "path_repair_needed": route == "flood",
+                "confirm": confirm,
             }
+
+    async def _confirm_direct_route(
+        self,
+        pubkey: str,
+        contact: dict[str, Any],
+        radio: tuple[float, float, int, int],
+    ) -> dict[str, Any]:
+        """Send one directed `ver` over the new direct route on the node's radio.
+
+        This is the confirm-or-kill test for the routability keystone: does a
+        directed command complete once a direct route is installed? Always
+        restores the gateway radio afterwards.
+        """
+        saved_radio = await self._gateway.switch_radio_temporarily(*radio)
+        try:
+            result = await self._gateway.send_command(contact, "ver", timeout=30)
+        finally:
+            await self._gateway.restore_radio(*saved_radio)
+
+        if _operation_succeeded(result):
+            response = (result.text or "").strip()
+            await self._db.write_log(
+                pubkey,
+                "INFO",
+                f"direct-route confirm probe succeeded: ver -> {response!r}",
+            )
+            return {"sent": True, "ok": True, "response": response}
+
+        response = (result.text or result.error or "no response").strip()
+        await self._db.write_log(
+            pubkey,
+            "WARNING",
+            f"direct-route confirm probe failed: {response}",
+        )
+        return {"sent": True, "ok": False, "response": response}
 
     def management_path_status(self, node: Node) -> dict[str, Any]:
         """Return cached gateway route metadata for a managed node without mesh traffic."""
