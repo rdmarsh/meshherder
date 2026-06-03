@@ -4,6 +4,28 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-03 - Fixes shipped from the faulkland session: proactive login + reach-on-own-radio
+
+- **Proactive login in the reachability probe.** When the bare `ver` probe fails, a password is
+  configured, and the node is not `auth_cached`, mch now logs in once (entering the node ACL) and
+  re-probes before giving up. Login is attempted only after the cheap bare probe fails, so a node
+  already in the gateway ACL keeps the no-login fast path. Closes the gap where `_send_authed` only
+  re-authenticated on an explicit permission error a silently-dropping node never sends.
+- **Reach a node on its own desired radio by default** (`resolve_reach_radio`): reach radio =
+  `via_radio` (split-mesh/bridge override) -> node desired `radio` setting -> gateway home, each
+  Node > Group > Global. Previously the gateway only switched for `via_radio`, so an off-home-radio
+  node was never probed on its own radio and relied entirely on the recovery hunt - which the
+  0.9.35 "radio confirmed -> skip" rule then disabled, stranding it. With the primary probe on the
+  node's own radio the skip is now correct, and `via_radio` is redundant when it equals the desired
+  radio (it is purely the bridge override). Also simplified the recovery-hunt restore: initialise
+  `hunt_saved_radio` from the caller's saved home radio so the gateway returns home exactly once,
+  with no wasteful bounce-to-home before hunting.
+- Design notes recorded but NOT built (operator's "only other hunt worth adding"): widen the
+  recovery candidate set to single-field off-by-one on SF *and* BW (4 candidates, using the UI BW
+  ladder) plus the distinct radios actually in use across the fleet (DB observed + config desired).
+  Gated on a shorter per-candidate hunt timeout / the anonymous presence probe, since each
+  candidate is timeout-dominated. See BACKLOG.
+
 ## 2026-06-03 - RESOLVED: it was AUTHENTICATION, not routing - the keystone was a misdiagnosis
 
 - The whole "routability" investigation below (both keystone entries) was chasing the wrong

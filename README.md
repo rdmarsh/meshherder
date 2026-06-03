@@ -25,6 +25,7 @@ Think Ansible for your nodes, running continuously in the background.
       * [Forcing a sync](#forcing-a-sync)
       * [Inspecting and repairing management paths](#inspecting-and-repairing-management-paths)
       * [Active discovery on another radio](#active-discovery-on-another-radio)
+      * [Investigating reachability with mch probe](#investigating-reachability-with-mch-probe)
       * [Checking status in the field](#checking-status-in-the-field)
       * [Read-only fleet API](#read-only-fleet-api)
       * [Changing a setting fleet-wide](#changing-a-setting-fleet-wide)
@@ -456,8 +457,26 @@ mch adopt 8e4a0d73ab612e8cc08cec29aa0df62e46c76614ab0449901de8e0dd3b5fef95 \
   --radio 915.800,250,11,5
 ```
 
-Adopt initially creates or uses a flood-routed gateway contact. That makes the node addressable,
-but path/radio repair may still be needed before normal management is reliable.
+Adopt creates or reuses the gateway contact, installs a direct (zero-hop) route on it, then sends
+one directed `ver` on the discovered radio to confirm the route carries a command (restoring the
+gateway radio afterwards). Path/radio repair may still be needed before normal management is
+reliable; the confirm-probe result is shown in the output and recorded in `mch logs`.
+
+### Investigating reachability with `mch probe`
+
+`mch probe NODE --radio FREQ,BW,SF,CR` is a read-only reachability check: it temporarily switches
+the gateway radio, sends one directed `ver`, restores the radio, and reports the result. It changes
+nothing on the node, the contact route, config, or secrets.
+
+```bash
+mch probe faulkland --radio 915.800,250,11,5
+mch probe faulkland --radio 915.800,250,11,5 --login    # auth-required nodes
+mch probe faulkland --radio 915.800,250,11,5 --advert   # announce the gateway first
+```
+
+`--login` authenticates with the node's configured password before probing (an auth-required node
+silently drops unauthenticated commands, so a bare `ver` times out). `--advert` sends a gateway
+zero-hop advert on the radio first, so the node can learn a route back.
 
 ### Checking status in the field
 
@@ -575,7 +594,8 @@ mch path <node> --advert      Show the gateway's cached advert path candidate
 mch path <node> --apply P[:M] Apply an operator-approved replacement path to the gateway contact
 mch discover --radio R        Actively discover nodes on a temporary radio; no DB/contact writes
 mch discover --radio R --unknown-only  Hide fully managed discovery results
-mch adopt PUBKEY --radio R    Add a discovered running node to DB and gateway contacts
+mch adopt PUBKEY --radio R    Add a discovered running node to DB + gateway contact (direct route)
+mch probe <node> --radio R [--login] [--advert]  Read-only reachability check on a given radio
 mch suggest                      Suggested txdelay for all nodes based on neighbour count
 mch suggest <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes

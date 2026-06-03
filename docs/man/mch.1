@@ -161,11 +161,31 @@ remain visible.
 .TP
 .B adopt \fIPUBKEY\fR \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-label \fILABEL\fR]
 Adopt an already-running discovered repeater by full 64-character public key.
-This adds/updates the local DB node and adds a flood-routed gateway contact, then
-favourites it. It does not edit
+This adds/updates the local DB node, adds and favourites a gateway contact,
+installs a direct (zero-hop) route on it, then sends one directed
+.B ver
+on the discovered radio to confirm the route carries a command (restoring the
+gateway radio afterwards). It does not edit
 .IR config.yaml ,
 .IR secrets.yaml ,
 or hardware settings.
+.TP
+.B probe \fILABEL_OR_PREFIX\fR \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-login] [\-\-advert]
+Read-only reachability check: temporarily switch the gateway radio, send one
+directed
+.B ver
+to the node, restore the radio, and report the result.
+.B \-\-login
+authenticates with the node's configured password first (an auth-required node
+silently drops unauthenticated commands, so a bare
+.B ver
+times out).
+.B \-\-advert
+sends a gateway zero-hop advert on the radio first so the node can learn a route
+back. Changes nothing on the node, the contact route,
+.IR config.yaml ,
+or
+.IR secrets.yaml .
 .TP
 .B exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
 Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked
