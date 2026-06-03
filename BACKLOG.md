@@ -30,6 +30,15 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   free. `tools/query_node_info.py` already implements the wire format; it needs lifting into the
   Gateway class. Note firmware exposes no anonymous version, so `ver` as a *fact* still needs
   login/guest. Pairs with the proactive-login item above.
+- Fix the 0.9.35 "radio confirmed -> skip recovery" optimization for nodes on a non-home radio
+  without `via_radio`. The skip assumes the just-failed probe was sent on the node's radio, so a
+  failure must be a path issue. But with no `via_radio`, the probe goes out on the gateway *home*
+  radio, which cannot reach a node on a different frequency/bandwidth at all (e.g. faulkland on
+  915.800 vs home 915.075). Once such a node's observed radio matches desired, the skip fires, the
+  hunt is never run, and the node is wrongly marked unreachable - a steady-state strand. Either
+  require `via_radio` for off-home-radio nodes (and document it), or make the skip aware of whether
+  the failed probe actually used the node's desired radio (home == desired, or via_radio == desired)
+  before concluding "path, not radio".
 - Make daemon startup tolerate a `get_contacts` failure instead of wedging. After the 0.9.34
   timeout bound, a `get_contacts` timeout at work-queue startup (`queue.py`) now raises out of the
   work-queue task and leaves the daemon half-alive: control socket up, work queue dead, every
