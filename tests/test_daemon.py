@@ -230,6 +230,7 @@ async def test_adopt_dispatch_adds_discovered_node(db, wq, config):
         pubkey,
         radio=(915.8, 250.0, 11, 5),
         label="faulkland",
+        progress=None,
     )
 
 

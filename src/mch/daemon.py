@@ -332,6 +332,14 @@ async def _dispatch(
             )
         except (TypeError, ValueError):
             return {"ok": False, "error": "radio must be numeric"}
+        adopt_progress_cb = None
+        if writer is not None:
+            async def adopt_progress_cb(msg: str) -> None:
+                try:
+                    writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
+                    await writer.drain()
+                except (ConnectionResetError, BrokenPipeError):
+                    raise ClientDisconnected("adopt client disconnected") from None
         try:
             return {
                 "ok": True,
@@ -339,6 +347,7 @@ async def _dispatch(
                     pubkey,
                     radio=radio,
                     label=label if isinstance(label, str) and label else None,
+                    progress=adopt_progress_cb,
                 ),
             }
         except OperationBusyError as exc:

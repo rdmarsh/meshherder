@@ -1725,6 +1725,26 @@ async def test_adopt_node_confirm_probe_failure_still_restores_radio(db):
     gw.restore_radio.assert_awaited_once_with(915.800, 250, 10, 5)
 
 
+async def test_adopt_node_emits_progress(db):
+    pubkey = "8e4a0d73ab61" + "0" * 52
+    cfg = _make_config(node_cfgs=[_node(pubkey="8e4a0d73", label="faulkland")])
+    gw = _make_gateway(cmd_text="v1.14.1")
+    wq = WorkQueue(cfg, gw, db)
+    messages: list[str] = []
+
+    async def collect(msg: str) -> None:
+        messages.append(msg)
+
+    await wq.adopt_node(pubkey, radio=(915.8, 250.0, 11, 5), progress=collect)
+
+    joined = "\n".join(messages)
+    assert "direct (zero-hop) route" in joined
+    assert "switching gateway radio to 915.800/250/SF11/CR5" in joined
+    assert "sending directed `ver`" in joined
+    assert "restoring gateway radio" in joined
+    assert "confirm probe ok" in joined
+
+
 async def test_adopt_node_requires_full_pubkey(db):
     wq = WorkQueue(_make_config(), _make_gateway(), db)
 
