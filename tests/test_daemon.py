@@ -248,7 +248,7 @@ async def test_probe_dispatch_resolves_node_and_probes(db, wq, config):
     assert resp["ok"] is True
     assert resp["data"]["route"] == "direct"
     wq.probe_node.assert_awaited_once_with(
-        node, radio=(915.8, 250.0, 11, 5), advert=True, progress=None
+        node, radio=(915.8, 250.0, 11, 5), advert=True, login=False, progress=None
     )
 
 

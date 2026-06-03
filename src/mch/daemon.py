@@ -283,6 +283,7 @@ async def _dispatch(
         query = req.get("query", "")
         raw_radio = req.get("radio")
         advert = bool(req.get("advert", False))
+        login = bool(req.get("login", False))
         if not isinstance(raw_radio, list | tuple) or len(raw_radio) != 4:
             return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
         try:
@@ -312,7 +313,7 @@ async def _dispatch(
             return {
                 "ok": True,
                 "data": await wq.probe_node(
-                    node, radio=radio, advert=advert, progress=probe_progress_cb
+                    node, radio=radio, advert=advert, login=login, progress=probe_progress_cb
                 ),
             }
         except OperationBusyError as exc:

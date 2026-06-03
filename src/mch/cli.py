@@ -1378,6 +1378,8 @@ def _render_probe_result(data: dict[str, Any]) -> None:
     click.echo(f"  radio: {radio.get('text') or '-'}")
     click.echo(f"  route: {data.get('route') or 'unknown'}")
     click.echo(f"  advert sent: {'yes' if data.get('advert_sent') else 'no'}")
+    if data.get("login_attempted"):
+        click.echo(f"  login: {'ok' if data.get('login_ok') else 'FAILED'}")
     if data.get("ok"):
         click.echo(f"  ver:   ok -> {data.get('response') or '-'}")
     else:
@@ -1398,14 +1400,20 @@ def _render_probe_result(data: dict[str, Any]) -> None:
     help="Send a gateway zero-hop advert on the radio before probing, so the node "
     "can learn a direct route back to the gateway.",
 )
+@click.option(
+    "--login",
+    is_flag=True,
+    help="Log in with the node's configured password before probing. Auth-required "
+    "nodes silently drop unauthenticated commands, so a bare `ver` times out.",
+)
 @click.pass_context
-def probe(ctx: click.Context, node: str, radio: str, advert: bool) -> None:
+def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) -> None:
     """Send a directed `ver` to NODE on a given radio to test reachability.
 
     Temporarily switches the gateway radio, optionally sends a zero-hop advert
-    first, sends one directed `ver`, restores the radio, and reports the result.
-    Investigation only - it does not change the contact route, config, secrets,
-    or the node.
+    and/or logs in first, sends one directed `ver`, restores the radio, and
+    reports the result. Investigation only - it does not change the contact
+    route, config, secrets, or the node.
     """
     error = validate_radio_tuple(radio)
     if error:
@@ -1420,6 +1428,7 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool) -> None:
             "query": node,
             "radio": [float(freq), float(bw), int(sf), int(cr)],
             "advert": advert,
+            "login": login,
         },
         on_progress=lambda msg: click.echo(f"  {msg}"),
         timeout=60,
