@@ -217,6 +217,7 @@ def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:
         "adv_name": "",
     })
     gw.set_contact_favourite = AsyncMock(return_value=True)
+    gw.advert = AsyncMock()
     gw.switch_radio_temporarily = AsyncMock(return_value=(915.800, 250, 10, 5))
     gw.restore_radio = AsyncMock()
     gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
@@ -1750,6 +1751,78 @@ async def test_adopt_node_requires_full_pubkey(db):
 
     with pytest.raises(ValueError, match="full 64-character"):
         await wq.adopt_node("8e4a0d73ab61", radio=(915.8, 250.0, 11, 5))
+
+
+async def test_probe_node_sends_directed_ver_on_radio(db):
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway(cmd_text="v1.14.1")
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland")
+
+    result = await wq.probe_node(node, radio=(915.8, 250.0, 11, 5))
+
+    gw.switch_radio_temporarily.assert_awaited_once_with(915.8, 250.0, 11, 5)
+    gw.restore_radio.assert_awaited_once_with(915.800, 250, 10, 5)
+    assert gw.send_command.await_args.args[1] == "ver"
+    gw.advert.assert_not_awaited()
+    assert result["advert_sent"] is False
+    assert result["ok"] is True
+    assert result["response"] == "v1.14.1"
+    assert result["route"] == "direct"
+
+
+async def test_probe_node_advert_first_sends_advert_before_ver(db, monkeypatch):
+    import mch.queue as queue_module
+    monkeypatch.setattr(queue_module, "_ADVERT_SETTLE_SECONDS", 0)
+
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway(cmd_text="v1.14.1")
+    order: list[str] = []
+    gw.advert = AsyncMock(side_effect=lambda *a, **k: order.append("advert"))
+    gw.send_command = AsyncMock(
+        side_effect=lambda *a, **k: order.append("ver")
+        or CommandResult(success=True, text="v1.14.1")
+    )
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland")
+
+    result = await wq.probe_node(node, radio=(915.8, 250.0, 11, 5), advert=True)
+
+    gw.advert.assert_awaited_once_with(zerohop=True)
+    assert order == ["advert", "ver"]  # advert must precede the directed probe
+    assert result["advert_sent"] is True
+    assert result["ok"] is True
+
+
+async def test_probe_node_without_contact_raises(db):
+    wq = WorkQueue(_make_config(), _make_gateway(), db)
+    wq._contacts = []
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland")
+
+    with pytest.raises(ValueError, match="no gateway contact"):
+        await wq.probe_node(node, radio=(915.8, 250.0, 11, 5))
+
+
+async def test_probe_node_restores_radio_on_failure(db):
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(
+        return_value=CommandResult(success=False, error="timeout — no response from node")
+    )
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland")
+
+    result = await wq.probe_node(node, radio=(915.8, 250.0, 11, 5))
+
+    assert result["ok"] is False
+    assert "timeout" in result["response"]
+    gw.restore_radio.assert_awaited_once_with(915.800, 250, 10, 5)
 
 
 async def test_management_path_discover_returns_candidate_without_applying(db):

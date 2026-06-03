@@ -53,6 +53,7 @@ def wq():
         "nodes": [],
     })
     m.adopt_node = AsyncMock(return_value={"pubkey": "8e4a0d73" + "0" * 56})
+    m.probe_node = AsyncMock(return_value={"ok": True, "response": "v1.14.1", "route": "direct"})
     return m
 
 
@@ -231,6 +232,23 @@ async def test_adopt_dispatch_adds_discovered_node(db, wq, config):
         radio=(915.8, 250.0, 11, 5),
         label="faulkland",
         progress=None,
+    )
+
+
+async def test_probe_dispatch_resolves_node_and_probes(db, wq, config):
+    node = await _seed_node_with_facts(db)
+
+    resp = await _dispatch(
+        {"cmd": "probe", "query": "test", "radio": [915.8, 250, 11, 5], "advert": True},
+        wq,
+        db,
+        config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["route"] == "direct"
+    wq.probe_node.assert_awaited_once_with(
+        node, radio=(915.8, 250.0, 11, 5), advert=True, progress=None
     )
 
 
