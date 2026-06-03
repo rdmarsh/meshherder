@@ -30,20 +30,32 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   free. `tools/query_node_info.py` already implements the wire format; it needs lifting into the
   Gateway class. Note firmware exposes no anonymous version, so `ver` as a *fact* still needs
   login/guest. Pairs with the proactive-login item above.
-- Default the probe/management reach radio to the node's desired `settings->radio`, not the gateway
-  home radio. Today `_process_node` switches the gateway radio only when `via_radio` is set
-  (`resolve_via_radio`); the node's desired `radio` is consulted *only* as a recovery-hunt candidate.
-  So a node whose desired radio differs from the home radio (e.g. faulkland on 915.800 vs home
-  915.075) is never probed on its own radio directly - it is reachable only via the recovery hunt,
-  and once its observed radio matches desired the 0.9.35 "radio confirmed -> skip recovery" rule
-  disables the hunt and the node is wrongly marked unreachable (steady-state strand). Correct model
-  (per operator): the reach radio for a node *is* its `settings->radio` in the normal case; switch
-  to it for the probe. `via_radio` is the OVERRIDE for split-mesh / bridged reachability, where the
-  gateway must sit on a *different* radio than the node's own to reach it - so `via_radio` should be
-  redundant whenever it equals `settings->radio`. With the primary probe on the node's own radio,
-  the 0.9.35 skip becomes correct (a failure there really is a path/availability issue), and
-  `via_radio` is reserved for true bridging. Skip the switch when the node's radio already equals
-  the gateway's current radio (the existing `switch_required` equality check).
+- DONE (Unreleased): the probe/management reach radio now defaults to the node's desired
+  `settings->radio` (`resolve_reach_radio`: `via_radio` -> desired `radio` -> gateway home, each
+  Node > Group > Global). `via_radio` is reserved for split-mesh/bridging and is redundant when it
+  equals the desired radio. The 0.9.35 "radio confirmed -> skip recovery" rule is now correct
+  because the primary probe is on the node's own radio. Recovery restore simplified to a single
+  return-to-home.
+- Redesign the radio-recovery candidate set (the "hunt" that runs when the primary probe on a
+  node's reach radio fails). Make it bounded and motivated by real failure modes, not a spectrum
+  sweep:
+  - **Single-field off-by-one around the desired radio:** SF-1/SF+1 (clamped SF5-12) and BW-1/BW+1
+    (adjacent in the UI ladder `7.8,10.4,15.6,20.8,31.25,41.7,62.5,125,250,500` kHz, defined in
+    `cli.py` `_prompt_radio_bw`). ~4 candidates. Guards the actual failure: an operator selecting
+    the adjacent dropdown value by mistake (this is literally faulkland - desired SF10, running
+    SF11). Replaces the current SF-only ±1 and the rejected "try all SF" idea (all-SF is timeout-
+    dominated and hammers the mesh - see cost note).
+  - **Radios actually in use across the fleet:** the distinct radio tuples observed in the DB
+    (`settings` observed `radio`) plus config desired radios. A lost node is far likelier to be on
+    a real fleet radio (wrong area/region) than on an arbitrary point. Small, deduped set;
+    DB-primary as inventory moves to the DB.
+  - Dedupe all candidates by channel; the reach-radio fix above makes this hunt a true fallback
+    (rare), so a slightly wider set is affordable.
+  - **Cost note:** each candidate is timeout-dominated (~60s/candidate in live logs: radio switch +
+    2 bare-`ver` probes at the ~30s send timeout, since a wrong-SF/BW node never replies; proactive
+    login adds more). So widening the set must come with a shorter per-candidate hunt timeout
+    (size it from max airtime, not the full 30s) and/or the anonymous presence probe, to respect
+    "don't hammer the mesh" for unattended field nodes.
 - Make daemon startup tolerate a `get_contacts` failure instead of wedging. After the 0.9.34
   timeout bound, a `get_contacts` timeout at work-queue startup (`queue.py`) now raises out of the
   work-queue task and leaves the daemon half-alive: control socket up, work queue dead, every

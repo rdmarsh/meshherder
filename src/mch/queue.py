@@ -28,7 +28,15 @@ from typing import TYPE_CHECKING, Any
 
 from mch.command_registry import command_timeout, read_command_for_key, write_command_for_key
 from mch.command_safety import fire_and_forget_command
-from mch.config import Config, GroupConfig, NodeConfig, OperationConfig, resolve_via_radio
+from mch.config import (
+    Config,
+    GroupConfig,
+    NodeConfig,
+    OperationConfig,
+    RadioConfig,
+    _parse_radio,
+    resolve_via_radio,
+)
 from mch.db import Database
 from mch.gateway import CommandResult, Gateway
 from mch.settings_compare import compare_setting
@@ -250,6 +258,37 @@ def resolve_desired(
         if global_setting and global_setting.desired is not None:
             return global_setting.desired
     return None
+
+
+def resolve_reach_radio(
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
+) -> tuple[RadioConfig | None, str]:
+    """Resolve the radio the gateway must switch to in order to reach a node.
+
+    Precedence (each level Node > Group > Global):
+      1. ``via_radio`` - the explicit split-mesh/bridge override, where the gateway
+         must sit on a *different* radio than the node's own to reach it through an
+         intermediate mesh.
+      2. the node's desired ``radio`` setting - the normal case: a node is reached on
+         its own radio, so ``via_radio`` is redundant whenever it equals this.
+      3. ``None`` - no node-specific radio; use the gateway home radio (no switch).
+
+    Returns ``(radio, source)``; ``source`` is a short human label for logging.
+    """
+    via = resolve_via_radio(node_cfg, group_cfg, global_cfg)
+    if via is not None:
+        return via, "via_radio override"
+    desired = resolve_desired("radio", node_cfg, group_cfg, global_cfg)
+    if desired:
+        try:
+            parsed = _parse_radio(desired)
+        except (ValueError, TypeError):
+            parsed = None
+        if parsed is not None:
+            return parsed, "node desired radio"
+    return None, "gateway home radio"
 
 
 def all_setting_keys(
@@ -1476,7 +1515,11 @@ class WorkQueue:
         saved_radio: tuple[float, float, int, int] | None = None
 
         try:
-            node_radio = resolve_via_radio(node_cfg, group_cfg, global_cfg)
+            # Reach a node on its own desired radio by default; via_radio overrides
+            # only for split-mesh/bridge cases. Without this, an off-home-radio node
+            # would be probed on the gateway home radio (which can't reach it) and rely
+            # entirely on radio recovery - which the "radio confirmed" skip then disables.
+            node_radio, reach_radio_source = resolve_reach_radio(node_cfg, group_cfg, global_cfg)
             # CR controls the sender's redundancy and need not match for reception.
             gateway_channel = (
                 round(float(self._gateway.info.get("radio_freq") or 0), 3),
@@ -1496,7 +1539,7 @@ class WorkQueue:
                 management_radio = _format_radio(
                     node_radio.freq, node_radio.bw, node_radio.sf, node_radio.cr
                 )
-                radio_source = "via_radio temporary switch"
+                radio_source = f"{reach_radio_source}, temporary switch"
             else:
                 management_radio = _format_radio(
                     self._gateway.info.get("radio_freq") or 0,
@@ -1854,15 +1897,6 @@ class WorkQueue:
         if not candidates:
             return None
 
-        if current_saved_radio is not None:
-            await _progress(progress, "restoring gateway radio before fallback probes")
-            await self._gateway.restore_radio(*current_saved_radio)
-            restored = _format_radio_tuple(current_saved_radio)
-            await self._db.write_log(
-                node.pubkey, "INFO", f"restored gateway radio to {restored}"
-            )
-            await _progress(progress, f"restored gateway radio to {restored}")
-
         await self._db.write_log(
             node.pubkey,
             "WARNING",
@@ -1871,7 +1905,12 @@ class WorkQueue:
                 f"{len(candidates)} config-derived radio fallback(s)"
             ),
         )
-        hunt_saved_radio: tuple[float, float, int, int] | None = None
+        # The radio to restore to once the hunt is done is the gateway home radio.
+        # When the primary probe already switched (current_saved_radio is the home
+        # radio), use it directly and switch straight to the first candidate - no
+        # need to bounce back to home first. Otherwise the gateway is already on
+        # home, so capture it from the first switch's saved value.
+        hunt_saved_radio: tuple[float, float, int, int] | None = current_saved_radio
         reached = False
         try:
             for candidate in candidates:

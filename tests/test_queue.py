@@ -38,6 +38,7 @@ from mch.queue import (
     radio_recovery_candidates,
     resolve_desired,
     resolve_policy,
+    resolve_reach_radio,
 )
 
 # ---------------------------------------------------------------------------
@@ -50,6 +51,37 @@ def _node(pubkey="aa", **kwargs) -> NodeConfig:
 
 def _group(**kwargs) -> GroupConfig:
     return GroupConfig(name="g", **kwargs)
+
+
+def test_resolve_reach_radio_via_radio_overrides_desired():
+    node = _node(
+        via_radio=RadioConfig(916.575, 62.5, 7, 8),
+        settings={"radio": SettingConfig(desired="915.800,250,10,5")},
+    )
+    radio, source = resolve_reach_radio(node, None, None)
+    assert radio is not None
+    assert (radio.freq, radio.bw, radio.sf, radio.cr) == (916.575, 62.5, 7, 8)
+    assert "via_radio" in source
+
+
+def test_resolve_reach_radio_falls_back_to_desired_radio():
+    node = _node(settings={"radio": SettingConfig(desired="915.800,250,10,5")})
+    radio, source = resolve_reach_radio(node, None, None)
+    assert radio is not None
+    assert (radio.freq, radio.bw, radio.sf, radio.cr) == (915.800, 250.0, 10, 5)
+    assert "desired" in source
+
+
+def test_resolve_reach_radio_desired_inherits_group():
+    group = _group(settings={"radio": SettingConfig(desired="915.800,250,10,5")})
+    radio, source = resolve_reach_radio(_node(), group, None)
+    assert radio is not None
+    assert (radio.freq, radio.bw, radio.sf, radio.cr) == (915.800, 250.0, 10, 5)
+
+
+def test_resolve_reach_radio_none_when_no_via_or_desired():
+    radio, source = resolve_reach_radio(_node(), None, None)
+    assert radio is None
 
 
 def test_resolve_policy_node_override_wins():
@@ -771,8 +803,13 @@ async def test_flood_routed_contact_tries_desired_radio_before_unreachable(db):
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.PARTIAL
     logs = await db.get_logs("aabbccdd1122")
-    assert any("radio fallback reached node on 915.800/250/SF10/CR5" in e["message"] for e in logs)
-    assert any("radio fallback reached flood-routed contact" in e["message"] for e in logs)
+    # The node is reached directly on its desired radio by the primary probe
+    # (the reach radio now defaults to settings->radio), so the flood contact is
+    # marked for path repair without needing the recovery hunt.
+    assert any(
+        "flood-routed contact reached by probe; path repair needed" in e["message"]
+        for e in logs
+    )
 
 
 async def test_stored_path_read_retry_budget_applies_after_successful_probe(db):
@@ -1516,7 +1553,10 @@ async def test_run_node_progress_describes_radio_switch_without_mesh_hop_wording
 
     await wq.run_node("aabbcc", progress=progress)
 
-    assert "management radio: 916.575/62.5/SF7/CR8 (via_radio temporary switch)" in messages
+    assert (
+        "management radio: 916.575/62.5/SF7/CR8 (via_radio override, temporary switch)"
+        in messages
+    )
     assert "cached management path: flood" in messages
     assert "switching gateway radio to 916.575/62.5/SF7/CR8" in messages
     assert "restored gateway radio to 915.800/250/SF10/CR5" in messages

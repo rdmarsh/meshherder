@@ -5,6 +5,17 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Sync now reaches a node on its own desired `radio` by default, instead of only the gateway home
+  radio. The reach radio resolves `via_radio` (the split-mesh/bridge override) -> else the node's
+  desired `radio` setting -> else the gateway home radio, each Node > Group > Global. Previously the
+  gateway only switched radios when `via_radio` was set, so a node whose desired radio differed from
+  home (e.g. a 915.800 node managed from a 915.075 gateway) was never probed on its own radio - it
+  was reachable only via the recovery hunt, and once its observed radio matched desired the
+  "radio confirmed -> skip recovery" rule disabled the hunt and the node was wrongly marked
+  unreachable. With the primary probe now on the node's own radio, that skip is correct, and
+  `via_radio` is needed only for genuine bridging (and is redundant when it equals the desired
+  radio). Also simplified the recovery hunt's radio restore so the gateway is returned to the home
+  radio exactly once, with no wasteful bounce back to home before hunting.
 - Reachability probe now proactively logs in to an auth-required node that silently drops
   unauthenticated commands. A secured node (observed on v1.15.0) drops a directed command from a
   peer not in its ACL with no reply and no permission error - just a timeout - so the bare `ver`
