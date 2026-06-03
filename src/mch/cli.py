@@ -1370,6 +1370,64 @@ def adopt(ctx: click.Context, pubkey: str, radio: str, label: str | None, yes: b
     _render_adopt_result(data)
 
 
+def _render_probe_result(data: dict[str, Any]) -> None:
+    label = data.get("label") or data.get("name") or (data.get("pubkey") or "")[:12]
+    radio = data.get("radio") or {}
+    click.echo("probe result")
+    click.echo(f"  node:  {label} ({(data.get('pubkey') or '')[:12]})")
+    click.echo(f"  radio: {radio.get('text') or '-'}")
+    click.echo(f"  route: {data.get('route') or 'unknown'}")
+    click.echo(f"  advert sent: {'yes' if data.get('advert_sent') else 'no'}")
+    if data.get("ok"):
+        click.echo(f"  ver:   ok -> {data.get('response') or '-'}")
+    else:
+        click.echo(f"  ver:   FAILED - {data.get('response') or 'no response'}")
+
+
+@cli.command()
+@click.argument("node")
+@click.option(
+    "--radio",
+    required=True,
+    metavar="FREQ,BW,SF,CR",
+    help="Radio to probe on, e.g. 915.800,250,11,5.",
+)
+@click.option(
+    "--advert",
+    is_flag=True,
+    help="Send a gateway zero-hop advert on the radio before probing, so the node "
+    "can learn a direct route back to the gateway.",
+)
+@click.pass_context
+def probe(ctx: click.Context, node: str, radio: str, advert: bool) -> None:
+    """Send a directed `ver` to NODE on a given radio to test reachability.
+
+    Temporarily switches the gateway radio, optionally sends a zero-hop advert
+    first, sends one directed `ver`, restores the radio, and reports the result.
+    Investigation only - it does not change the contact route, config, secrets,
+    or the node.
+    """
+    error = validate_radio_tuple(radio)
+    if error:
+        raise click.UsageError(f"--radio {error}")
+    parsed = parse_radio_tuple(radio)
+    assert parsed is not None
+    freq, bw, sf, cr = parsed
+    resp = _rpc(
+        ctx.obj["socket"],
+        {
+            "cmd": "probe",
+            "query": node,
+            "radio": [float(freq), float(bw), int(sf), int(cr)],
+            "advert": advert,
+        },
+        on_progress=lambda msg: click.echo(f"  {msg}"),
+        timeout=60,
+    )
+    data = _check(resp)
+    _render_probe_result(data)
+
+
 @cli.command()
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed local DB state.")
 @click.pass_context

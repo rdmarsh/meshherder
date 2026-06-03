@@ -51,6 +51,10 @@ ProgressCallback = Callable[[str], Awaitable[None]] | None
 _PATH_HEX_RE = re.compile(r"^[0-9a-fA-F,]+(?::[0-3])?$")
 _MIN_RECOVERY_SF = 5
 _MAX_RECOVERY_SF = 12
+# Provisional bench value: pause after a gateway zero-hop advert so the target can
+# receive it and update its routing before we send a directed command. Not yet
+# calibrated against firmware; revisit if the advert return-path experiment needs it.
+_ADVERT_SETTLE_SECONDS = 3.0
 
 
 async def _progress(callback: ProgressCallback, message: str) -> None:
@@ -853,6 +857,100 @@ class WorkQueue:
         )
         await _progress(progress, f"confirm probe FAILED: {response}")
         return {"sent": True, "ok": False, "response": response}
+
+    async def probe_node(
+        self,
+        node: Node,
+        *,
+        radio: tuple[float, float, int, int],
+        advert: bool = False,
+        progress: ProgressCallback = None,
+    ) -> dict[str, Any]:
+        """Send one directed `ver` to a node on a given radio to test reachability.
+
+        Switches the gateway radio temporarily, optionally sends a gateway zero-hop
+        advert first (so the node can learn a direct route *back* to the gateway -
+        the return-path hypothesis for why directed commands fail where broadcast
+        discovery succeeds), sends a directed `ver`, and always restores the radio.
+        Sends to the contact as-is; it does not change the contact's route, config,
+        secrets, or the node.
+        """
+        async with self.operation(f"probe {node.pubkey[:8]}", wait=False):
+            contact = self._contact_for_pubkey(node.pubkey)
+            if contact is None:
+                raise ValueError(
+                    f"no gateway contact for {node.pubkey[:12]}; adopt or add it first"
+                )
+
+            radio_text = _format_radio_tuple(radio)
+            await _progress(progress, f"switching gateway radio to {radio_text}")
+            saved_radio = await self._gateway.switch_radio_temporarily(*radio)
+            try:
+                if advert:
+                    await _progress(progress, f"sending gateway zero-hop advert on {radio_text}")
+                    await self._gateway.advert(zerohop=True)
+                    await self._db.write_log(
+                        node.pubkey,
+                        "INFO",
+                        f"sent gateway zero-hop advert on {radio_text} before probe",
+                    )
+                    await _progress(
+                        progress,
+                        f"waiting {_ADVERT_SETTLE_SECONDS:g}s for the node to learn the gateway",
+                    )
+                    await asyncio.sleep(_ADVERT_SETTLE_SECONDS)
+
+                await _progress(progress, "sending directed `ver`...")
+                result = await self._gateway.send_command(contact, "ver", timeout=30)
+            finally:
+                saved_text = _format_radio_tuple(saved_radio)
+                await _progress(progress, f"restoring gateway radio to {saved_text}")
+                await self._gateway.restore_radio(*saved_radio)
+
+            ok = _operation_succeeded(result)
+            if ok:
+                response = (result.text or "").strip()
+                await self._db.write_log(
+                    node.pubkey,
+                    "INFO",
+                    f"probe on {radio_text} (advert={advert}) succeeded: ver -> {response!r}",
+                )
+                await _progress(progress, f"probe ok: ver -> {response}")
+            else:
+                response = (result.text or result.error or "no response").strip()
+                await self._db.write_log(
+                    node.pubkey,
+                    "WARNING",
+                    f"probe on {radio_text} (advert={advert}) failed: {response}",
+                )
+                await _progress(progress, f"probe FAILED: {response}")
+
+            path_len = contact.get("out_path_len")
+            if path_len == -1:
+                route = "flood"
+            elif path_len == 0:
+                route = "direct"
+            elif isinstance(path_len, int) and path_len > 0:
+                route = "stored"
+            else:
+                route = "unknown"
+
+            return {
+                "pubkey": node.pubkey,
+                "label": node.label,
+                "name": node.name,
+                "radio": {
+                    "freq": radio[0],
+                    "bw": radio[1],
+                    "sf": radio[2],
+                    "cr": radio[3],
+                    "text": radio_text,
+                },
+                "advert_sent": advert,
+                "ok": ok,
+                "response": response,
+                "route": route,
+            }
 
     def management_path_status(self, node: Node) -> dict[str, Any]:
         """Return cached gateway route metadata for a managed node without mesh traffic."""

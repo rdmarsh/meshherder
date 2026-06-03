@@ -4,6 +4,33 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
+## 2026-06-03 - KEYSTONE FALSIFIED on faulkland: direct route alone does not fix directed commands
+
+- Live bench result. `mch adopt 8e4a0d73... --radio 915.800,250,11,5` installed a real zero-hop
+  direct route (`mch status` confirmed `known path: direct`), then the confirm probe's directed
+  `ver` timed out with no reply.
+- The test was valid, not a radio mismatch. Re-ran discovery to check: faulkland answers broadcast
+  discovery at **SF11** (SNR 6.0), and is absent at SF10 (only wip06 answers there). Its *desired*
+  config radio is SF10, but it is actually running SF11 - so SF11 is the correct probe radio, and
+  we probed SF11. Node present, link good in the node->gateway direction, directed command still
+  failed.
+- Conclusion: the literal keystone - "discovery succeeds -> install a (gateway-side) direct route
+  -> directed commands work" - is **false** for faulkland. A gateway-side `out_path` only changes
+  the gateway's outbound routing decision. It does nothing about (a) whether faulkland can hear the
+  gateway, or (b) whether faulkland has a return path to reply. This is exactly the branch-collapse
+  ROADMAP predicted.
+- Critical nuance for future work: discovery SNR 6.0 is the **node->gateway** direction only (the
+  gateway heard faulkland's reply). It does NOT establish gateway->node. A directed request needs
+  both directions plus a reply route; a broadcast advert exchange needs neither - which is why
+  broadcast works where directed fails. A timeout cannot distinguish "command didn't arrive" from
+  "reply didn't come back" from "node declined to reply".
+- Leading hypothesis to test next: the missing piece is the **return path**. Have the gateway send
+  a zero-hop advert on SF11 (so faulkland learns a direct route back), then retry the directed
+  `ver`. Succeeds -> onboarding needs a "make the node learn the gateway" step. Still fails ->
+  physical link asymmetry or protocol/ACL, and management "direct range" is narrower than advert
+  range. No CLI currently sends an advert on a chosen radio (`gateway.advert(zerohop=True)` exists
+  but is unexposed); the experiment needs a small new capability.
+
 ## 2026-06-03 - mch adopt installs a direct route + confirm probe (keystone now runnable)
 
 - Implemented the minimal-first onboarding step from ROADMAP: `mch adopt` now (1) installs a

@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Added `mch probe NODE --radio FREQ,BW,SF,CR [--advert]`, a reachability-only investigation
+  command. It temporarily switches the gateway radio, optionally sends a gateway zero-hop advert
+  first (`--advert`, so the node can learn a direct route *back* to the gateway), sends one directed
+  `ver`, restores the radio, and reports the result. It streams live progress and does not change
+  the contact route, config, secrets, or the node. Built to test the return-path hypothesis after
+  the bench result below showed a gateway-side direct route alone does not make a directed command
+  succeed where broadcast discovery does.
 - `mch adopt` now installs a direct (zero-hop) route on the new gateway contact and sends one
   directed `ver` on the discovered radio to confirm the route carries a command, restoring the
   gateway radio afterwards. This is the minimal-first step of the routability-onboarding work: a
