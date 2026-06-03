@@ -42,8 +42,8 @@ hammers a weak link to force a result, is working against the medium. This is th
 |---|---|---|
 | 1 | Factory-fresh node into management | Done - `mch new` (new mode) |
 | 2 | Restore a known node onto fresh hardware | Done-ish - `mch new` replace mode (needs live retest) |
-| 3 | Known node into management (e.g. faulkland) | **Gap** - no working over-mesh path yet |
-| 3a | Adopt a node already out on the mesh | Mostly via config + sync when reachable; `mch adopt` seeds DB + flood contact only |
+| 3 | Known node into management (e.g. faulkland) | **Diagnosed** - blocker was auth, not routing; needs proactive-login fix (BACKLOG). Manual login + bare `ver` confirmed working 2026-06-03 |
+| 3a | Adopt a node already out on the mesh | `mch adopt` seeds DB + installs a direct route + confirm probe; `mch probe --radio [--advert] [--login]` for investigation. Config + sync manages it once auth/login lands |
 | 4 | Retrieve facts | Done |
 | 5 | Configure node | Done (enforce / audit / drift) |
 | 6 | Remove / decommission | Done - `mch remove` |
@@ -76,57 +76,49 @@ Today these are separate bespoke flows (`mch new` new mode, `mch new` replace mo
 and nothing for #3), which is why #3 (faulkland) falls through the cracks and `adopt` doesn't
 actually make a node manageable.
 
-### The real difficulty axis: do we have a route?
+### The real difficulty axis: TWO variables - auth first, then routing
 
-Identity is the obvious variable, but the thing that actually decides how hard onboarding is, is
-**whether the gateway already has a usable route to the node** - a real `out_path` in its mesh
-contacts. Bench-vs-wild is secondary; it only matters when a route is *missing*.
+There are two independent things that decide whether onboarding works, and an earlier version of
+this section conflated them into one ("do we have a route?"). The faulkland bench test
+(2026-06-03) settled which one actually bit us:
 
-- **Routable (a contact with a stored/direct path):** the easy, already-working case. Directed
-  commands route; normal config + sync manages it, bench or wild alike. A node that has been
-  meshing in the field is usually here. `mch contacts` already shows what the gateway knows.
-  (Stale stored paths still happen - handled by path repair / lossy retry.)
-- **Known contact but no usable route (flood/missing) - this is faulkland:** a route must be
-  established before management works.
-  - *In direct radio range (bench):* hop to its radio and install a **direct (zero-hop) route** via
-    discovery. This is the minimal-first work below, and it unblocks the bench side of #1/#2/#3a
-    too (their post-commission re-find is the same problem).
-  - *Out of direct range (wild):* mesh path discovery has to find a route. Harder; later.
-- **Unknown to the gateway and out of direct range (wild + unknown):** no contact, no route, and
-  local discovery can't reach it. **We won't try - *remotely*.** This is a deliberate scope
-  boundary, not a gap: it keeps the tool simple and honest about what the radio can actually do.
-  "Out of scope" means out of *remote* scope - the node isn't permanently unmanageable, it just has
-  to be carried into direct range (the bench), at which point it becomes the case above. See
-  BACKLOG Won't Do.
+1. **Authentication / ACL (this was faulkland's real blocker).** A secured node silently *drops* a
+   directed command from a peer that is not in its ACL - no reply, no permission error, just a
+   timeout. So the gateway must **log in at least once** (entering the node's ACL) before any
+   directed command will be answered. Until then the node looks identical to an unreachable one.
+   This is a documented MeshCore behaviour we already knew and then forgot mid-investigation.
+2. **Routing (real, but secondary - and NOT what stopped faulkland).** Whether the gateway has a
+   usable `out_path` to the node. Genuinely unrouted nodes exist and need path repair/discovery,
+   but a missing route was *not* why faulkland's directed `ver` timed out: after login, a bare
+   directed `ver` succeeded over a direct route at SF11, both directions, no asymmetry.
 
-Sequencing falls out of this: routable nodes already work; next is establishing a direct route for
-known-but-unrouted bench nodes (faulkland); mesh path-discovery for unrouted wild nodes is later;
-unknown wild nodes are out of scope.
+The lesson: **a no-response timeout cannot tell you which variable failed.** We read faulkland's
+timeout as a routing/asymmetry problem and built a whole "establish a direct route" keystone on it,
+when the node was simply dropping unauthenticated commands. Always isolate the variable (log in and
+retry) before theorising about routes.
 
-**Plan:** build the common back-half once - "reach a node I can only see via discovery, on its own
-radio, and pull it under management" - then make the identity steps thin front-ends that hand off
-to it. This also hardens #1/#2, whose post-reboot re-find hits the same reachability problem.
+The corrected onboarding sequence for a known node:
 
-The hard part the faulkland case exposed: establishing a reliable channel to a node that only
-answers broadcast discovery (no route, on a non-home radio). A directed command over flood does not
-complete even at strong SNR, while broadcast discovery does. The fix is to **hop to the node's
-radio and install a direct (zero-hop) route**, justified by the discovery SNR.
+- **Auth first:** if a password is configured and the gateway is not yet in the node's ACL,
+  proactively log in. This is the real next work (see BACKLOG); the reachability probe and
+  `_send_authed` currently only re-authenticate on an *explicit* permission error, which a
+  silently-dropping node never sends, so mch never logs in and the node looks permanently
+  unreachable.
+- **Then routing, only if needed:** if directed commands still fail *after* a successful login, it
+  is a genuine routing problem - repair the path (`mch path`), and on the bench install a direct
+  route on the node's radio. The route tooling built for the (mis-aimed) keystone -
+  `mch adopt`'s direct-route install, `mch probe --radio [--advert] [--login]` - remains useful
+  here; it was just pointed at the wrong cause.
+- **Scope boundary unchanged:** a node unknown to the gateway and out of direct radio range stays
+  out of *remote* scope (carry it to the bench). See BACKLOG Won't Do.
 
-**Minimal-first (next work):** extend `mch adopt` to install a direct route and persist the
-reach-radio on the radio where discovery just succeeded - enough to get faulkland managed and
-learn from a real node - before generalising into the fuller DB-primary version. faulkland on the
-bench is the proving case.
-
-> **Keystone assumption - unproven.** This whole branch rests on: *discovery succeeds → install a
-> direct (zero-hop) route → directed commands now work.* We have proven discovery succeeds on
-> faulkland; we have **not** proven the direct route fixes the directed-command failure. It is
-> well-motivated (a flood-routed directed `ver` fails at strong SNR while a broadcast advert
-> succeeds, so a one-hop direct route should be more reliable) but it is a hypothesis. If a direct
-> route *also* fails on faulkland, this branch collapses and the open question becomes "why does a
-> directed command fail where a broadcast succeeds." So the faulkland bench test is not just the
-> first delivery - it is what confirms or kills the model this direction depends on. Also note
-> "direct range" is a fuzzy, asymmetric heuristic (we hear their advert ≠ they reliably hear our
-> command), not a crisp measurable boundary.
+> **Keystone RESOLVED (was a misdiagnosis).** The earlier assumption - *discovery succeeds → install
+> a direct (zero-hop) route → directed commands now work* - was falsified on faulkland, but for the
+> wrong-stated reason: the direct route was fine; the missing step was **login**. faulkland answers
+> directed commands over a direct route once the gateway is in its ACL. So the load-bearing
+> difficulty is auth for secured nodes, not routability. "Direct range" remains a fuzzy, asymmetric
+> heuristic, but that asymmetry was never demonstrated on faulkland - the link works both ways.
+> See JOURNAL 2026-06-03 RESOLVED.
 
 **Onboarding completion check (new):** after a node is adopted/synced, verify access actually
 works rather than assuming it: try a wrong password (expect rejection), the right password (expect

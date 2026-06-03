@@ -14,6 +14,22 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Operation Safety And Reachability
 
+- **Proactively log in to auth-required nodes that silently drop unauthenticated commands.**
+  (Confirmed root cause of the faulkland "unreachable" saga - see JOURNAL 2026-06-03 RESOLVED.)
+  faulkland (v1.15.0) drops a directed command from a peer not in its ACL with no reply and no
+  permission error, so the bare-`ver` reachability probe times out and the node is mislabeled
+  unreachable. `_send_authed` only re-authenticates on an *explicit* permission error, which never
+  arrives. Fix: when a node has a password configured and is not `auth_cached`, attempt login
+  before/instead of relying on the bare probe, so the gateway enters the node ACL at least once.
+  `mch probe --login` already exercises the gateway side. Decide where this slots into the
+  reachability-probe/sync flow and how it interacts with the offline/skip decision.
+- Make daemon startup tolerate a `get_contacts` failure instead of wedging. After the 0.9.34
+  timeout bound, a `get_contacts` timeout at work-queue startup (`queue.py`) now raises out of the
+  work-queue task and leaves the daemon half-alive: control socket up, work queue dead, every
+  command hanging the full client timeout. It should retry/back off, or fail loudly and exit so
+  systemd restarts cleanly. (Observed 2026-06-03 when a serial lockup made `get_contacts` time out
+  on restart; on a healthy gateway `get_contacts` is <1s, so this is about resilience, not the
+  contact-list size.)
 - Store a small set of candidate management paths per node with success/failure counts or
   percentages. Normal sync should try the current stored path first, then fall back to a known
   strong recent path before using flood as a bounded recovery signal. The recovery command is

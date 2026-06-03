@@ -4,7 +4,42 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## 2026-06-03 - KEYSTONE FALSIFIED on faulkland: direct route alone does not fix directed commands
+## 2026-06-03 - RESOLVED: it was AUTHENTICATION, not routing - the keystone was a misdiagnosis
+
+- The whole "routability" investigation below (both keystone entries) was chasing the wrong
+  variable. The real blocker for faulkland was **authentication**, confirmed by a clean natural
+  experiment on the bench.
+- Evidence: a directed `ver` to faulkland over a direct route at SF11 timed out at 15:23. The
+  operator then used meshcore-cli manually: at SF11, `node_discover` showed faulkland direct
+  (0 hops, RSSI -2), a bare `ver` returned nothing, but after `login` (success) `ver` and `clock`
+  both returned values. The *only* thing changed about faulkland after that was the gateway pubkey
+  being added to its ACL. Re-running the **identical bare `mch probe` (no login)** then returned
+  `ver -> v1.15.0-dee3e26`. The gateway reset in between is neutral - it recovered a serial lockup;
+  the ACL lives on faulkland, which was never reset, so it persisted.
+- Firmware behaviour (durable): faulkland on v1.15.0 **silently drops** a directed command from a
+  peer not in its ACL - no reply, no permission error, just a timeout. Broadcast discovery needs no
+  ACL, which is exactly why discovery succeeded while a directed `ver` "failed". There is **no link
+  asymmetry**; both directions work fine once authenticated. A direct route was never the missing
+  piece - the earlier adopt confirm-probe failed *with* a direct route purely because it never
+  logged in.
+- The real bug in mch: an auth-required node that silently drops unauthenticated commands cannot be
+  onboarded by the current reachability model. The probe sends a bare `ver` and reads no-response
+  as "unreachable"; `_send_authed` only re-authenticates on an *explicit* permission error
+  (`queue.py`), which never arrives. So mch never logs in, never enters the ACL, and the node looks
+  permanently unreachable - sending us chasing radios and routes. Fix: for a node with a password
+  configured and not `auth_cached`, **proactively log in** (at least once, to enter the ACL) rather
+  than waiting for a permission error. `mch probe --login` proves the gateway can do this.
+- Process lesson: a no-response timeout was over-interpreted as a routing/asymmetry signal when it
+  was an auth signal. A silent drop and an unroutable node look identical from a timeout; do not
+  build a model on which one it is without isolating the variable (here: log in and retry).
+- Operational note: heavy bench testing (repeated radio switches/adverts + a long manual
+  meshcore-cli session) locked up the gateway serial; `get_contacts` then timed out and **wedged
+  the daemon on startup** (socket up, work queue dead - `queue.py` startup does not handle a
+  `get_contacts` failure). A physical gateway reset recovered it; on the healthy gateway
+  `get_contacts` completes in <1s, so the contact-list size was NOT the cause. Both the startup
+  wedge and batching deploys away from active gateway use are logged in BACKLOG.
+
+## SUPERSEDED (see entry above - this was an auth problem, not routing): 2026-06-03 - KEYSTONE FALSIFIED on faulkland: direct route alone does not fix directed commands
 
 - Live bench result. `mch adopt 8e4a0d73... --radio 915.800,250,11,5` installed a real zero-hop
   direct route (`mch status` confirmed `known path: direct`), then the confirm probe's directed
@@ -55,7 +90,7 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
   cover route install, probe success, and probe-failure-still-restores-radio, but the real question
   (does a directed command complete over a direct route where flood failed?) needs hardware.
 
-## 2026-06-03 - Onboarding reachability: the difficulty axis is routability, not location
+## SUPERSEDED (the directed-vs-broadcast failure was AUTH, not routing - see top entry): 2026-06-03 - Onboarding reachability: the difficulty axis is routability, not location
 
 - Investigated a configured node that would not sync: scheduled sync reported "unreachable over
   flood", the config-derived radio recovery hunt tried the effective desired radio and nearby SF
