@@ -1838,6 +1838,42 @@ async def test_probe_node_advert_first_sends_advert_before_ver(db, monkeypatch):
     assert result["ok"] is True
 
 
+async def test_probe_node_records_ver_fact_on_success(db):
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway(cmd_text="v1.15.0-dee3e26 (Build: 19-Apr-2026)")
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+    pubkey = "8e4a0d73ab61" + "0" * 52
+    node = Node(pubkey=pubkey, name="", label="faulkland")
+
+    result = await wq.probe_node(node, radio=(915.8, 250.0, 11, 5))
+
+    assert result["ok"] is True
+    facts = await db.get_fact_records(pubkey)
+    ver = next((f for f in facts if f.key == "ver"), None)
+    assert ver is not None
+    assert ver.value == "v1.15.0-dee3e26 (Build: 19-Apr-2026)"
+
+
+async def test_probe_node_records_no_fact_on_failure(db):
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(
+        return_value=CommandResult(success=False, error="timeout — no response from node")
+    )
+    wq = WorkQueue(_make_config(), gw, db)
+    wq._contacts = [contact]
+    pubkey = "8e4a0d73ab61" + "0" * 52
+    node = Node(pubkey=pubkey, name="", label="faulkland")
+
+    await wq.probe_node(node, radio=(915.8, 250.0, 11, 5))
+
+    facts = await db.get_fact_records(pubkey)
+    assert not any(f.key == "ver" for f in facts)
+
+
 async def test_probe_node_without_contact_raises(db):
     wq = WorkQueue(_make_config(), _make_gateway(), db)
     wq._contacts = []

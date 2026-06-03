@@ -880,6 +880,7 @@ class WorkQueue:
 
         if _operation_succeeded(result):
             response = (result.text or "").strip()
+            await self._record_ver_fact(pubkey, response)
             await self._db.write_log(
                 pubkey,
                 "INFO",
@@ -896,6 +897,17 @@ class WorkQueue:
         )
         await _progress(progress, f"confirm probe FAILED: {response}")
         return {"sent": True, "ok": False, "response": response}
+
+    async def _record_ver_fact(self, pubkey: str, text: str) -> None:
+        """Store a successful bare-`ver` reply as the observed `ver` fact.
+
+        A reachability/confirm probe sends `ver`; its reply is a genuine fact
+        observation, so persist it (rather than only logging it) - the same data
+        the sync fact pass would collect, captured for free.
+        """
+        value = (text or "").strip()
+        if value:
+            await self._db.upsert_fact(NodeFact(node_pubkey=pubkey, key="ver", value=value))
 
     def _password_for_node(self, node: Node) -> str | None:
         """Resolve the configured password for a node (per-node prefix, else default)."""
@@ -981,6 +993,7 @@ class WorkQueue:
             ok = _operation_succeeded(result)
             if ok:
                 response = (result.text or "").strip()
+                await self._record_ver_fact(node.pubkey, response)
                 await self._db.write_log(
                     node.pubkey,
                     "INFO",
