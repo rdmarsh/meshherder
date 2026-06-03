@@ -5,21 +5,28 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
-- Added `mch probe NODE --radio FREQ,BW,SF,CR [--advert]`, a reachability-only investigation
-  command. It temporarily switches the gateway radio, optionally sends a gateway zero-hop advert
-  first (`--advert`, so the node can learn a direct route *back* to the gateway), sends one directed
-  `ver`, restores the radio, and reports the result. It streams live progress and does not change
-  the contact route, config, secrets, or the node. Built to test the return-path hypothesis after
-  the bench result below showed a gateway-side direct route alone does not make a directed command
-  succeed where broadcast discovery does.
+- Reachability probe now proactively logs in to an auth-required node that silently drops
+  unauthenticated commands. A secured node (observed on v1.15.0) drops a directed command from a
+  peer not in its ACL with no reply and no permission error - just a timeout - so the bare `ver`
+  reachability probe timed out and the node was mislabeled unreachable, and `_send_authed` (which
+  only re-authenticates on an explicit permission error) never logged in. Now, when the bare probe
+  fails and a password is configured and the node is not yet authenticated this session, mch logs
+  in once (entering the node ACL) and re-probes before giving up. The login is attempted only after
+  the cheap bare probe fails, so a node already in the gateway's ACL keeps the no-login fast path.
+  (This was the real cause of the faulkland "unreachable" investigation - not routing.)
+- Added `mch probe NODE --radio FREQ,BW,SF,CR [--advert] [--login]`, a reachability-only
+  investigation command. It temporarily switches the gateway radio, optionally sends a gateway
+  zero-hop advert (`--advert`) and/or logs in with the node's configured password (`--login`,
+  needed for auth-required nodes that drop unauthenticated commands), sends one directed `ver`,
+  restores the radio, and reports the result with live progress. It does not change the contact
+  route, config, secrets, or the node. (The `--login` path is what confirmed faulkland's blocker
+  was authentication, not routing.)
 - `mch adopt` now installs a direct (zero-hop) route on the new gateway contact and sends one
   directed `ver` on the discovered radio to confirm the route carries a command, restoring the
-  gateway radio afterwards. This is the minimal-first step of the routability-onboarding work: a
-  flood-routed directed command can fail even at strong SNR (the faulkland case), so adopt converts
-  the contact to a direct route and reports whether a directed command actually completes. The
-  confirm probe result is shown in the command output and recorded in `mch logs`. DB persistence of
-  the discovered reach-radio is deliberately deferred until the keystone (direct route -> directed
-  command works) is confirmed on a real node.
+  gateway radio afterwards. The confirm probe result is shown in the command output and recorded in
+  `mch logs`. (Note: the faulkland investigation later showed the original directed-command failure
+  was an authentication problem, not routing - see the reachability-probe login change above; the
+  direct-route install remains useful for genuinely unrouted nodes.)
 
 ## 0.9.35 - 2026-06-03
 

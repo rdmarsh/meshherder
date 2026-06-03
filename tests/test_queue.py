@@ -1868,6 +1868,79 @@ async def test_probe_node_login_without_password_skips_login(db):
     assert result["login_ok"] is None
 
 
+async def test_probe_reachable_logs_in_when_bare_probe_silently_fails(db):
+    """Auth-required node that silently drops unauthenticated ver: probe must log
+    in once (entering the node ACL) and re-probe, rather than report unreachable."""
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})  # direct
+    gw = _make_gateway()
+    state = {"authed": False}
+
+    async def _send(c, cmd, **k):
+        if state["authed"]:
+            return CommandResult(success=True, text="v1.15.0")
+        return CommandResult(success=False, error="timeout — no response from node")
+
+    async def _login(c, pw):
+        state["authed"] = True
+        return True
+
+    gw.send_command = AsyncMock(side_effect=_send)
+    gw.login = AsyncMock(side_effect=_login)
+    cfg = _make_config(node_cfgs=[_node(pubkey="8e4a0d73", label="faulkland")])
+    cfg.secrets = {"8e4a0d73": NodeSecrets(password="newadminpw")}
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland", auth_cached=False)
+
+    res = await wq._probe_reachable(contact, node, cfg.nodes[0])
+
+    assert res is not None and res.success
+    gw.login.assert_awaited_once_with(contact, "newadminpw")
+    assert node.auth_cached is True
+
+
+async def test_probe_reachable_no_login_when_already_auth_cached(db):
+    """A node already authenticated this session that stops answering is genuinely
+    unreachable - do not spend a login (that only fires on an explicit perm error)."""
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(
+        return_value=CommandResult(success=False, error="timeout — no response from node")
+    )
+    cfg = _make_config(node_cfgs=[_node(pubkey="8e4a0d73", label="faulkland")])
+    cfg.secrets = {"8e4a0d73": NodeSecrets(password="newadminpw")}
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland", auth_cached=True)
+
+    res = await wq._probe_reachable(contact, node, cfg.nodes[0])
+
+    assert res is None
+    gw.login.assert_not_awaited()
+
+
+async def test_probe_reachable_no_login_when_no_password(db):
+    """No password configured: nothing to log in with, so don't attempt it."""
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway()
+    gw.send_command = AsyncMock(
+        return_value=CommandResult(success=False, error="timeout — no response from node")
+    )
+    cfg = _make_config(node_cfgs=[_node(pubkey="8e4a0d73", label="faulkland")])
+    cfg.secrets = {}  # no password
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland", auth_cached=False)
+
+    res = await wq._probe_reachable(contact, node, cfg.nodes[0])
+
+    assert res is None
+    gw.login.assert_not_awaited()
+
+
 async def test_management_path_discover_returns_candidate_without_applying(db):
     contact = _contact("aabbccdd1122")
     contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
