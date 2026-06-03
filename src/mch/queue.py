@@ -858,12 +858,22 @@ class WorkQueue:
         await _progress(progress, f"confirm probe FAILED: {response}")
         return {"sent": True, "ok": False, "response": response}
 
+    def _password_for_node(self, node: Node) -> str | None:
+        """Resolve the configured password for a node (per-node prefix, else default)."""
+        ns = next(
+            (ns for prefix, ns in self._config.secrets.items()
+             if prefix != "default" and node.pubkey.startswith(prefix)),
+            None,
+        ) or self._config.secrets.get("default")
+        return ns.password if ns else None
+
     async def probe_node(
         self,
         node: Node,
         *,
         radio: tuple[float, float, int, int],
         advert: bool = False,
+        login: bool = False,
         progress: ProgressCallback = None,
     ) -> dict[str, Any]:
         """Send one directed `ver` to a node on a given radio to test reachability.
@@ -871,9 +881,11 @@ class WorkQueue:
         Switches the gateway radio temporarily, optionally sends a gateway zero-hop
         advert first (so the node can learn a direct route *back* to the gateway -
         the return-path hypothesis for why directed commands fail where broadcast
-        discovery succeeds), sends a directed `ver`, and always restores the radio.
-        Sends to the contact as-is; it does not change the contact's route, config,
-        secrets, or the node.
+        discovery succeeds), optionally logs in first (auth-required nodes silently
+        drop unauthenticated directed commands - returning nothing, not a permission
+        error - so a bare `ver` times out and looks unreachable), sends a directed
+        `ver`, and always restores the radio. Sends to the contact as-is; it does
+        not change the contact's route, config, secrets, or the node.
         """
         async with self.operation(f"probe {node.pubkey[:8]}", wait=False):
             contact = self._contact_for_pubkey(node.pubkey)
@@ -883,6 +895,8 @@ class WorkQueue:
                 )
 
             radio_text = _format_radio_tuple(radio)
+            login_attempted = False
+            login_ok: bool | None = None
             await _progress(progress, f"switching gateway radio to {radio_text}")
             saved_radio = await self._gateway.switch_radio_temporarily(*radio)
             try:
@@ -899,6 +913,24 @@ class WorkQueue:
                         f"waiting {_ADVERT_SETTLE_SECONDS:g}s for the node to learn the gateway",
                     )
                     await asyncio.sleep(_ADVERT_SETTLE_SECONDS)
+
+                if login:
+                    password = self._password_for_node(node)
+                    if not password:
+                        await _progress(
+                            progress, "login requested but no password configured - skipping login"
+                        )
+                    else:
+                        login_attempted = True
+                        label = node.label or node.name or node.pubkey[:12]
+                        await _progress(progress, f"logging in to {label}...")
+                        login_ok = await self._gateway.login(contact, password)
+                        await _progress(progress, f"login {'ok' if login_ok else 'FAILED'}")
+                        await self._db.write_log(
+                            node.pubkey,
+                            "INFO" if login_ok else "WARNING",
+                            f"probe login {'succeeded' if login_ok else 'failed'} on {radio_text}",
+                        )
 
                 await _progress(progress, "sending directed `ver`...")
                 result = await self._gateway.send_command(contact, "ver", timeout=30)
@@ -947,6 +979,8 @@ class WorkQueue:
                     "text": radio_text,
                 },
                 "advert_sent": advert,
+                "login_attempted": login_attempted,
+                "login_ok": login_ok,
                 "ok": ok,
                 "response": response,
                 "route": route,
@@ -1762,12 +1796,7 @@ class WorkQueue:
             node.auth_cached = False
             await self._db.upsert_node(node)
 
-            ns = next(
-                (ns for prefix, ns in self._config.secrets.items()
-                 if prefix != "default" and node.pubkey.startswith(prefix)),
-                None,
-            ) or self._config.secrets.get("default")
-            password = ns.password if ns else None
+            password = self._password_for_node(node)
             if not password:
                 raise _ReloginFailed("permission denied — no password configured")
 

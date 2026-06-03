@@ -1825,6 +1825,49 @@ async def test_probe_node_restores_radio_on_failure(db):
     gw.restore_radio.assert_awaited_once_with(915.800, 250, 10, 5)
 
 
+async def test_probe_node_login_authenticates_before_ver(db):
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway()
+    order: list[str] = []
+    gw.login = AsyncMock(side_effect=lambda *a, **k: order.append("login") or True)
+    gw.send_command = AsyncMock(
+        side_effect=lambda *a, **k: order.append("ver")
+        or CommandResult(success=True, text="v1.15.0")
+    )
+    cfg = _make_config()
+    cfg.secrets = {"8e4a0d73": NodeSecrets(password="walter76")}
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland")
+
+    result = await wq.probe_node(node, radio=(915.8, 250.0, 11, 5), login=True)
+
+    gw.login.assert_awaited_once_with(contact, "walter76")
+    assert order == ["login", "ver"]  # must authenticate before the directed probe
+    assert result["login_attempted"] is True
+    assert result["login_ok"] is True
+    assert result["ok"] is True
+    assert result["response"] == "v1.15.0"
+
+
+async def test_probe_node_login_without_password_skips_login(db):
+    contact = _contact("8e4a0d73ab61")
+    contact.update({"out_path": "", "out_path_len": 0, "out_path_hash_mode": 0})
+    gw = _make_gateway(cmd_text="v1.15.0")
+    cfg = _make_config()
+    cfg.secrets = {}  # no password configured for this node
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+    node = Node(pubkey="8e4a0d73ab61" + "0" * 52, name="", label="faulkland")
+
+    result = await wq.probe_node(node, radio=(915.8, 250.0, 11, 5), login=True)
+
+    gw.login.assert_not_awaited()
+    assert result["login_attempted"] is False
+    assert result["login_ok"] is None
+
+
 async def test_management_path_discover_returns_candidate_without_applying(db):
     contact = _contact("aabbccdd1122")
     contact.update({"out_path": "", "out_path_len": -1, "out_path_hash_mode": 0})
