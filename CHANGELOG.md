@@ -5,6 +5,16 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- Added `name_prefix`: a string (usually an emoji) prepended to a node's desired name, settable at
+  global, group, or node scope and resolving Node > Group > Global - so a whole group can be tagged
+  on the map (e.g. "📡") while each node keeps its own name. The prefix is prepended verbatim with
+  no separator; put a space in the prefix if you want one. It applies only when a node has a desired
+  `settings.name`; a prefix with no base name does nothing. Config load now rejects any node whose
+  combined `prefix+name` exceeds the 31-byte UTF-8 firmware name cap (bench-confirmed byte-based,
+  not char-based, and unaffected by a set location), because the firmware would truncate on a raw
+  byte boundary - corrupting multibyte emoji and producing a stored name that can never equal the
+  desired value, i.e. a permanent enforcement loop. The 31-byte cap is now a shared constant reused
+  by interactive commissioning.
 - Sync now reaches a node on its own desired `radio` by default, instead of only the gateway home
   radio. The reach radio resolves `via_radio` (the split-mesh/bridge override) -> else the node's
   desired `radio` setting -> else the gateway home radio, each Node > Group > Global. Previously the

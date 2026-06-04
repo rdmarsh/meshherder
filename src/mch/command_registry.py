@@ -57,6 +57,16 @@ class CommandSpec:
 DEFAULT_COMMAND_TIMEOUT = 30.0
 VALID_RADIO_BANDWIDTHS = (7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0)
 
+# Maximum stored node name length in UTF-8 bytes. The firmware name buffer holds 31
+# bytes and truncates on a hard byte boundary - it does NOT respect multibyte char
+# boundaries, so an over-length emoji name is cut mid-sequence and reads back as
+# corrupt UTF-8 that can never equal the desired value (a permanent enforcement loop).
+# Bench-confirmed byte-based (not char-based) on v1.14.1 (32->31) and v1.15.0; a set
+# location did NOT reduce the stored cap. The "24 bytes with location" figure concerns
+# the over-the-air *advertised* name, not the stored value `get name` returns.
+# Evidence: JOURNAL.md 2026-06-04 name-byte-cap entry; tools/name_limit_probe.py.
+MAX_NODE_NAME_BYTES = 31
+
 
 _SPECS: tuple[CommandSpec, ...] = (
     CommandSpec(

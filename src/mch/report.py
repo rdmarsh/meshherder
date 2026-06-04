@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from mch.command_registry import write_command_for_key
-from mch.config import Config, GroupConfig, NodeConfig
+from mch.config import Config, GroupConfig, NodeConfig, resolve_desired
 from mch.db import Database
 from mch.models import Node, NodeState, SettingPolicy, SettingRecord
-from mch.queue import all_setting_keys, resolve_desired, resolve_policy
+from mch.queue import all_setting_keys, resolve_policy
 from mch.settings_compare import compare_setting
 
 SCHEMA_VERSION = 2

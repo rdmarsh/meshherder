@@ -176,6 +176,14 @@ groups:
     # This is not the desired `settings.radio` value and not a MeshCore routing path.
     # A different freq, bw, or sf selects another channel; CR alone does not.
     # via_radio: "916.575,62.5,7,8"
+    #
+    # Optional name prefix prepended to each member's desired name (settings.name),
+    # usually an emoji marking the group on the map. Resolves Node > Group > Global.
+    # No space is added - put one in the prefix if you want it (e.g. "REP "). A node
+    # with no desired name gets nothing prefixed. The combined prefix+name must fit the
+    # 31-byte UTF-8 firmware name cap (emoji are 3-4 bytes each); mchd refuses to start
+    # if it would overflow, because the node would silently truncate and never converge.
+    # name_prefix: "📡"   # satellite-antenna emoji
     settings:
       # Two ways to configure a setting key:
       #

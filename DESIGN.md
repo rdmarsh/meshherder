@@ -282,6 +282,23 @@ Comparison is field-aware for known numeric settings where firmware returns roun
 SF and CR are exact integers. `lat` and `lon` compare within roughly three decimal places. Status
 still displays the actual observed value and marks rows within expected tolerance with `*`.
 
+### Node name prefix
+
+`name_prefix` prepends a string - usually an emoji marking a group on the map - to a node's desired
+`name`. It is declared globally, on a group, or on a node, with the same node-then-group-then-global
+precedence as other shared fields, and combines with the separately-resolved base name (so a group
+prefix plus a per-node name is the common case). The prefix is prepended verbatim: no separator is
+inserted, so an operator who wants a space includes it in the prefix. The prefix only applies when
+a base name is configured; a prefix with no desired name has nothing to prepend onto.
+
+Because the firmware name buffer stores at most 31 UTF-8 bytes and truncates on a raw byte boundary
+(not a character boundary), `mch` validates `prefix+name` against `MAX_NODE_NAME_BYTES` at config
+load and refuses to start if it would overflow. Truncation is never used: it would split a multibyte
+emoji into invalid UTF-8 that `get name` reads back differently from the desired value, producing a
+permanent enforcement loop. The cap is byte-based and is not reduced by a set location (bench-
+confirmed); the smaller over-the-air *advertised* name budget when a location is present concerns
+what other nodes display, not the stored value mch verifies, and is not enforced here.
+
 ## Facts vs settings
 
 A value read from a setting is an observed fact in the ordinary English sense, and a future

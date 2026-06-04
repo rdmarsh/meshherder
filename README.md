@@ -59,6 +59,10 @@ Think Ansible for your nodes, running continuously in the background.
   a group, or to a node. Node values override group values, which override the global fallback.
   mchd temporarily switches the gateway radio tuple, manages the node, and restores the home
   radio tuple when done. This is not a MeshCore routing hop.
+- **Group name prefix** — tag a group on the map with a `name_prefix:` (usually an emoji) that is
+  prepended to each member's desired name. Set it globally, on a group, or on a node; the most
+  specific wins. No space is added (put one in the prefix if you want it), and mchd refuses to
+  start if a `prefix+name` would overflow the 31-byte firmware name limit.
 - **Staggered scheduler** — nodes are spread randomly across the sync window so mchd restarts never
   cause a sync surge.
 - **DM commands** — authorised MeshCore devices can ask mchd for field status over the mesh:
