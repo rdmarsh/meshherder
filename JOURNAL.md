@@ -27,6 +27,31 @@ the dated entry just below. Until fixed, treat `radio` as audit-only / bench-cha
 BACKLOG: hunt redesign (SF+-1 & BW+-1 + fleet-in-use radios), anonymous presence probe, and the
 startup-wedge-on-`get_contacts` robustness fix.
 
+## 2026-06-04 - bench-confirmed node-name byte cap for the name_prefix feature
+
+Building the `name_prefix` ("mesh name prehook", usually an emoji) backlog item. Probed the
+Mac-attached test node (`dave_mac_test`, v1.15.0-dee3e26) over the plain-text serial CLI with
+`tools/name_limit_probe.py`, setting `set name <X>` and reading back `get name`:
+
+- **Hard cap is 31 bytes of UTF-8, byte-based, not char-based.** ASCII: 31 stored verbatim, 32+
+  truncated to 31. Rockets (4B each): 7 (28B) stored fine, 8 (32B) truncated. Confirms the prior
+  v1.14.1 finding (32 sent -> 31 stored) on v1.15.0 too.
+- **Truncation cuts mid-multibyte-sequence and corrupts.** 8 rockets (32B) -> stored 31B = 7 rockets
+  plus a lone `\xf0` that reads back as the U+FFFD replacement char. So an over-length emoji name
+  comes back as invalid UTF-8 that can *never* equal the desired value -> a permanent enforcement
+  loop, exactly the hazard the BACKLOG note warned about, plus silent corruption.
+- **Location does NOT reduce the stored cap.** With `set lat 51.5` / `set lon -0.1` active, the
+  stored-name cap was still 31 bytes (32 ASCII -> 31, 8 rockets -> 31). The BACKLOG's "24 bytes with
+  location" figure is about the *advertised* name in the OTA packet, not the stored value that
+  `get name` returns. mch verifies via `get name` (stored), so stored-name validation uses a flat
+  31-byte cap. The OTA advert-name reduction is a separate, still-unverified concern (needs a second
+  receiving node to observe) - left as an open BACKLOG sub-item, not enforced here.
+
+Design decision from this evidence: validate `name_prefix + desired name` as `<= 31 bytes UTF-8`
+and **fail at config load** if it exceeds. Never truncate (corrupts + loops). Rejecting over-length
+names before they reach the mesh also means we never construct a name that splits a multibyte char.
+Constant lives as `MAX_NODE_NAME_BYTES` with this evidence; `cli.py` commissioning re-uses it.
+
 ## 2026-06-04 - faulkland came under management end-to-end - and exposed a radio-reboot strand
 
 - **Milestone:** faulkland's scheduled sync (with the reach-on-own-radio + proactive-login fixes

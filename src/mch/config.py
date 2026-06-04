@@ -14,7 +14,11 @@ from typing import Any
 
 import yaml
 
-from mch.command_registry import readable_observation_keys, validate_value
+from mch.command_registry import (
+    MAX_NODE_NAME_BYTES,
+    readable_observation_keys,
+    validate_value,
+)
 from mch.meshkey import derive_public_key
 from mch.models import SettingPolicy
 
@@ -51,6 +55,7 @@ _NODE_KEYS = {
     "settings",
     "operations",
     "via_radio",
+    "name_prefix",
 }
 _GROUP_KEYS = {
     "name",
@@ -59,8 +64,16 @@ _GROUP_KEYS = {
     "setting_overrides",
     "operations",
     "via_radio",
+    "name_prefix",
 }
-_GLOBAL_KEYS = {"default_policy", "settings", "setting_overrides", "operations", "via_radio"}
+_GLOBAL_KEYS = {
+    "default_policy",
+    "settings",
+    "setting_overrides",
+    "operations",
+    "via_radio",
+    "name_prefix",
+}
 _SETTING_KEYS = {"desired", "policy", "poll_hours"}
 _OPERATION_KEYS = {"command", "every_hours", "fire_and_forget"}
 _RADIO_KEYS = {"freq", "bw", "sf", "cr"}
@@ -183,6 +196,8 @@ class NodeConfig:
     operations: list[OperationConfig] = field(default_factory=list)
     # Radio tuple used to contact this node; overrides the group value when set.
     via_radio: RadioConfig | None = None
+    # Prepended to the desired name (no auto-space); overrides group/global when set.
+    name_prefix: str | None = None
 
 
 @dataclass
@@ -196,6 +211,8 @@ class GroupConfig:
     # setting_overrides: policy-only overrides (no desired value required)
     setting_overrides: dict[str, SettingConfig] = field(default_factory=dict)
     operations: list[OperationConfig] = field(default_factory=list)
+    # Prepended to members' desired names (no auto-space); usually an emoji.
+    name_prefix: str | None = None
 
 
 @dataclass
@@ -218,6 +235,49 @@ def resolve_via_radio(
         or (group_cfg.via_radio if group_cfg else None)
         or (global_cfg.via_radio if global_cfg else None)
     )
+
+
+def resolve_name_prefix(
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
+) -> str | None:
+    """Return the name prefix for a node with Node > Group > Global precedence."""
+    return (
+        node_cfg.name_prefix
+        or (group_cfg.name_prefix if group_cfg else None)
+        or (global_cfg.name_prefix if global_cfg else None)
+    )
+
+
+def resolve_desired(
+    key: str,
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
+) -> str | None:
+    """Return the desired value for a setting, node overrides group overrides global.
+
+    For the ``name`` key the resolved ``name_prefix`` (Node > Group > Global) is
+    prepended verbatim - no separator is inserted, so an operator who wants a space
+    puts it in the prefix. The prefix only applies when a base name is configured;
+    a prefix with no desired name has nothing to prepend onto and yields None.
+    """
+    node_setting = node_cfg.settings.get(key)
+    if node_setting and node_setting.desired is not None:
+        desired = node_setting.desired
+    elif group_cfg and (gs := group_cfg.settings.get(key)) and gs.desired is not None:
+        desired = gs.desired
+    elif global_cfg and (xs := global_cfg.settings.get(key)) and xs.desired is not None:
+        desired = xs.desired
+    else:
+        desired = None
+
+    if key == "name" and desired is not None:
+        prefix = resolve_name_prefix(node_cfg, group_cfg, global_cfg)
+        if prefix:
+            return prefix + desired
+    return desired
 
 
 @dataclass
@@ -350,6 +410,26 @@ def load(
             + f" - defined groups: {defined}"
         )
 
+    # Reject any node whose prefixed desired name exceeds the firmware byte cap.
+    # Truncation corrupts multibyte chars and loops forever (see MAX_NODE_NAME_BYTES),
+    # so fail at load rather than ship a name that can never converge.
+    groups_by_name = {g.name: g for g in cfg.groups}
+    for n in cfg.nodes:
+        group_cfg = groups_by_name.get(n.group) if n.group else None
+        effective_name = resolve_desired("name", n, group_cfg, cfg.global_settings)
+        if effective_name is None:
+            continue
+        nbytes = len(effective_name.encode("utf-8"))
+        if nbytes > MAX_NODE_NAME_BYTES:
+            ident = n.label or n.pubkey_prefix
+            prefix = resolve_name_prefix(n, group_cfg, cfg.global_settings)
+            prefix_note = f" (name_prefix {prefix!r} + name)" if prefix else ""
+            raise ValueError(
+                f"node {ident!r}: desired name {effective_name!r}{prefix_note} is "
+                f"{nbytes} bytes, over the {MAX_NODE_NAME_BYTES}-byte firmware limit"
+                " - shorten the name or prefix (the node would truncate and never converge)"
+            )
+
     # Resolve secrets file: explicit arg > config key > sibling secrets.yaml
     if secrets_path is None:
         secrets_path = Path(raw.get("secrets_file", config_path.parent / "secrets.yaml"))
@@ -449,6 +529,14 @@ def _normalize_pubkey_prefix(raw: Any, context: str) -> str:
     return prefix
 
 
+def _coerce_name_prefix(raw: Any) -> str | None:
+    """Stringify a name_prefix; treat empty/absent as no prefix."""
+    if raw is None:
+        return None
+    text = str(raw)
+    return text or None
+
+
 def _coerce_setting_value(v: Any) -> str | None:
     """Stringify a setting value from YAML.
 
@@ -539,6 +627,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
         settings=settings,
         operations=operations,
         via_radio=via_radio,
+        name_prefix=_coerce_name_prefix(raw.get("name_prefix")),
     )
 
 
@@ -581,6 +670,7 @@ def _parse_group(raw: Any, context: str = "group") -> GroupConfig:
         settings=settings,
         setting_overrides=overrides,
         operations=operations,
+        name_prefix=_coerce_name_prefix(raw.get("name_prefix")),
     )
 
 
@@ -613,6 +703,7 @@ def _parse_global(raw: dict[str, Any]) -> GroupConfig:
         settings=settings,
         setting_overrides=overrides,
         operations=operations,
+        name_prefix=_coerce_name_prefix(raw.get("name_prefix")),
     )
 
 

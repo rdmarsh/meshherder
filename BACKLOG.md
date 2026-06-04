@@ -136,9 +136,21 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   managed node during a normal/probe path.
 - Consider nearby bandwidth variants for radio recovery only after known-good radio history is in
   place; SF variants are already speculative enough for the current bounded hunt.
-- Decide the node-name-prefix design. If `name_prefix` is added it should use Node > Group >
-  Global precedence and respect the advertised-name byte limits: 32 bytes without location and
-  24 with location. Do not add a suffix because truncation can create an enforcement loop.
+- Node-name prefix (`name_prefix`) - DONE (Unreleased). Implemented with Node > Group > Global
+  precedence; prepended verbatim (no auto-space); applied only when a desired name exists; rejected
+  at config load if `prefix+name` exceeds the stored 31-byte UTF-8 cap (no truncation, which would
+  corrupt and loop). Bench-confirmed (v1.15.0, `tools/name_limit_probe.py`): the stored cap is a
+  flat byte-based 31 and is NOT reduced by a set location - so the earlier "24 bytes with location"
+  figure does not apply to the stored value `get name` returns. Still open: the over-the-air
+  *advertised* name may be truncated shorter than the stored name when a location is present, which
+  would make the on-map name disagree with the (correct) stored name mch verifies. Verifying that
+  needs a second receiving node to observe the advert; until then it is unenforced and undocumented
+  as a hard limit.
+- Apply `name_prefix` at commission time. Currently the interactive commission flow writes the bare
+  name the operator types; the prefix is only applied by the first convergence sync afterwards. Decide
+  whether commissioning should show/preview the effective prefixed name (resolved from the chosen
+  group) and write it directly, including re-validating the combined name against the 31-byte cap at
+  the prompt rather than only on the next config load.
 - Expand field-aware validation and operator-facing setting descriptions where registry metadata
   is incomplete, including enumerated settings such as `path.hash.mode`.
 - Investigate `get pwrmgt.support` across deployed boards and firmware. Decide whether it should

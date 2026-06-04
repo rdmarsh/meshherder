@@ -138,6 +138,57 @@ def test_global_settings_block_parses_like_group(tmp_path):
     assert cfg.global_settings.setting_overrides["powersaving"].policy == SettingPolicy.SKIP
 
 
+def test_name_prefix_parsed_at_node_group_global(tmp_path):
+    p = _write_config(tmp_path, """\
+        global:
+          name_prefix: "G"
+        groups:
+          - name: edge
+            name_prefix: "\U0001f4e1"
+        nodes:
+          - pubkey_prefix: aabbccdd
+            group: edge
+            name_prefix: "\U0001f680"
+    """)
+    cfg = load(p)
+    assert cfg.global_settings.name_prefix == "G"
+    assert cfg.groups[0].name_prefix == "\U0001f4e1"
+    assert cfg.nodes[0].name_prefix == "\U0001f680"
+
+
+def test_name_prefix_emoji_within_limit_ok(tmp_path):
+    # rocket (4 bytes) + "Repeater01" (10 bytes) = 14 bytes, well under 31.
+    p = _write_config(tmp_path, """\
+        groups:
+          - name: edge
+            name_prefix: "\U0001f680"
+        nodes:
+          - pubkey_prefix: aabbccdd
+            group: edge
+            settings:
+              name: "Repeater01"
+    """)
+    cfg = load(p)  # must not raise
+    assert cfg.nodes[0].settings["name"].desired == "Repeater01"
+
+
+def test_name_prefix_plus_name_over_byte_limit_rejected(tmp_path):
+    # prefix (4B) + 28 ASCII chars = 32 bytes > 31-byte stored cap. Firmware would
+    # truncate and corrupt, so reject at load rather than enter an enforcement loop.
+    p = _write_config(tmp_path, """\
+        groups:
+          - name: edge
+            name_prefix: "\U0001f680"
+        nodes:
+          - pubkey_prefix: aabbccdd
+            group: edge
+            settings:
+              name: "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    """)
+    with pytest.raises(ValueError, match="31-byte firmware limit"):
+        load(p)
+
+
 def test_known_setting_desired_values_are_validated(tmp_path):
     p = _write_config(tmp_path, """\
         nodes:

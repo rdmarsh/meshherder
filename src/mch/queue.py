@@ -35,6 +35,7 @@ from mch.config import (
     OperationConfig,
     RadioConfig,
     _parse_radio,
+    resolve_desired,
     resolve_via_radio,
 )
 from mch.db import Database
@@ -237,27 +238,6 @@ def resolve_policy(
             return global_cfg.default_policy
 
     return global_default
-
-
-def resolve_desired(
-    key: str,
-    node_cfg: NodeConfig,
-    group_cfg: GroupConfig | None,
-    global_cfg: GroupConfig | None = None,
-) -> str | None:
-    """Return the desired value for a setting, node overrides group overrides global."""
-    node_setting = node_cfg.settings.get(key)
-    if node_setting and node_setting.desired is not None:
-        return node_setting.desired
-    if group_cfg:
-        group_setting = group_cfg.settings.get(key)
-        if group_setting and group_setting.desired is not None:
-            return group_setting.desired
-    if global_cfg:
-        global_setting = global_cfg.settings.get(key)
-        if global_setting and global_setting.desired is not None:
-            return global_setting.desired
-    return None
 
 
 def resolve_reach_radio(

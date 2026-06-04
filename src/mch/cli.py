@@ -22,7 +22,11 @@ from typing import Any
 import click
 
 from mch import __version__
-from mch.command_registry import parse_radio_tuple, validate_radio_tuple
+from mch.command_registry import (
+    MAX_NODE_NAME_BYTES,
+    parse_radio_tuple,
+    validate_radio_tuple,
+)
 from mch.command_safety import blocked_exec_command, confirm_exec_command
 from mch.config import fact_name_warnings, sanitize_node_label, secrets_identity_warnings
 from mch.config import load as load_config
@@ -2249,15 +2253,17 @@ def _commission_new_wizard(
         label = sanitize_node_label(requested_label)
         if label != requested_label:
             click.echo(f"  local label must be config-safe; using {label!r}")
-        # Re-prompt name until within 31 bytes (MeshCore firmware cap).
+        # Re-prompt name until within the MeshCore firmware byte cap.
         name_default = name or requested_label or label
         while True:
             name = click.prompt("Node name  ", default=name_default).strip()
             encoded = name.encode("utf-8")
-            if len(encoded) <= 31:
+            if len(encoded) <= MAX_NODE_NAME_BYTES:
                 break
-            truncated = encoded[:31].decode("utf-8", errors="ignore")
-            click.echo(f"  name too long (max 31 bytes). Truncated: {truncated!r}")
+            truncated = encoded[:MAX_NODE_NAME_BYTES].decode("utf-8", errors="ignore")
+            click.echo(
+                f"  name too long (max {MAX_NODE_NAME_BYTES} bytes). Truncated: {truncated!r}"
+            )
             name_default = truncated
         group = _prompt_commission_group(group, group_options)
 

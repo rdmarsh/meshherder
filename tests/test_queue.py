@@ -19,6 +19,7 @@ from mch.config import (
     RadioConfig,
     SchedulerConfig,
     SettingConfig,
+    resolve_name_prefix,
 )
 from mch.db import Database
 from mch.gateway import CommandResult, Gateway
@@ -186,6 +187,64 @@ def test_resolve_desired_group_wins_over_global():
 
 def test_resolve_desired_none_when_no_config():
     assert resolve_desired("tx", _node(), None) is None
+
+
+# ---------------------------------------------------------------------------
+# name_prefix: emoji/string prepended to the desired node name
+# ---------------------------------------------------------------------------
+
+def test_resolve_name_prefix_node_wins_over_group():
+    node = _node(name_prefix="N")
+    group = _group(name_prefix="G")
+    assert resolve_name_prefix(node, group) == "N"
+
+
+def test_resolve_name_prefix_falls_back_to_group():
+    group = _group(name_prefix="G")
+    assert resolve_name_prefix(_node(), group) == "G"
+
+
+def test_resolve_name_prefix_falls_back_to_global():
+    global_cfg = _group(name_prefix="X")
+    assert resolve_name_prefix(_node(), None, global_cfg) == "X"
+
+
+def test_resolve_name_prefix_none_when_unset():
+    assert resolve_name_prefix(_node(), _group(), _group()) is None
+
+
+def test_resolve_desired_name_applies_group_prefix():
+    # The headline use case: group emoji prefix + per-node name.
+    node = _node(settings={"name": SettingConfig(desired="NodeA")})
+    group = _group(name_prefix="\U0001f680")
+    assert resolve_desired("name", node, group) == "\U0001f680NodeA"
+
+
+def test_resolve_desired_name_no_auto_space():
+    # No space is inserted between prefix and name - operators add it if they want one.
+    node = _node(settings={"name": SettingConfig(desired="NodeA")})
+    group = _group(name_prefix="\U0001f680")
+    assert resolve_desired("name", node, group) == "\U0001f680NodeA"
+    # An operator who wants a space puts it in the prefix.
+    group_space = _group(name_prefix="\U0001f680 ")
+    assert resolve_desired("name", node, group_space) == "\U0001f680 NodeA"
+
+
+def test_resolve_desired_name_no_prefix_unchanged():
+    node = _node(settings={"name": SettingConfig(desired="NodeA")})
+    assert resolve_desired("name", node, _group()) == "NodeA"
+
+
+def test_resolve_desired_name_prefix_without_base_is_none():
+    # A prefix with no desired base name has nothing to prepend onto.
+    group = _group(name_prefix="\U0001f680")
+    assert resolve_desired("name", _node(), group) is None
+
+
+def test_resolve_desired_prefix_only_applies_to_name_key():
+    # name_prefix must never leak onto other settings.
+    node = _node(settings={"tx": SettingConfig(desired="20")}, name_prefix="\U0001f680")
+    assert resolve_desired("tx", node, None) == "20"
 
 
 def test_all_setting_keys_union():
