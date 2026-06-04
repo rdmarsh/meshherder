@@ -6,10 +6,11 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## >>> RESUME HERE (paused 2026-06-04) - update or clear this block when you pick up <<<
 
-**Deploy state:** luna's running daemon is `ce23e82` (reach-on-own-radio fix). Origin is ahead at
-`63717a7` - it includes the `ver`-fact-from-probe fix (`e3c5b4e`) which is committed/pushed but
-**NOT deployed** (held deliberately). luna source == installed, so it's clean. Next deploy is a
-full one (git pull both checkouts -> `pip install .` -> restart `mchd`); see the deploy memory.
+**Deploy state:** luna's running daemon is `fd1a0f5` (deployed 2026-06-04), which bundles the
+previously-held `ver`-fact-from-probe fix (`e3c5b4e`) and the new `name_prefix` feature. luna
+source == installed; production config validates clean against the new 31-byte name check and the
+daemon is `active`. The radio-strand fix (headline task below) is still **NOT done** - it was the
+original reason the ver-fact deploy was held, but `name_prefix` shipped ahead of it on request.
 
 **faulkland is stranded** and will not self-recover: it's physically on SF11, but mch enforced
 `set radio` to SF10, recorded observed=SF10, and the "radio confirmed -> skip recovery" rule now
