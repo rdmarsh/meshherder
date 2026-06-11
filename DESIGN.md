@@ -120,7 +120,12 @@ wanted.
    Scope note: a DB desired row on a node *not* in config.yaml is not surfaced yet (the report still
    needs a config-derived `NodeConfig` to resolve against); that arrives with the config-import /
    group-global-scope slices.
-5. `mch clean settings` removes orphaned observed rows.
+5. [done 2026-06-11] `mch clean settings` removes orphaned observed rows - the mirror of
+   `mch clean facts`. A `settings` row is orphaned when its key is not in the node's resolved
+   desired set (config + DB overlay). The DB overlay is applied when computing the wanted set, and
+   db-set keys are seeded directly, so a key set only via `mch set` is never deleted (even on a node
+   absent from config.yaml). Dry-run by default; `--yes` deletes; `--group`/`--all`/`--setting`
+   filters mirror `clean facts`. Deletes are safe because observed rows are a re-derivable cache.
 6. Later: group/global scopes, then reserved-key directives, then config.yaml import/export and
    sunset.
 

@@ -425,6 +425,20 @@ class Database:
         )
         await db.commit()
 
+    async def delete_setting(self, node_pubkey: str, key: str) -> None:
+        """Delete one observed setting row (e.g. ``mch clean settings``).
+
+        Observed rows are a cache, never authoritative, so removing an orphaned one
+        is always safe - it is re-observed next cycle if the key is still wanted.
+        Desired state in ``desired_settings`` is untouched.
+        """
+        db = self._db_required()
+        await db.execute(
+            "DELETE FROM settings WHERE node_pubkey = ? AND key = ?",
+            (node_pubkey, key),
+        )
+        await db.commit()
+
     # ------------------------------------------------------------------
     # operations
     # ------------------------------------------------------------------

@@ -29,7 +29,7 @@ from meshcore.events import EventType
 from mch.api import ReadOnlyApi
 from mch.command_registry import validate_value, writable_setting_keys
 from mch.command_safety import blocked_exec_command
-from mch.config import Config
+from mch.config import Config, overlay_db_settings
 from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
@@ -39,6 +39,7 @@ from mch.queue import (
     NodeResult,
     OperationBusyError,
     WorkQueue,
+    all_setting_keys,
 )
 from mch.report import (
     build_fleet_report,
@@ -196,6 +197,72 @@ async def _stale_fact_candidates(
                 "key": fact.key,
                 "value": fact.value,
                 "collected_at": fact.collected_at.isoformat(),
+            })
+    return candidates
+
+
+async def _wanted_setting_keys(db: Database, config: Config, node: Any) -> set[str]:
+    """Setting keys this node currently wants observed: resolved desired + DB-set keys.
+
+    Applies the DB overlay (DESIGN.md "Desired state in the DB") so a key set only via
+    `mch set` counts as wanted and is never treated as orphaned. db_keys are seeded
+    directly so DB-set keys still count even for a node absent from config.yaml.
+    """
+    node_cfg = next(
+        (nc for nc in config.nodes if node.pubkey.startswith(nc.pubkey_prefix)), None
+    )
+    db_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    wanted = {row.key for row in db_rows}
+    if node_cfg is not None:
+        groups = {group.name: group for group in config.groups}
+        group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
+        node_cfg, _ = overlay_db_settings(node_cfg, db_rows)
+        wanted |= all_setting_keys(node_cfg, group_cfg, config.global_settings)
+    return wanted
+
+
+async def _stale_setting_candidates(
+    db: Database,
+    config: Config,
+    *,
+    query: str | None = None,
+    group: str | None = None,
+    setting_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """Observed `settings` rows whose key is no longer wanted (mirror of stale facts).
+
+    A key is wanted if it is in the node's resolved desired set (config + DB overlay).
+    Orphans appear when a key is unset, dropped from a group/global, or the node leaves
+    config; they are safe to delete because observed rows are a re-derivable cache.
+    """
+    if query:
+        node = await _resolve_node(query, db)
+        if not node:
+            raise ValueError(f"node {query!r} not found")
+        nodes = [node]
+    else:
+        nodes = await db.get_all_nodes()
+        if group is not None:
+            nodes = [node for node in nodes if node.group == group]
+
+    candidates: list[dict[str, Any]] = []
+    for node in nodes:
+        wanted = await _wanted_setting_keys(db, config, node)
+        for setting in await db.get_settings(node.pubkey):
+            if setting_key is not None and setting.key != setting_key:
+                continue
+            if setting.key in wanted:
+                continue
+            candidates.append({
+                "pubkey": node.pubkey,
+                "label": node.label,
+                "name": node.name,
+                "group": node.group,
+                "key": setting.key,
+                "value": setting.observed,
+                "collected_at": (
+                    setting.last_checked.isoformat() if setting.last_checked else None
+                ),
             })
     return candidates
 
@@ -632,6 +699,36 @@ async def _dispatch(
             "data": {
                 "candidates": candidates,
                 "deleted": 0 if dry_run else len(candidates),
+            },
+        }
+
+    if cmd == "clean_settings":
+        dry_run = bool(req.get("dry_run", True))
+        query = req.get("query")
+        group = req.get("group")
+        setting_key = req.get("setting")
+        try:
+            # Fresh variable name (not the shared `candidates`) so mypy keeps the accurate
+            # list[dict[str, Any]] element type for the delete_setting call below.
+            stale_settings = await _stale_setting_candidates(
+                db,
+                config,
+                query=str(query) if query else None,
+                group=str(group) if group else None,
+                setting_key=str(setting_key) if setting_key else None,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not dry_run:
+            # Fresh loop variable (not the shared `candidate`) so mypy keeps the
+            # dict[str, Any] element type for the delete_setting call.
+            for row in stale_settings:
+                await db.delete_setting(row["pubkey"], row["key"])
+        return {
+            "ok": True,
+            "data": {
+                "candidates": stale_settings,
+                "deleted": 0 if dry_run else len(stale_settings),
             },
         }
 
