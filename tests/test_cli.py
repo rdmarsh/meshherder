@@ -2753,6 +2753,98 @@ def test_unset_surfaces_daemon_error():
     assert "no DB-set" in result.output
 
 
+def test_set_group_scope_sends_group_request():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "scope": "group", "group": "solar", "key": "txdelay", "value": "14", "policy": None,
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "--group", "solar", "txdelay", "14"]
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {
+        "cmd": "set_setting", "scope": "group", "group": "solar",
+        "key": "txdelay", "value": "14", "policy": None,
+    }
+    assert "group 'solar'" in result.output
+
+
+def test_set_global_scope_sends_global_request():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "scope": "global", "key": "txdelay", "value": "14", "policy": None,
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "--global", "txdelay", "14"]
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {
+        "cmd": "set_setting", "scope": "global",
+        "key": "txdelay", "value": "14", "policy": None,
+    }
+    assert "all managed nodes" in result.output
+
+
+def test_set_rejects_group_and_global_together():
+    runner = CliRunner()
+    rpc = MagicMock()
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "set", "--group", "g", "--global", "txdelay", "14"],
+        )
+
+    assert result.exit_code != 0
+    rpc.assert_not_called()
+
+
+def test_set_group_scope_validates_key_before_rpc():
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "--group", "g", "nonsense", "1"]
+        )
+
+    assert result.exit_code != 0
+    assert "not a writable setting" in result.output
+    rpc.assert_not_called()
+
+
+def test_unset_group_scope_sends_group_request():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "scope": "group", "group": "solar", "key": "txdelay",
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "unset", "--group", "solar", "txdelay"]
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {
+        "cmd": "unset_setting", "scope": "group", "group": "solar", "key": "txdelay",
+    }
+    assert "group 'solar'" in result.output
+
+
+def test_unset_global_scope_sends_global_request():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {"scope": "global", "key": "txdelay"}})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "unset", "--global", "txdelay"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {
+        "cmd": "unset_setting", "scope": "global", "key": "txdelay",
+    }
+    assert "all managed nodes" in result.output
+
+
 def test_status_single_match_shows_setting_source_column():
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[

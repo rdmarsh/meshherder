@@ -126,8 +126,19 @@ wanted.
    db-set keys are seeded directly, so a key set only via `mch set` is never deleted (even on a node
    absent from config.yaml). Dry-run by default; `--yes` deletes; `--group`/`--all`/`--setting`
    filters mirror `clean facts`. Deletes are safe because observed rows are a re-derivable cache.
-6. Later: group/global scopes, then reserved-key directives, then config.yaml import/export and
-   sunset.
+6. [done 2026-06-11] Group and global desired scopes. The schema and resolver already supported
+   `scope_type` group/global; this slice wired them end-to-end. `overlay_db_group_settings` is the
+   group/global analogue of `overlay_db_settings` (all DB rows land in `GroupConfig.settings`; a
+   policy-only row is skipped by `resolve_desired` but drives `resolve_policy`/`all_setting_keys`).
+   It is applied in `_process_node` (reconcile) and `_wanted_setting_keys` (clean) at a single
+   chokepoint per path. `mch set`/`unset` gained `--group NAME` and `--global`; node-scope wire
+   format is unchanged (daemon defaults `scope` to node) so older clients keep working. `set`
+   validates the group exists in config (catches typos); `unset` does not, so a row for a removed
+   group can still be cleared. Group conflict warnings are config-level and go to the app log only,
+   not per-node DB history. Group attribution in the clean path still needs the node in config to
+   know its group (global keys are seeded unconditionally) - same limitation as node scope today.
+7. Later: reserved-key directives (via_radio/name_prefix/default_policy as rows), then
+   config.yaml import/export and sunset.
 
 ## Convergence Over A Constrained Mesh
 

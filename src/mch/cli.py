@@ -1869,10 +1869,36 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
 # set / unset (DB-authored desired state)
 # ---------------------------------------------------------------------------
 
+def _scope_from_flags(group_name: str | None, global_scope: bool) -> str:
+    """Validate the --group/--global flags and return the scope name."""
+    if group_name and global_scope:
+        raise click.UsageError("choose at most one of --group / --global")
+    if global_scope:
+        return "global"
+    if group_name:
+        return "group"
+    return "node"
+
+
+def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) -> None:
+    """Print the 'set/unset KEY ... on <target>' line for any scope."""
+    scope = data.get("scope", "node")
+    suffix = f" {detail}" if detail else ""
+    if scope == "group":
+        click.echo(f"{verb} {key}{suffix}  on group {data['group']!r}")
+    elif scope == "global":
+        click.echo(f"{verb} {key}{suffix}  on all managed nodes")
+    else:
+        label = data.get("label") or data["name"]
+        click.echo(f"{verb} {key}{suffix}  on {label} ({data['pubkey'][:8]})")
+
+
 @cli.command("set")
-@click.argument("node")
-@click.argument("key")
-@click.argument("value", required=False)
+@click.argument("args", nargs=-1, required=True)
+@click.option("--group", "group_name", default=None,
+              help="Set at group scope: applies to every node in the group.")
+@click.option("--global", "global_scope", is_flag=True,
+              help="Set at global scope: applies to every managed node.")
 @click.option(
     "--policy",
     type=click.Choice(["enforce", "audit", "skip"]),
@@ -1882,57 +1908,109 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
 @click.pass_context
 def set_setting(
     ctx: click.Context,
-    node: str,
-    key: str,
-    value: str | None,
+    args: tuple[str, ...],
+    group_name: str | None,
+    global_scope: bool,
     policy: str | None,
 ) -> None:
-    """Record a desired setting for a node in the DB (the source of truth).
+    """Record a desired setting in the DB (the source of truth).
+
+    \b
+    Node scope:   mch set NODE KEY [VALUE]
+    Group scope:  mch set --group NAME KEY [VALUE]
+    Global scope: mch set --global KEY [VALUE]
 
     NODE: pubkey prefix, label substring, or name substring.
     KEY:  a writable setting, e.g. name, txdelay, advert.interval.
     VALUE: the desired value (omit for a policy-only override with --policy).
+    Node wins over group wins over global at resolution time.
 
-    Writing is synchronous, so `mch node` shows the new intent immediately. The
-    node converges on the next sync cycle, or run `mch sync <node>` to converge now.
+    Writing is synchronous, so `mch status` shows the new intent immediately. Nodes
+    converge on the next sync cycle, or run `mch sync` to converge now.
     """
+    scope = _scope_from_flags(group_name, global_scope)
+    # With nargs the positionals shift: group/global drop the NODE arg, so KEY is first.
+    if scope == "node":
+        if not 2 <= len(args) <= 3:
+            raise click.UsageError("usage: mch set NODE KEY [VALUE]")
+        node, key, value = args[0], args[1], (args[2] if len(args) == 3 else None)
+    else:
+        if not 1 <= len(args) <= 2:
+            raise click.UsageError(
+                "usage: mch set --group NAME KEY [VALUE]  (or --global KEY [VALUE])"
+            )
+        node, key, value = None, args[0], (args[1] if len(args) == 2 else None)
+
     if value is None and policy is None:
         raise click.UsageError("provide a VALUE, --policy, or both")
     if key not in writable_setting_keys():
         valid = ", ".join(sorted(writable_setting_keys()))
         raise click.UsageError(f"{key!r} is not a writable setting (choose from: {valid})")
 
-    resp = _rpc(
-        ctx.obj["socket"],
-        {"cmd": "set_setting", "query": node, "key": key, "value": value, "policy": policy},
-    )
-    data = _check(resp)
-    label = data.get("label") or data["name"]
-    pubkey = data["pubkey"]
+    req: dict[str, Any] = {"cmd": "set_setting", "key": key, "value": value, "policy": policy}
+    if scope == "group":
+        req.update({"scope": "group", "group": group_name})
+    elif scope == "global":
+        req["scope"] = "global"
+    else:
+        req["query"] = node
+
+    data = _check(_rpc(ctx.obj["socket"], req))
     parts = []
     if data.get("value") is not None:
         parts.append(f"= {data['value']!r}")
     if data.get("policy"):
         parts.append(f"policy={data['policy']}")
     detail = " ".join(parts) or "(no change)"
-    click.echo(f"set {key} {detail}  on {label} ({pubkey[:8]})")
-    click.echo(f"run: mch sync {pubkey[:8]}  to converge now")
+    _scoped_target_echo("set", key, detail, data)
+    if data.get("scope", "node") == "node":
+        click.echo(f"run: mch sync {data['pubkey'][:8]}  to converge now")
+    else:
+        click.echo("run: mch sync  to converge the fleet now")
 
 
 @cli.command("unset")
-@click.argument("node")
-@click.argument("key")
+@click.argument("args", nargs=-1, required=True)
+@click.option("--group", "group_name", default=None,
+              help="Unset at group scope.")
+@click.option("--global", "global_scope", is_flag=True,
+              help="Unset at global scope.")
 @click.pass_context
-def unset_setting(ctx: click.Context, node: str, key: str) -> None:
-    """Remove a DB-set desired setting from a node (leaves observed state alone).
+def unset_setting(
+    ctx: click.Context,
+    args: tuple[str, ...],
+    group_name: str | None,
+    global_scope: bool,
+) -> None:
+    """Remove a DB-set desired setting (leaves observed state alone).
 
-    NODE: pubkey prefix, label substring, or name substring.
-    KEY:  the setting key to clear, e.g. name, txdelay.
+    \b
+    Node scope:   mch unset NODE KEY
+    Group scope:  mch unset --group NAME KEY
+    Global scope: mch unset --global KEY
     """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "unset_setting", "query": node, "key": key})
-    data = _check(resp)
-    label = data.get("label") or data["name"]
-    click.echo(f"unset {key}  on {label} ({data['pubkey'][:8]})")
+    scope = _scope_from_flags(group_name, global_scope)
+    if scope == "node":
+        if len(args) != 2:
+            raise click.UsageError("usage: mch unset NODE KEY")
+        node, key = args[0], args[1]
+    else:
+        if len(args) != 1:
+            raise click.UsageError(
+                "usage: mch unset --group NAME KEY  (or --global KEY)"
+            )
+        node, key = None, args[0]
+
+    req: dict[str, Any] = {"cmd": "unset_setting", "key": key}
+    if scope == "group":
+        req.update({"scope": "group", "group": group_name})
+    elif scope == "global":
+        req["scope"] = "global"
+    else:
+        req["query"] = node
+
+    data = _check(_rpc(ctx.obj["socket"], req))
+    _scoped_target_echo("unset", key, "", data)
 
 
 # ---------------------------------------------------------------------------
