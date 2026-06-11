@@ -1263,7 +1263,7 @@ def test_status_single_match_shows_unobserved_settings_in_yellow():
     assert result.exit_code == 0
     assert "unknown = not yet observed" not in result.output
     assert re.search(
-        r"owner\.info\s+-\s+Managed by mch\s+-\s+0\s+\x1b\[33mnot observed\x1b\[0m",
+        r"owner\.info\s+Managed by mch\s+-\s+-\s+0\s+\x1b\[33mnot observed\x1b\[0m",
         result.output,
     )
 
@@ -1277,7 +1277,7 @@ def test_status_single_match_shows_tries_as_not_applicable_for_audit():
     }])
     result = _run_multi(["status", "aabb"], status, detail)
     assert re.search(
-        r"audit\s+owner\.info\s+wrong\s+Managed by mch\s+-\s+-\s+drifted", result.output
+        r"audit\s+owner\.info\s+Managed by mch\s+wrong\s+-\s+-\s+drifted", result.output
     )
 
 
@@ -1293,7 +1293,7 @@ def test_status_single_match_shows_approximate_settings_status():
     assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
-        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+-\s+0\s+nominal",
+        r"radio\s+915\.075,125,9,5\s+915\.0750122,125,9,5\s+-\s+0\s+nominal",
         result.output,
     )
 
@@ -2771,8 +2771,25 @@ def test_status_single_match_shows_setting_source_column():
 
     assert result.exit_code == 0
     assert "SOURCE" in result.output
+    # DESIRED comes before OBSERVED, matching the fleet drift table.
+    assert re.search(r"DESIRED\s+OBSERVED", result.output)
     assert re.search(r"txdelay\s+14\s+14\s+db\s+0\s+ok", result.output)
     assert re.search(r"name\s+Tower\s+Tower\s+config\s+0\s+ok", result.output)
+
+
+def test_status_single_match_settings_show_desired_before_observed():
+    """The detail settings table must read DESIRED then OBSERVED (matches drift table)."""
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(settings=[{
+        "key": "txdelay", "desired": "14", "observed": "20",
+        "policy": "enforce", "source": "db", "drift": True,
+        "approximate": False, "update_attempts": 1,
+    }])
+    result = _run_multi(["status", "aabb"], status, detail)
+
+    assert result.exit_code == 0
+    # desired (14) appears before observed (20) on the row
+    assert re.search(r"txdelay\s+14\s+20\s+db\s+1\s+drifted", result.output)
 
 
 def test_status_single_match_source_defaults_to_dash_when_absent():

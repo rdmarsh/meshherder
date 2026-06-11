@@ -850,15 +850,16 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         col_tries = max(
             len("TRIES"), max(len(_tries(s)) for s in settings)
         )
+        # DESIRED before OBSERVED, matching the fleet drift table (desired-vs-actual reading).
         def _srow(
-            policy: str, key: str, observed: str, desired: str,
+            policy: str, key: str, desired: str, observed: str,
             source: str, tries: str, status: str,
         ) -> str:
             return (
-                f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(observed, col_obs)}"
-                f"  {_wpad(desired, col_des)}  {source:<{col_src}}  {tries:>{col_tries}}  {status}"
+                f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}"
+                f"  {_wpad(observed, col_obs)}  {source:<{col_src}}  {tries:>{col_tries}}  {status}"
             )
-        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "SOURCE", "TRIES", "STATUS"))
+        click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "SOURCE", "TRIES", "STATUS"))
         click.echo(_srow("------", "---", "-------", "--------", "------", "-----", "------"))
         for s in settings:
             if s.get("observed") is None:
@@ -872,8 +873,8 @@ def _render_node_detail(data: dict[str, Any]) -> None:
             click.echo(_srow(
                 s["policy"],
                 s["key"],
-                _sv(s.get("observed")),
                 _sv(s.get("desired")),
+                _sv(s.get("observed")),
                 _src(s),
                 _tries(s),
                 status,
