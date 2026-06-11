@@ -8,11 +8,13 @@ import pytest
 
 from mch.db import Database
 from mch.models import (
+    DesiredSetting,
     Node,
     NodeFact,
     NodeState,
     OperationRecord,
     OperationStatus,
+    Scope,
     SettingPolicy,
     SettingRecord,
 )
@@ -86,6 +88,74 @@ async def test_delete_node_removes_local_state(db):
     assert await db.get_facts("aabbcc") == {}
     assert await db.get_pending_operations("aabbcc") == []
     assert await db.get_logs("aabbcc") == []
+
+
+# ------------------------------------------------------------------
+# desired_settings (layered, CLI/API-authored source of truth)
+# ------------------------------------------------------------------
+
+async def test_set_and_get_desired_setting_node_scope(db):
+    setting = DesiredSetting(
+        scope_type=Scope.NODE,
+        scope_id="aabbcc",
+        key="tx",
+        desired="14",
+        policy=SettingPolicy.ENFORCE,
+        poll_hours=12,
+    )
+    await db.set_desired_setting(setting)
+
+    rows = await db.get_desired_settings(Scope.NODE, "aabbcc")
+    assert len(rows) == 1
+    got = rows[0]
+    assert got.scope_type == Scope.NODE
+    assert got.scope_id == "aabbcc"
+    assert got.key == "tx"
+    assert got.desired == "14"
+    assert got.policy == SettingPolicy.ENFORCE
+    assert got.poll_hours == 12
+
+
+async def test_set_desired_setting_upserts_on_conflict(db):
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.NODE, scope_id="aabbcc", key="tx", desired="14")
+    )
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.NODE, scope_id="aabbcc", key="tx", desired="20")
+    )
+
+    rows = await db.get_desired_settings(Scope.NODE, "aabbcc")
+    assert len(rows) == 1
+    assert rows[0].desired == "20"
+
+
+async def test_desired_setting_inherit_fields_roundtrip_as_none(db):
+    # policy-only override with no value and inherited policy/poll_hours
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.GROUP, scope_id="solar", key="tx")
+    )
+    rows = await db.get_desired_settings(Scope.GROUP, "solar")
+    assert len(rows) == 1
+    assert rows[0].desired is None
+    assert rows[0].policy is None
+    assert rows[0].poll_hours is None
+
+
+async def test_global_scope_uses_empty_scope_id(db):
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.GLOBAL, scope_id="", key="tx", desired="20")
+    )
+    rows = await db.get_desired_settings(Scope.GLOBAL, "")
+    assert len(rows) == 1
+    assert rows[0].desired == "20"
+
+
+async def test_delete_desired_setting(db):
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.NODE, scope_id="aabbcc", key="tx", desired="14")
+    )
+    await db.delete_desired_setting(Scope.NODE, "aabbcc", "tx")
+    assert await db.get_desired_settings(Scope.NODE, "aabbcc") == []
 
 
 # ------------------------------------------------------------------

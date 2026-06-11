@@ -28,6 +28,94 @@ state into SQLite. If that changes, add explicit import/export/backup commands r
 silently making the DB the only copy. Secrets and private keys need a separate security decision
 before they are included in any ordinary backup/export workflow.
 
+> **Update (2026-06-11): this is being superseded.** Desired state is migrating into the SQLite DB
+> so it can be edited by `mch` commands and (later) an HTTP API / web frontend. config.yaml becomes
+> an import/seed source and will eventually be retired; secrets.yaml stays a file (see the
+> "Desired state in the DB" section below for the full rationale and the migration plan). The
+> YAML-first description above remains accurate for every scope/key not yet migrated.
+
+## Desired state in the DB (migration in progress, started 2026-06-11)
+
+We are moving desired state from config.yaml into the SQLite DB so it can be edited with `mch`
+commands and, later, an HTTP API and a web frontend. A web UI round-tripping a YAML file is
+fragile; an API/UI writing to a DB is natural. Git history of intent is an acceptable loss here:
+mch targets a single hobbyist box, not a corporate fleet, and retirement history (below) replaces
+the practice of keeping old config.yaml copies.
+
+**The problem this solves.** There were three stores that drift: config.yaml (desired), the DB
+(observed + a cache of desired), and the gateway's favourited contacts. Editing YAML then waiting
+to see whether the daemon read it is opaque, because the slow mesh hides whether *intent* even
+landed. With desired state in the DB, `mch set` writes synchronously, so `mch node` shows the new
+desired value immediately - "intent recorded" stops being conflated with the slow "node converged".
+
+**Stores collapse from three to two:**
+- **DB** - authoritative for inventory + desired state, plus the observed state it already held.
+- **Gateway favourites** - a *downstream mirror* of the DB managed set, not a source. The daemon
+  favourites every managed node (eviction protection: an evicted contact cannot be addressed at
+  all, and Sydney already runs ~440 repeaters) and unfavourites any contact not in the DB.
+  Unfavouriting only clears the eviction pin; it does not delete the contact, and it is a local
+  gateway write, not mesh traffic. Reading favourites back *as inventory* is dropped - `mch
+  contacts` already covers "what is visible on the mesh".
+- **secrets.yaml stays a file.** Passwords and private keys must not live in a DB that a (currently
+  read-only, loopback-only, unauthenticated) HTTP API and web UI will read. File mode 0600 is a
+  clear secret boundary; the DB has no equivalent. "config.yaml goes away" and "secrets.yaml goes
+  away" are independent decisions; the second is argued against for now.
+
+**Schema.** Desired state is *layered* (global/group/node) but observed state is *per node only*.
+Today's `settings` table conflated the two; the redesign splits them:
+- `desired_settings(scope_type, scope_id, key, desired, policy, poll_hours)`, primary key
+  `(scope_type, scope_id, key)`. `scope_type` is `global|group|node`; `scope_id` is `''` for global
+  (a non-NULL empty string, to avoid SQLite treating NULLs in a primary key as distinct), the group
+  name for group scope, or the node pubkey for node scope. `desired = NULL` is a policy-only
+  override; `policy`/`poll_hours = NULL` mean "inherit".
+- `observed_settings` - per node: `observed, last_checked, last_set, update_attempts, drift`
+  (today's `settings` minus the desired columns).
+- Scope-level attributes (`default_policy`, `name_prefix`, `via_radio`) live on the `nodes`/`groups`
+  rows and a `globals` singleton for now.
+
+**Uniformity.** Every key is settable at every scope - the `(scope_type, scope_id, key)` shape has
+no per-scope whitelist, so e.g. `via_radio` on global "just works" even where it is redundant.
+This deliberately reduces operator confusion. `via_radio`, `name_prefix`, and `default_policy` are
+mch-internal directives (they shape resolution; they are never `get`/`set` on the node and have no
+observed value), not node CLI settings. The clean end state is to store them as reserved keys in
+`desired_settings` too, so there are no special scope columns at all; that is a later step.
+
+**Resolution is unchanged.** `resolve_desired()` / `resolve_policy()` / `all_setting_keys()` keep
+operating on `NodeConfig` / `GroupConfig` dataclasses. The migration builds those same dataclasses
+from DB rows instead of parsed YAML, so the node > group > global precedence and the 9-step policy
+cascade are untouched. During the transition, when a key exists both in the DB and still in
+config.yaml, **the DB wins and the daemon warns** so the now-ignored YAML value can be cleaned up.
+
+**Retire, don't delete.** Nodes get a lifecycle (`active|retired`) plus `retired_at` and a
+free-text `retired_reason`, replacing kept copies of config.yaml as the historical record. A
+retired node is excluded from sync and unfavourited (same rule as the favourite mirror). Permanent
+delete stays a separate, explicit operator action. Auto-purge is **not** triggered by a node
+dropping off the contact list - eviction is the normal state on a dense mesh, so contact-list
+absence is a poor signal; any future auto-cleanup is gated on time since retirement instead.
+
+**Cleanup.** `observed_settings` should only hold keys that are currently wanted, i.e.
+`key in (resolved desired set + facts)`. Orphans (a key you unset, or dropped from a group) are
+removed by `mch clean settings`, the mirror of the existing `mch clean facts`. Observed rows are
+never authoritative, so deleting them is always safe - they are re-observed next cycle if still
+wanted.
+
+**Migration status / plan.**
+1. [done 2026-06-11] `desired_settings` table + `set/get/delete_desired_setting` DB methods.
+2. [done 2026-06-11] `overlay_db_settings()` merges DB node-scope rows onto `NodeConfig` before
+   resolution (DB wins + warn); wired into `WorkQueue._process_node`, so reconcile and
+   `all_setting_keys` pick up DB keys with no change to `resolve_*`.
+3. [done 2026-06-11] `mch set <node> <key> <value> [--policy ...]` and `mch unset <node> <key>`
+   write/delete a node-scope `desired_settings` row (full pubkey as `scope_id`), validating the
+   key (writable settings only), value, and policy. The write is synchronous so intent is recorded
+   immediately; convergence is **deliberately decoupled** - `set`/`unset` do not auto-sync (that
+   would block on the mesh and conflict with traffic-minimisation), they print a `mch sync <node>`
+   hint instead. The slice-2 overlay reads exactly these `(NODE, pubkey)` rows, so a `set` is
+   honoured on the next cycle with no resolver change.
+4. `mch node` shows the source (db vs config) per setting.
+5. `mch clean settings` removes orphaned observed rows.
+6. Later: group/global scopes, then reserved-key directives, then config.yaml import/export and
+   sunset.
+
 ## Convergence Over A Constrained Mesh
 
 mch is a slow-convergence configuration manager for MeshCore nodes over an unreliable,

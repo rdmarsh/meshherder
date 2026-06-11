@@ -10,11 +10,13 @@ from typing import Any
 import aiosqlite
 
 from mch.models import (
+    DesiredSetting,
     Node,
     NodeFact,
     NodeState,
     OperationRecord,
     OperationStatus,
+    Scope,
     SettingPolicy,
     SettingRecord,
 )
@@ -49,6 +51,16 @@ CREATE TABLE IF NOT EXISTS settings (
     drift           INTEGER NOT NULL DEFAULT 0,
     UNIQUE(node_pubkey, key),
     FOREIGN KEY (node_pubkey) REFERENCES nodes(pubkey)
+);
+
+CREATE TABLE IF NOT EXISTS desired_settings (
+    scope_type      TEXT NOT NULL,           -- 'global' | 'group' | 'node'
+    scope_id        TEXT NOT NULL DEFAULT '', -- '' for global; group name; node pubkey
+    key             TEXT NOT NULL,
+    desired         TEXT,                     -- NULL = policy-only override (no value)
+    policy          TEXT,                     -- NULL = inherit from a less specific scope
+    poll_hours      INTEGER,                  -- NULL = inherit / built-in default
+    PRIMARY KEY (scope_type, scope_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS node_facts (
@@ -312,6 +324,56 @@ class Database:
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
+    # desired_settings (layered, CLI/API-authored source of truth)
+    # ------------------------------------------------------------------
+
+    async def set_desired_setting(self, setting: DesiredSetting) -> None:
+        """Upsert one desired setting at its scope. (scope_type, scope_id, key) is unique."""
+        db = self._db_required()
+        await db.execute(
+            """
+            INSERT INTO desired_settings (scope_type, scope_id, key, desired, policy, poll_hours)
+            VALUES (:scope_type, :scope_id, :key, :desired, :policy, :poll_hours)
+            ON CONFLICT(scope_type, scope_id, key) DO UPDATE SET
+                desired    = excluded.desired,
+                policy     = excluded.policy,
+                poll_hours = excluded.poll_hours
+            """,
+            {
+                "scope_type": setting.scope_type.value,
+                "scope_id":   setting.scope_id,
+                "key":        setting.key,
+                "desired":    setting.desired,
+                "policy":     setting.policy.value if setting.policy else None,
+                "poll_hours": setting.poll_hours,
+            },
+        )
+        await db.commit()
+
+    async def get_desired_settings(
+        self, scope_type: Scope, scope_id: str
+    ) -> list[DesiredSetting]:
+        """Return all desired settings authored at one scope, ordered by key."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM desired_settings WHERE scope_type = ? AND scope_id = ? ORDER BY key",
+            (scope_type.value, scope_id),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_desired_setting(r) for r in rows]
+
+    async def delete_desired_setting(
+        self, scope_type: Scope, scope_id: str, key: str
+    ) -> None:
+        """Remove one desired setting (e.g. ``mch unset``); leaves observed state alone."""
+        db = self._db_required()
+        await db.execute(
+            "DELETE FROM desired_settings WHERE scope_type = ? AND scope_id = ? AND key = ?",
+            (scope_type.value, scope_id, key),
+        )
+        await db.commit()
+
+    # ------------------------------------------------------------------
     # facts (read-only CMDB inventory)
     # ------------------------------------------------------------------
 
@@ -498,6 +560,17 @@ def _row_to_setting(row: aiosqlite.Row) -> SettingRecord:
         last_set=_parse_dt(row["last_set"]),
         update_attempts=row["update_attempts"],
         drift=bool(row["drift"]),
+    )
+
+
+def _row_to_desired_setting(row: aiosqlite.Row) -> DesiredSetting:
+    return DesiredSetting(
+        scope_type=Scope(row["scope_type"]),
+        scope_id=row["scope_id"],
+        key=row["key"],
+        desired=row["desired"],
+        policy=SettingPolicy(row["policy"]) if row["policy"] else None,
+        poll_hours=row["poll_hours"],
     )
 
 

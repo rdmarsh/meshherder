@@ -24,10 +24,12 @@ from mch.config import (
 from mch.db import Database
 from mch.gateway import CommandResult, Gateway
 from mch.models import (
+    DesiredSetting,
     Node,
     NodeState,
     OperationRecord,
     OperationStatus,
+    Scope,
     SettingPolicy,
     SettingRecord,
 )
@@ -643,6 +645,65 @@ async def test_cycle_enforces_drifted_setting(db):
     results = await wq.run_cycle()
     assert results[0].settings_enforced == 1
     assert results[0].settings_drifted == 0  # drift was fixed — not counted as residual
+
+
+async def test_cycle_applies_db_node_scope_desired_setting(db):
+    # config node carries NO settings; the desired value comes only from the DB
+    # (node scope). Proves overlay_db_settings is wired into _process_node: without
+    # it, node_cfg.settings is empty, powersaving is never read, and the send_command
+    # side_effect sequence below would not be consumed in this order.
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", settings={})
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.set_desired_setting(DesiredSetting(
+        Scope.NODE, "aabbccdd1122", "powersaving",
+        desired="on", policy=SettingPolicy.ENFORCE,
+    ))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
+        CommandResult(success=True, text="off"),       # powersaving read -> drift
+        CommandResult(success=True, text="ok"),         # powersaving on (enforce write)
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_enforced == 1
+    assert [c.args[1] for c in gw.send_command.await_args_list] == [
+        "ver", "powersaving", "powersaving on",
+    ]
+
+
+async def test_cycle_db_setting_overrides_yaml_and_logs_warning(db):
+    # YAML wants powersaving off; DB wants on -> DB wins, a conflict warning is logged,
+    # and the node is enforced to the DB value.
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"powersaving": SettingConfig(desired="off", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.set_desired_setting(DesiredSetting(
+        Scope.NODE, "aabbccdd1122", "powersaving",
+        desired="on", policy=SettingPolicy.ENFORCE,
+    ))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
+        CommandResult(success=True, text="off"),       # observed off; DB wants on -> drift
+        CommandResult(success=True, text="ok"),         # powersaving on
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_enforced == 1
+    logs = await db.get_logs("aabbccdd1122")
+    assert any(
+        "both config.yaml" in e["message"] and "DB wins" in e["message"] for e in logs
+    )
 
 
 async def test_enforced_write_does_not_fallback_to_flood_after_cached_route_failure(db):

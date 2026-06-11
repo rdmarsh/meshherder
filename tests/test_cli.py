@@ -2628,3 +2628,124 @@ def test_commission_replace_happy_path():
         result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert result.exit_code == 0
     assert "Site A" in result.output or "aabbccdd" in result.output
+
+
+# ------ set / unset (DB-authored desired state) ------
+
+def _set_resp(value="14", policy=None):
+    return {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8,
+        "label": "site-a",
+        "name": "Tower",
+        "key": "txdelay",
+        "value": value,
+        "policy": policy,
+    }}
+
+
+def test_set_sends_node_key_value_and_reports():
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "set", "site-a", "txdelay", "14"])
+
+    assert result.exit_code == 0
+    sent = rpc.call_args.args[1]
+    assert sent == {
+        "cmd": "set_setting",
+        "query": "site-a",
+        "key": "txdelay",
+        "value": "14",
+        "policy": None,
+    }
+    assert "set txdelay = '14'" in result.output
+    assert "mch sync aabbccdd" in result.output
+
+
+def test_set_passes_policy():
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp(policy="audit"))
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "set", "site-a", "txdelay", "14", "--policy", "audit"],
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1]["policy"] == "audit"
+    assert "policy=audit" in result.output
+
+
+def test_set_policy_only_override():
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp(value=None, policy="skip"))
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "site-a", "txdelay", "--policy", "skip"]
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {
+        "cmd": "set_setting",
+        "query": "site-a",
+        "key": "txdelay",
+        "value": None,
+        "policy": "skip",
+    }
+
+
+def test_set_rejects_unknown_key_before_rpc():
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "site-a", "nonsense", "1"]
+        )
+
+    assert result.exit_code != 0
+    assert "not a writable setting" in result.output
+    rpc.assert_not_called()
+
+
+def test_set_requires_value_or_policy():
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "set", "site-a", "txdelay"])
+
+    assert result.exit_code != 0
+    assert "provide a VALUE" in result.output
+    rpc.assert_not_called()
+
+
+def test_set_invalid_policy_choice_rejected():
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["--socket", "/fake.sock", "set", "site-a", "txdelay", "14", "--policy", "maybe"]
+    )
+    assert result.exit_code != 0
+
+
+def test_unset_sends_query_and_key():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "key": "txdelay",
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "unset", "site-a", "txdelay"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {
+        "cmd": "unset_setting", "query": "site-a", "key": "txdelay",
+    }
+    assert "unset txdelay" in result.output
+
+
+def test_unset_surfaces_daemon_error():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": False, "error": "no DB-set 'txdelay' on 'site-a'"})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "unset", "site-a", "txdelay"])
+
+    assert result.exit_code != 0
+    assert "no DB-set" in result.output

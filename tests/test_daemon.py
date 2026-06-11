@@ -12,7 +12,7 @@ import pytest
 from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
 from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
-from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
+from mch.models import Node, NodeFact, NodeState, Scope, SettingPolicy, SettingRecord
 from mch.queue import NodeResult, OperationBusyError
 
 
@@ -1616,3 +1616,187 @@ async def test_handle_advert_ignores_unknown_node(db):
 
     nodes = await db.get_all_nodes()
     assert nodes == []
+
+
+# ------------------------------------------------------------------
+# set_setting / unset_setting — DB-authored desired state
+# ------------------------------------------------------------------
+
+async def _seed_plain_node(db: Database) -> Node:
+    node = Node(
+        pubkey="aabbccdd" * 8,
+        name="Test Node",
+        label="test",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(node)
+    return node
+
+
+async def test_set_setting_writes_node_scope_row(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "14"}, wq, db, config
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["pubkey"] == node.pubkey
+    assert resp["data"]["value"] == "14"
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert len(rows) == 1
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+    assert rows[0].policy is None
+
+
+async def test_set_setting_resolves_pubkey_prefix(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": node.pubkey[:8], "key": "txdelay", "value": "20"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].desired == "20"
+
+
+async def test_set_setting_records_policy(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "14", "policy": "audit"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["policy"] == "audit"
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].policy is SettingPolicy.AUDIT
+
+
+async def test_set_setting_policy_only_override(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "policy": "skip"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].desired is None
+    assert rows[0].policy is SettingPolicy.SKIP
+
+
+async def test_set_setting_upserts_existing_key(db, wq, config):
+    node = await _seed_plain_node(db)
+    await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "14"}, wq, db, config
+    )
+
+    await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "22"}, wq, db, config
+    )
+
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert len(rows) == 1
+    assert rows[0].desired == "22"
+
+
+async def test_set_setting_rejects_unknown_key(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "nonsense", "value": "1"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "not a writable setting" in resp["error"]
+
+
+async def test_set_setting_rejects_invalid_value(db, wq, config):
+    await _seed_plain_node(db)
+
+    # tx has an int-range validator; a non-numeric value must be rejected
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "loud"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "txdelay" in resp["error"]
+
+
+async def test_set_setting_rejects_invalid_policy(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "14", "policy": "maybe"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "invalid policy" in resp["error"]
+
+
+async def test_set_setting_unknown_node_errors(db, wq, config):
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "ghost", "key": "txdelay", "value": "14"}, wq, db, config
+    )
+
+    assert resp["ok"] is False
+    assert "not found" in resp["error"]
+
+
+async def test_set_setting_requires_value_or_policy(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay"}, wq, db, config
+    )
+
+    assert resp["ok"] is False
+
+
+async def test_unset_setting_removes_row(db, wq, config):
+    node = await _seed_plain_node(db)
+    await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "14"}, wq, db, config
+    )
+
+    resp = await _dispatch(
+        {"cmd": "unset_setting", "query": "test", "key": "txdelay"}, wq, db, config
+    )
+
+    assert resp["ok"] is True
+    assert await db.get_desired_settings(Scope.NODE, node.pubkey) == []
+
+
+async def test_unset_setting_missing_key_errors(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "unset_setting", "query": "test", "key": "txdelay"}, wq, db, config
+    )
+
+    assert resp["ok"] is False
+    assert "no DB-set" in resp["error"]
+
+
+async def test_unset_setting_leaves_other_keys(db, wq, config):
+    node = await _seed_plain_node(db)
+    await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "txdelay", "value": "14"}, wq, db, config
+    )
+    await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name", "value": "Tower"}, wq, db, config
+    )
+
+    await _dispatch({"cmd": "unset_setting", "query": "test", "key": "txdelay"}, wq, db, config)
+
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert [r.key for r in rows] == ["name"]

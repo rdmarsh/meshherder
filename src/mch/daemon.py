@@ -27,12 +27,14 @@ from typing import Any
 from meshcore.events import EventType
 
 from mch.api import ReadOnlyApi
+from mch.command_registry import validate_value, writable_setting_keys
 from mch.command_safety import blocked_exec_command
 from mch.config import Config
 from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
+from mch.models import DesiredSetting, Scope, SettingPolicy
 from mch.queue import (
     NodeResult,
     OperationBusyError,
@@ -196,6 +198,105 @@ async def _stale_fact_candidates(
                 "collected_at": fact.collected_at.isoformat(),
             })
     return candidates
+
+
+async def _handle_set_setting(req: dict[str, Any], db: Database) -> dict[str, Any]:
+    """Write a node-scope desired setting to the DB (the authoritative source).
+
+    Validates the key (must be a writable node setting), the value, and the policy
+    before recording intent synchronously. Convergence is left to the next sync cycle
+    or an explicit ``mch sync`` - recording intent and reaching the node are decoupled
+    (DESIGN.md "Desired state in the DB").
+    """
+    query = str(req.get("query") or "")
+    key = str(req.get("key") or "")
+    value = req.get("value")
+    policy_raw = req.get("policy")
+
+    if not query:
+        return {"ok": False, "error": "missing node"}
+    if not key:
+        return {"ok": False, "error": "missing setting key"}
+    if key not in writable_setting_keys():
+        return {"ok": False, "error": f"{key!r} is not a writable setting"}
+    if value is None and policy_raw is None:
+        return {"ok": False, "error": "provide a value, a --policy, or both"}
+
+    if value is not None:
+        value = str(value)
+        error = validate_value(key, value)
+        if error:
+            return {"ok": False, "error": f"{key} {error}: {value!r}"}
+
+    policy: SettingPolicy | None = None
+    if policy_raw is not None:
+        try:
+            policy = SettingPolicy(str(policy_raw))
+        except ValueError:
+            valid = ", ".join(p.value for p in SettingPolicy)
+            return {"ok": False, "error": f"invalid policy {policy_raw!r} (choose from: {valid})"}
+
+    try:
+        node = await _resolve_node(query, db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {query!r} not found"}
+
+    await db.set_desired_setting(
+        DesiredSetting(
+            scope_type=Scope.NODE,
+            scope_id=node.pubkey,
+            key=key,
+            desired=value,
+            policy=policy,
+        )
+    )
+    return {
+        "ok": True,
+        "data": {
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+            "key": key,
+            "value": value,
+            "policy": policy.value if policy else None,
+        },
+    }
+
+
+async def _handle_unset_setting(req: dict[str, Any], db: Database) -> dict[str, Any]:
+    """Delete a node-scope desired setting from the DB; observed state is left intact."""
+    query = str(req.get("query") or "")
+    key = str(req.get("key") or "")
+    if not query:
+        return {"ok": False, "error": "missing node"}
+    if not key:
+        return {"ok": False, "error": "missing setting key"}
+
+    try:
+        node = await _resolve_node(query, db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {query!r} not found"}
+
+    existing = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    if not any(row.key == key for row in existing):
+        return {
+            "ok": False,
+            "error": f"no DB-set {key!r} on {node.label or node.pubkey[:8]!r}",
+        }
+    await db.delete_desired_setting(Scope.NODE, node.pubkey, key)
+    return {
+        "ok": True,
+        "data": {
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+            "key": key,
+        },
+    }
 
 
 async def _dispatch(
@@ -533,6 +634,12 @@ async def _dispatch(
                 "deleted": 0 if dry_run else len(candidates),
             },
         }
+
+    if cmd == "set_setting":
+        return await _handle_set_setting(req, db)
+
+    if cmd == "unset_setting":
+        return await _handle_unset_setting(req, db)
 
     if cmd == "remove":
         query = str(req.get("query") or "")
