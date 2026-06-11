@@ -6,8 +6,26 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## >>> RESUME HERE (updated 2026-06-11) - update or clear this block when you pick up <<<
 
-**Active work: desired-state migration into the DB (slices 1-4 committed `a7c0cd6`+`8d7ed39`;
-slice 5 done, UNCOMMITTED).**
+**Workflow change (2026-06-11): new work goes on a branch + PR, no more direct commits to `main`.**
+Slices 1-5 + the DESIRED/OBSERVED column swap landed on `main` (the swap + slice 5 pushed there as
+the last direct-to-main change). Slice 6 is on branch `slice6-group-global-scopes` (commits 6a/6b/6c
+local, not yet pushed/PR'd).
+
+**Active work: desired-state migration into the DB. Slice 6 (group/global scopes) DONE on a branch.**
+- Slice 6a (`overlay_db_group_settings` pure fn), 6b (wire into reconcile `_process_node` + clean
+  `_wanted_setting_keys`), 6c (`mch set/unset --group/--global` + daemon scope dispatch) all done,
+  774 tests pass, ruff clean, mypy unchanged (7 pre-existing). See DESIGN.md slice 6 for the model.
+- **Next: slice 7** - reserved-key directives (via_radio/name_prefix/default_policy as DB rows),
+  then config.yaml import/export and sunset. secrets.yaml stays a file.
+- Open follow-up surfaced in slice 6: the clean path can only attribute a *group*-scope key to a
+  node when the node is in config (to know its group); global keys are seeded unconditionally.
+  Same class as the node-absent-from-config report-path limitation - closes with config-import.
+
+---
+_Prior block (slices 1-5), kept for context:_
+
+**desired-state migration into the DB (slices 1-4 committed `a7c0cd6`+`8d7ed39`;
+slice 5 committed `2d699e7`, swap `c647768`).**
 Moving desired state from config.yaml into the SQLite DB so `mch`/API/web can edit it. Full design,
 schema, resolution model, and migration plan are in DESIGN.md "Desired state in the DB"; the dated
 2026-06-11 entries below have the decision log.
