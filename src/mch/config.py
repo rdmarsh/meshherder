@@ -280,6 +280,40 @@ def resolve_desired(
     return desired
 
 
+def _merge_desired_rows(
+    base_settings: dict[str, SettingConfig],
+    db_rows: list[DesiredSetting],
+    ident: str,
+    scope_noun: str,
+    extra_conflict: dict[str, SettingConfig] | None = None,
+) -> tuple[dict[str, SettingConfig], list[str]]:
+    """Layer DB desired rows over a config-derived settings dict (DB wins, warn on conflict).
+
+    Shared by the node and group/global overlays. ``extra_conflict`` lets the group
+    overlay also flag a DB key that shadows a policy-only YAML ``setting_override``.
+    A None poll_hours on the DB row means "inherit"; we materialise the SettingConfig
+    default (24h) since SettingConfig carries a concrete int.
+    """
+    merged = dict(base_settings)
+    warnings: list[str] = []
+    for row in db_rows:
+        yaml_setting = merged.get(row.key)
+        if yaml_setting is None and extra_conflict is not None:
+            yaml_setting = extra_conflict.get(row.key)
+        if yaml_setting is not None:
+            warnings.append(
+                f"{scope_noun} {ident!r}: setting {row.key!r} is set in both config.yaml "
+                f"({yaml_setting.desired!r}) and the DB ({row.desired!r}); "
+                "DB wins - remove it from config.yaml"
+            )
+        merged[row.key] = SettingConfig(
+            desired=row.desired,
+            policy=row.policy,
+            poll_hours=row.poll_hours if row.poll_hours is not None else 24,
+        )
+    return merged, warnings
+
+
 def overlay_db_settings(
     node_cfg: NodeConfig,
     db_rows: list[DesiredSetting],
@@ -293,9 +327,7 @@ def overlay_db_settings(
 
     During the config.yaml -> DB transition a key may still appear in both places.
     The DB wins, and we return a warning for every key present in both so the operator
-    can remove the now-ignored YAML entry. A None poll_hours on the DB row means
-    "inherit"; we materialise the SettingConfig default (24h) since node-scope
-    SettingConfig carries a concrete int.
+    can remove the now-ignored YAML entry.
 
     Returns a *new* NodeConfig (the shared config-loaded object is never mutated) and
     the list of conflict warnings. With no DB rows the original object is returned
@@ -303,24 +335,33 @@ def overlay_db_settings(
     """
     if not db_rows:
         return node_cfg, []
-
-    merged = dict(node_cfg.settings)
-    warnings: list[str] = []
     ident = node_cfg.label or node_cfg.pubkey_prefix
-    for row in db_rows:
-        yaml_setting = merged.get(row.key)
-        if yaml_setting is not None:
-            warnings.append(
-                f"node {ident!r}: setting {row.key!r} is set in both config.yaml "
-                f"({yaml_setting.desired!r}) and the DB ({row.desired!r}); "
-                "DB wins - remove it from config.yaml"
-            )
-        merged[row.key] = SettingConfig(
-            desired=row.desired,
-            policy=row.policy,
-            poll_hours=row.poll_hours if row.poll_hours is not None else 24,
-        )
+    merged, warnings = _merge_desired_rows(node_cfg.settings, db_rows, ident, "node")
     return replace(node_cfg, settings=merged), warnings
+
+
+def overlay_db_group_settings(
+    group_cfg: GroupConfig,
+    db_rows: list[DesiredSetting],
+) -> tuple[GroupConfig, list[str]]:
+    """Merge DB group- or global-scope desired settings onto a config-derived GroupConfig.
+
+    The group/global analogue of overlay_db_settings. All DB rows are placed in
+    ``settings`` (never ``setting_overrides``): a row with a desired value drives
+    resolve_desired, and a policy-only row (desired=None) is skipped by resolve_desired
+    but still consulted by resolve_policy/all_setting_keys - exactly as a node-scope
+    overlay row behaves. A conflict warning is raised when the key already appears in
+    the group's YAML ``settings`` or its policy-only ``setting_overrides``.
+
+    Returns a *new* GroupConfig; the shared config-loaded object is never mutated.
+    """
+    if not db_rows:
+        return group_cfg, []
+    merged, warnings = _merge_desired_rows(
+        group_cfg.settings, db_rows, group_cfg.name, "group",
+        extra_conflict=group_cfg.setting_overrides,
+    )
+    return replace(group_cfg, settings=merged), warnings
 
 
 @dataclass
