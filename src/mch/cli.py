@@ -1512,6 +1512,74 @@ def clean() -> None:
     """Clean reviewed stale local DB state."""
 
 
+def _render_stale_table(
+    data: dict[str, Any],
+    *,
+    noun_plural: str,
+    noun_singular: str,
+    key_header: str,
+    yes: bool,
+) -> None:
+    """Render the candidate table shared by `clean facts` and `clean settings`.
+
+    Both list orphaned, re-derivable observation rows (PUBKEY/LABEL/KEY/VALUE/OBSERVED)
+    and behave identically apart from the noun wording and the KEY column header.
+    """
+    candidates = data.get("candidates", [])
+    if not candidates:
+        click.echo(f"no stale {noun_plural}")
+        return
+
+    label_w = max(
+        _wlen("LABEL"),
+        max((_wlen(item.get("label") or "-") for item in candidates), default=0),
+    )
+    key_w = max(
+        len(key_header), max((len(item.get("key") or "") for item in candidates), default=0)
+    )
+    value_w = max(
+        _wlen("VALUE"),
+        max((_wlen(_sv(item.get("value"))) for item in candidates), default=0),
+    )
+    observed_w = max(
+        _wlen("OBSERVED"),
+        max((_wlen(_ago_with_ts(item.get("collected_at"))) for item in candidates), default=0),
+    )
+    row = "  {:<12}  {}  {:<{kw}}  {}  {}"
+    click.echo(f"stale {noun_plural}:")
+    click.echo(row.format(
+        "PUBKEY",
+        _wpad("LABEL", label_w),
+        key_header,
+        _wpad("VALUE", value_w),
+        _wpad("OBSERVED", observed_w),
+        kw=key_w,
+    ))
+    click.echo(row.format(
+        "------",
+        _wpad("-----", label_w),
+        "-" * len(key_header),
+        _wpad("-----", value_w),
+        _wpad("--------", observed_w),
+        kw=key_w,
+    ))
+    for item in candidates:
+        click.echo(row.format(
+            _pk(item.get("pubkey")),
+            _wpad(item.get("label") or "-", label_w),
+            item.get("key") or "",
+            _wpad(_sv(item.get("value")), value_w),
+            _wpad(_ago_with_ts(item.get("collected_at")), observed_w),
+            kw=key_w,
+        ))
+
+    click.echo("")
+    if yes:
+        click.echo(f"deleted {data.get('deleted', 0)} stale {noun_singular}(s)")
+    else:
+        click.echo(f"run again with --yes to delete these stale {noun_singular} rows")
+
+
 @clean.command("facts")
 @click.argument("node", required=False)
 @click.option("--group", "group_name", help="Clean stale facts for nodes in this group.")
@@ -1544,59 +1612,51 @@ def clean_facts(
         },
     )
     data = _check(resp)
-    candidates = data.get("candidates", [])
-
-    if not candidates:
-        click.echo("no stale facts")
-        return
-
-    label_w = max(
-        _wlen("LABEL"),
-        max((_wlen(item.get("label") or "-") for item in candidates), default=0),
+    _render_stale_table(
+        data, noun_plural="facts", noun_singular="fact", key_header="FACT", yes=yes
     )
-    key_w = max(len("FACT"), max((len(item.get("key") or "") for item in candidates), default=0))
-    value_w = max(
-        _wlen("VALUE"),
-        max((_wlen(_sv(item.get("value"))) for item in candidates), default=0),
-    )
-    observed_w = max(
-        _wlen("OBSERVED"),
-        max((_wlen(_ago_with_ts(item.get("collected_at"))) for item in candidates), default=0),
-    )
-    row = "  {:<12}  {}  {:<{kw}}  {}  {}"
-    click.echo("stale facts:")
-    click.echo(row.format(
-        "PUBKEY",
-        _wpad("LABEL", label_w),
-        "FACT",
-        _wpad("VALUE", value_w),
-        _wpad("OBSERVED", observed_w),
-        kw=key_w,
-    ))
-    click.echo(row.format(
-        "------",
-        _wpad("-----", label_w),
-        "----",
-        _wpad("-----", value_w),
-        _wpad("--------", observed_w),
-        kw=key_w,
-    ))
-    for item in candidates:
-        click.echo(row.format(
-            _pk(item.get("pubkey")),
-            _wpad(item.get("label") or "-", label_w),
-            item.get("key") or "",
-            _wpad(_sv(item.get("value")), value_w),
-            _wpad(_ago_with_ts(item.get("collected_at")), observed_w),
-            kw=key_w,
-        ))
 
-    if yes:
-        click.echo("")
-        click.echo(f"deleted {data.get('deleted', 0)} stale fact(s)")
-    else:
-        click.echo("")
-        click.echo("run again with --yes to delete these stale fact rows")
+
+@clean.command("settings")
+@click.argument("node", required=False)
+@click.option("--group", "group_name", help="Clean orphaned settings for nodes in this group.")
+@click.option("--all", "all_nodes", is_flag=True, help="Clean orphaned settings across the fleet.")
+@click.option("--setting", "setting_key", help="Only consider one setting key, e.g. txdelay.")
+@click.option("--yes", "-y", is_flag=True, help="Delete the listed orphaned settings.")
+@click.pass_context
+def clean_settings(
+    ctx: click.Context,
+    node: str | None,
+    group_name: str | None,
+    all_nodes: bool,
+    setting_key: str | None,
+    yes: bool,
+) -> None:
+    """List or delete observed settings whose key is no longer desired.
+
+    Orphans appear when a key is unset, dropped from a group/global, or the node
+    leaves config. Observed rows are a cache, so deleting them is safe - they are
+    re-observed next sync if still wanted. Desired state (mch set) is untouched.
+    """
+    scopes = sum(1 for value in (node, group_name, all_nodes) if value)
+    if scopes != 1:
+        raise click.UsageError("choose exactly one scope: NODE, --group, or --all")
+
+    resp = _rpc(
+        ctx.obj["socket"],
+        {
+            "cmd": "clean_settings",
+            "query": node,
+            "group": group_name,
+            "all": all_nodes,
+            "setting": setting_key,
+            "dry_run": not yes,
+        },
+    )
+    data = _check(resp)
+    _render_stale_table(
+        data, noun_plural="settings", noun_singular="setting", key_header="SETTING", yes=yes
+    )
 
 
 @cli.command("remove")

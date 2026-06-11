@@ -2804,3 +2804,67 @@ def test_status_single_match_source_defaults_to_dash_when_absent():
 
     assert result.exit_code == 0
     assert re.search(r"owner\.info\s+x\s+x\s+-\s+0\s+ok", result.output)
+
+
+# ------ clean settings ------
+
+def _clean_settings_resp(candidates=None, deleted=0):
+    return {"ok": True, "data": {"candidates": candidates or [], "deleted": deleted}}
+
+
+def test_clean_settings_requires_scope():
+    result = CliRunner().invoke(cli, ["clean", "settings"])
+
+    assert result.exit_code != 0
+    assert "choose exactly one scope" in result.output
+
+
+def test_clean_settings_lists_candidates_without_deleting():
+    rpc = MagicMock(return_value=_clean_settings_resp(candidates=[{
+        "pubkey": "aabbccdd" * 8,
+        "label": "site-a",
+        "name": "Tower",
+        "group": "default",
+        "key": "txdelay",
+        "value": "14",
+        "collected_at": "2026-06-01T23:12:00+00:00",
+    }]))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(
+            cli, ["--socket", "/fake.sock", "clean", "settings", "--all"]
+        )
+
+    assert result.exit_code == 0
+    assert "stale settings:" in result.output
+    assert "SETTING" in result.output
+    assert "txdelay" in result.output
+    assert "site-a" in result.output
+    assert "run again with --yes" in result.output
+    # dry-run default: the daemon request must not delete
+    assert rpc.call_args.args[1]["dry_run"] is True
+    assert rpc.call_args.args[1]["cmd"] == "clean_settings"
+
+
+def test_clean_settings_yes_reports_deleted_count():
+    result = _run(["clean", "settings", "site-a", "--yes"], _clean_settings_resp(
+        candidates=[{
+            "pubkey": "aabbccdd" * 8,
+            "label": "site-a",
+            "name": "Tower",
+            "group": "default",
+            "key": "txdelay",
+            "value": "14",
+            "collected_at": "2026-06-01T23:12:00+00:00",
+        }],
+        deleted=1,
+    ))
+
+    assert result.exit_code == 0
+    assert "deleted 1 stale setting(s)" in result.output
+
+
+def test_clean_settings_none_reports_clean():
+    result = _run(["clean", "settings", "--all"], _clean_settings_resp())
+
+    assert result.exit_code == 0
+    assert "no stale settings" in result.output

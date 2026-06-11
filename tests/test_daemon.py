@@ -12,7 +12,15 @@ import pytest
 from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
 from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
-from mch.models import Node, NodeFact, NodeState, Scope, SettingPolicy, SettingRecord
+from mch.models import (
+    DesiredSetting,
+    Node,
+    NodeFact,
+    NodeState,
+    Scope,
+    SettingPolicy,
+    SettingRecord,
+)
 from mch.queue import NodeResult, OperationBusyError
 
 
@@ -1800,3 +1808,101 @@ async def test_unset_setting_leaves_other_keys(db, wq, config):
 
     rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
     assert [r.key for r in rows] == ["name"]
+
+
+# ------------------------------------------------------------------
+# clean_settings — orphaned observed setting rows
+# ------------------------------------------------------------------
+
+async def _seed_observed_setting(db: Database, node: Node, key: str, observed: str = "x") -> None:
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey,
+        key=key,
+        desired=None,
+        policy=SettingPolicy.AUDIT,
+        observed=observed,
+    ))
+
+
+async def test_clean_settings_lists_orphan_not_in_desired(db, wq):
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "txdelay")
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        settings={"name": SettingConfig(desired="Test Node", policy=SettingPolicy.ENFORCE)},
+    )])
+
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert resp["ok"] is True
+    keys = [c["key"] for c in resp["data"]["candidates"]]
+    assert keys == ["txdelay"]
+    assert resp["data"]["deleted"] == 0  # dry run by default
+
+
+async def test_clean_settings_keeps_config_desired_key(db, wq):
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "name", observed="Test Node")
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        settings={"name": SettingConfig(desired="Test Node", policy=SettingPolicy.ENFORCE)},
+    )])
+
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert resp["data"]["candidates"] == []
+
+
+async def test_clean_settings_keeps_db_set_key(db, wq, config):
+    """A key set via `mch set` (DB overlay) must never be treated as an orphan."""
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "txdelay", observed="14")
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
+    ))
+    # node not in config.yaml at all - only the DB row keeps txdelay wanted
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert resp["data"]["candidates"] == []
+
+
+async def test_clean_settings_yes_deletes_orphan(db, wq, config):
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "txdelay")
+
+    resp = await _dispatch(
+        {"cmd": "clean_settings", "query": "test", "dry_run": False}, wq, db, config
+    )
+
+    assert resp["data"]["deleted"] == 1
+    assert await db.get_settings(node.pubkey) == []
+
+
+async def test_clean_settings_unconfigured_node_orphans_all(db, wq, config):
+    """A node absent from config with no DB desired rows: every observed row is orphaned."""
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "name")
+    await _seed_observed_setting(db, node, "txdelay")
+
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert sorted(c["key"] for c in resp["data"]["candidates"]) == ["name", "txdelay"]
+
+
+async def test_clean_settings_setting_key_filter(db, wq, config):
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "name")
+    await _seed_observed_setting(db, node, "txdelay")
+
+    resp = await _dispatch(
+        {"cmd": "clean_settings", "query": "test", "setting": "txdelay"}, wq, db, config
+    )
+
+    assert [c["key"] for c in resp["data"]["candidates"]] == ["txdelay"]
+
+
+async def test_clean_settings_unknown_node_errors(db, wq, config):
+    resp = await _dispatch({"cmd": "clean_settings", "query": "ghost"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "not found" in resp["error"]

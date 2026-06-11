@@ -6,31 +6,39 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## >>> RESUME HERE (updated 2026-06-11) - update or clear this block when you pick up <<<
 
-**Active work: desired-state migration into the DB (slices 1-3 committed `a7c0cd6`; slice 4 done,
-UNCOMMITTED).**
+**Active work: desired-state migration into the DB (slices 1-4 committed `a7c0cd6`+`8d7ed39`;
+slice 5 done, UNCOMMITTED).**
 Moving desired state from config.yaml into the SQLite DB so `mch`/API/web can edit it. Full design,
 schema, resolution model, and migration plan are in DESIGN.md "Desired state in the DB"; the dated
 2026-06-11 entries below have the decision log.
-- Committed (`a7c0cd6`, on origin/main): slice 1 (`desired_settings` table + DB methods), slice 2
-  (`overlay_db_settings()` wired into `WorkQueue._process_node`), slice 3 (`mch set`/`mch unset` +
-  daemon dispatch + `writable_setting_keys()`).
-- **Uncommitted this session: slice 4** - `mch node`/`mch status <node>` now show a per-setting
-  SOURCE column (`db`/`config`/`-`). report.py (`_settings_report`/`_setting_item` gained a
-  `source`), cli.py (`_node_detail_view` + `_render_node_detail` SOURCE column), plus tests. 739
-  tests pass, ruff clean, mypy unchanged (same 7 pre-existing errors).
-- **Slice 4 also closed a latent gap**: `build_fleet_report` did NOT apply `overlay_db_settings`
-  (only the sync path did), so `mch node`/`mch plan`/the API would not have reflected a `mch set`
-  until a later sync wrote an observed row. The overlay now runs in the report path too. (In
-  practice the exposure window was nil - `mch set` only shipped in slice 3, same uncommitted batch.)
+- Committed: slice 1-3 (`a7c0cd6`) + slice 4 (`8d7ed39`), both on origin/main. Slices: 1
+  `desired_settings` table + DB methods; 2 `overlay_db_settings()` in the sync path; 3 `mch set`/
+  `mch unset`; 4 per-setting SOURCE column + overlay also applied in the report path.
+- **Uncommitted this session: slice 5** - `mch clean settings`, the mirror of `mch clean facts`.
+  Drops observed `settings` rows whose key is no longer in the node's resolved desired set
+  (config + DB overlay). New `db.delete_setting`, daemon `_stale_setting_candidates` /
+  `_wanted_setting_keys` / `clean_settings` dispatch, CLI `clean settings` (extracted a shared
+  `_render_stale_table` so `clean facts` output stays byte-identical). 751 tests pass, ruff clean,
+  mypy unchanged (7 pre-existing).
+- **Slice 5 correctness hinge**: the wanted-key set applies the DB overlay AND seeds db-set keys
+  directly, so a key set only via `mch set` is never treated as an orphan - even on a node absent
+  from config.yaml. Without that, `clean settings` would delete the observed row for a freshly
+  `mch set` key. Covered by `test_clean_settings_keeps_db_set_key`.
 - Slice 3 decision (still stands): `set`/`unset` write the DB row **synchronously and do NOT
-  auto-sync** (auto-sync would block on the mesh and fight traffic-minimisation); they print a
-  `mch sync <node>` hint. The slice-2 overlay reads exactly the `(NODE, pubkey)` rows `set` writes.
-- **Next: slice 5** - `mch clean settings` mirroring `mch clean facts` (drop observed rows whose key
-  is no longer in resolved-desired + facts). Then group/global scopes and config import/sunset.
-- Decision still open for later: secrets.yaml stays a file for now (not in the DB); revisit.
+  auto-sync**; they print a `mch sync <node>` hint. The slice-2 overlay reads the `(NODE, pubkey)`
+  rows `set` writes.
+- **Next: slice 6** - group/global scopes for `desired_settings` (currently only NODE scope is
+  written/read), then reserved-key directives (via_radio/name_prefix/default_policy as rows), then
+  config.yaml import/export and sunset. secrets.yaml stays a file (revisit later).
 - Known scope limit (DESIGN.md slice 4): a DB desired row on a node *not* in config.yaml is not
   surfaced in reports yet - the report path still needs a config-derived `NodeConfig` to resolve
-  against. Arrives with the config-import / scope slices.
+  against. (`clean settings` already handles that case via the db_keys seed.) Arrives with the
+  config-import / scope slices.
+- Tiny pre-existing typing wart noted while doing slice 5: `_dispatch` reuses one `candidates`/
+  `candidate` variable across blocks, so an early `prune` assignment narrows it to
+  `dict[str, str | None]` function-wide -> the `delete_fact` call in `clean_facts` has 2 tolerated
+  mypy errors. Slice 5 dodged it by using fresh names (`stale_settings`/`row`). The `clean_facts`
+  ones could be fixed the same way later; left alone now to keep scope controlled.
 
 **Also still parked (pre-2026-06-11, unrelated to the DB migration): radio-strand fix + faulkland.**
 
@@ -145,8 +153,37 @@ report.py threads a `source` through `_settings_report`/`_setting_item`; cli.py 
   overrides config, legacy_node source) and 2 CLI tests (SOURCE column renders db/config; absent
   source renders `-`). Full suite green (739), ruff clean, mypy unchanged (same 7 pre-existing).
 
-Remaining slices (DESIGN.md): slice 5 `mch clean settings`, then group/global scopes and config
-import/sunset.
+Slice 4 committed as `8d7ed39` and pushed to origin/main.
+
+Slice 5 landed (uncommitted): `mch clean settings`, the mirror of `mch clean facts`. Lists/deletes
+observed `settings` rows whose key is no longer wanted, where "wanted" = the node's resolved desired
+set (config + DB overlay). New `db.delete_setting(pubkey, key)`; daemon `_wanted_setting_keys` +
+`_stale_setting_candidates` + `clean_settings` dispatch; CLI `clean settings` with the same
+NODE/`--group`/`--all`/`--setting`/`--yes` shape and dry-run-by-default behaviour as `clean facts`.
+
+- **The correctness hinge is the overlay.** `_wanted_setting_keys` applies `overlay_db_settings` and
+  also seeds the wanted set with the raw db-row keys, so a key set only via `mch set` is never an
+  orphan - including on a node that isn't in config.yaml at all (where there is no `NodeConfig` to
+  resolve, the db_keys seed alone keeps it). Without this, `clean settings` would delete the observed
+  row of a freshly-`mch set` key. Locked by `test_clean_settings_keeps_db_set_key`.
+- Refactor: extracted `_render_stale_table()` in cli.py so `clean facts` and `clean settings` share
+  the PUBKEY/LABEL/KEY/VALUE/OBSERVED renderer; only the noun ("facts"/"settings") and KEY header
+  ("FACT"/"SETTING") differ. Verified `clean facts` output stayed byte-identical (its 3 existing CLI
+  tests still pass untouched).
+- mypy gotcha worth recording: `_dispatch` is one big function that reuses the `candidates` and
+  `candidate` variable names across the `prune`/`clean_facts`/`clean_settings` blocks. The `prune`
+  list-comprehension assigns `dict[str, str | None]`, which mypy then pins as the function-wide type
+  for both names - that is the source of the 2 long-standing `delete_fact` arg-type errors in
+  `clean_facts`. Naming my new locals `stale_settings`/`row` keeps the accurate `dict[str, Any]`
+  element type and adds zero new errors. Left the `clean_facts` ones alone (unrelated, pre-existing)
+  rather than silently fixing them; they are a trivial future cleanup.
+- Tests: `db.delete_setting` (1), daemon `clean_settings` (7: orphan vs config-desired vs db-set,
+  `--yes` delete, unconfigured-node-orphans-all, `--setting` filter, unknown-node error), CLI (4:
+  scope guard, list-without-delete + dry_run flag asserted, `--yes` count, empty). Full suite green
+  (751), ruff clean, mypy 7 pre-existing.
+
+Remaining slices (DESIGN.md): slice 6 group/global scopes for `desired_settings`, then reserved-key
+directives, then config.yaml import/export and sunset.
 
 ## 2026-06-04 - bench-confirmed node-name byte cap for the name_prefix feature
 

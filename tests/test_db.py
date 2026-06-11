@@ -238,6 +238,22 @@ async def test_delete_fact_removes_single_fact(db):
     assert facts == {"ver": "v1.14.1"}
 
 
+async def test_delete_setting_removes_single_observed_row(db):
+    await db.upsert_node(Node(pubkey="aabbcc", name="N"))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey="aabbcc", key="name", desired="N", policy=SettingPolicy.ENFORCE, observed="N",
+    ))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey="aabbcc", key="txdelay", desired=None, policy=SettingPolicy.AUDIT,
+        observed="14",
+    ))
+
+    await db.delete_setting("aabbcc", "txdelay")
+
+    remaining = [s.key for s in await db.get_settings("aabbcc")]
+    assert remaining == ["name"]
+
+
 # ------------------------------------------------------------------
 # operations
 # ------------------------------------------------------------------
