@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
+from mch.config import Config, GroupConfig, NodeConfig, NodeSecrets, SettingConfig, load
 from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
 from mch.models import (
@@ -1861,6 +1861,35 @@ async def test_clean_settings_keeps_db_set_key(db, wq, config):
         scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
     ))
     # node not in config.yaml at all - only the DB row keeps txdelay wanted
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert resp["data"]["candidates"] == []
+
+
+async def test_clean_settings_keeps_db_global_set_key(db, wq, config):
+    """A global-scope DB key keeps the observed row wanted, even for a node absent from config."""
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "txdelay", observed="14")
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="txdelay", desired="14",
+    ))
+    # config fixture is empty: only the global DB row keeps txdelay wanted
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert resp["data"]["candidates"] == []
+
+
+async def test_clean_settings_keeps_db_group_set_key(db, wq):
+    """A group-scope DB key keeps the observed row wanted for a node in that group."""
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "txdelay", observed="14")
+    config = Config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="test", group="g")],
+        groups=[GroupConfig(name="g")],
+    )
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GROUP, scope_id="g", key="txdelay", desired="14",
+    ))
     resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
 
     assert resp["data"]["candidates"] == []

@@ -35,6 +35,7 @@ from mch.config import (
     OperationConfig,
     RadioConfig,
     _parse_radio,
+    overlay_db_group_settings,
     overlay_db_settings,
     resolve_desired,
     resolve_via_radio,
@@ -1504,6 +1505,21 @@ class WorkQueue:
         for warning in overlay_warnings:
             log.warning("%s", warning)
             await self._db.write_log(pubkey, "WARNING", warning)
+
+        # Overlay DB group- and global-scope desired settings the same way, so a value
+        # set with `mch set --group/--global` reconciles like a node-scope one. These
+        # conflict warnings are config-level (not node-specific), so they go to the app
+        # log only — writing them to every group member's per-node DB history is noise.
+        if group_cfg is not None:
+            group_rows = await self._db.get_desired_settings(Scope.GROUP, group_cfg.name)
+            group_cfg, group_warnings = overlay_db_group_settings(group_cfg, group_rows)
+            for warning in group_warnings:
+                log.warning("%s", warning)
+        if global_cfg is not None:
+            global_rows = await self._db.get_desired_settings(Scope.GLOBAL, "")
+            global_cfg, global_warnings = overlay_db_group_settings(global_cfg, global_rows)
+            for warning in global_warnings:
+                log.warning("%s", warning)
 
         log.info("processing node %r (%s…)", name, pubkey[:12])
         await _progress(progress, f"syncing {name!r} ({pubkey[:12]})")
