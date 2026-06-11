@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from mch.command_registry import write_command_for_key
-from mch.config import Config, GroupConfig, NodeConfig, resolve_desired
+from mch.config import Config, GroupConfig, NodeConfig, overlay_db_settings, resolve_desired
 from mch.db import Database
-from mch.models import Node, NodeState, SettingPolicy, SettingRecord
+from mch.models import Node, NodeState, Scope, SettingPolicy, SettingRecord
 from mch.queue import all_setting_keys, resolve_policy
 from mch.settings_compare import compare_setting
 
@@ -31,6 +31,14 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
     for node in nodes:
         node_cfg = _node_config(node, config)
         group_cfg = groups.get(node_cfg.group) if node_cfg and node_cfg.group else None
+        # Overlay DB node-scope desired settings so the report reflects the authoritative
+        # source (DESIGN.md "Desired state in the DB") - the same merge the sync path uses,
+        # so `mch node`/`mch plan` show DB-authored intent immediately after `mch set`.
+        # db_keys records which keys the DB supplied, surfaced as each setting's "source".
+        db_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+        db_keys = {row.key for row in db_rows}
+        if node_cfg is not None and db_rows:
+            node_cfg, _ = overlay_db_settings(node_cfg, db_rows)
         fact_records = await db.get_fact_records(node.pubkey)
         facts = {fact.key: fact.value for fact in fact_records}
         facts_collected_at = {fact.key: _iso(fact.collected_at) for fact in fact_records}
@@ -40,6 +48,7 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             group_cfg,
             config,
             known_settings,
+            db_keys,
         )
         open_node = _is_open_node(node, config)
         node_issues = _node_issues(node, settings, open_node)
@@ -159,6 +168,7 @@ def legacy_node(node: dict[str, Any], config: Config) -> dict[str, Any]:
                 "desired": setting["desired"],
                 "observed": setting["observed"],
                 "policy": setting["policy"],
+                "source": setting.get("source"),
                 "update_attempts": setting["update_attempts"],
                 "drift": setting["status"] == "drift",
                 "approximate": setting["status"] == "nominal",
@@ -176,6 +186,7 @@ def _settings_report(
     group_cfg: GroupConfig | None,
     config: Config,
     known_settings: dict[str, SettingRecord],
+    db_keys: set[str],
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     configured_keys: set[str] = set()
@@ -186,12 +197,17 @@ def _settings_report(
             desired = resolve_desired(key, node_cfg, group_cfg, config.global_settings)
             known = known_settings.get(key)
             observed = known.observed if known else None
-            items.append(_setting_item(key, desired, observed, policy, known))
+            # A node-scope DB row wins in the overlay, so its key's desired value came
+            # from the DB; everything else resolved from config.yaml.
+            source = "db" if key in db_keys else "config"
+            items.append(_setting_item(key, desired, observed, policy, known, source))
 
     # Keep observations for values removed from config visible as history/evidence.
     for key, known in sorted(known_settings.items()):
         if key not in configured_keys:
-            items.append(_setting_item(key, known.desired, known.observed, known.policy, known))
+            items.append(
+                _setting_item(key, known.desired, known.observed, known.policy, known, None)
+            )
     return items
 
 
@@ -201,6 +217,7 @@ def _setting_item(
     observed: str | None,
     policy: SettingPolicy,
     known: SettingRecord | None,
+    source: str | None,
 ) -> dict[str, Any]:
     comparison = compare_setting(key, desired, observed) if desired is not None else None
     if policy == SettingPolicy.SKIP:
@@ -229,6 +246,7 @@ def _setting_item(
         "desired": desired,
         "observed": observed,
         "policy": policy.value,
+        "source": source,
         "status": status,
         "action": action,
         "command": (

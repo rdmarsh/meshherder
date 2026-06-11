@@ -526,6 +526,7 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
                 "desired": setting["desired"],
                 "observed": setting["observed"],
                 "policy": setting["policy"],
+                "source": setting.get("source"),
                 "update_attempts": setting["update_attempts"],
                 "drift": setting["status"] == "drift",
                 "approximate": setting["status"] == "nominal",
@@ -835,24 +836,30 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 else "-"
             )
 
+        def _src(setting: dict[str, Any]) -> str:
+            # "db" = set via `mch set`; "config" = from config.yaml; "-" = observed-only history.
+            return setting.get("source") or "-"
+
         click.echo("settings:")
         # column widths based on content display width, not char count
         col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
         col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
         col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
+        col_src = max(len("SOURCE"), max(len(_src(s)) for s in settings))
         col_tries = max(
             len("TRIES"), max(len(_tries(s)) for s in settings)
         )
         def _srow(
-            policy: str, key: str, observed: str, desired: str, tries: str, status: str
+            policy: str, key: str, observed: str, desired: str,
+            source: str, tries: str, status: str,
         ) -> str:
             return (
                 f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(observed, col_obs)}"
-                f"  {_wpad(desired, col_des)}  {tries:>{col_tries}}  {status}"
+                f"  {_wpad(desired, col_des)}  {source:<{col_src}}  {tries:>{col_tries}}  {status}"
             )
-        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "TRIES", "STATUS"))
-        click.echo(_srow("------", "---", "-------", "--------", "-----", "------"))
+        click.echo(_srow("POLICY", "KEY", "OBSERVED", "DESIRED", "SOURCE", "TRIES", "STATUS"))
+        click.echo(_srow("------", "---", "-------", "--------", "------", "-----", "------"))
         for s in settings:
             if s.get("observed") is None:
                 status = click.style("not observed", fg="yellow")
@@ -867,6 +874,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 s["key"],
                 _sv(s.get("observed")),
                 _sv(s.get("desired")),
+                _src(s),
                 _tries(s),
                 status,
             ))

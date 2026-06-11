@@ -6,30 +6,31 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## >>> RESUME HERE (updated 2026-06-11) - update or clear this block when you pick up <<<
 
-**Active work: desired-state migration into the DB (slices 1-3 done, UNCOMMITTED).**
+**Active work: desired-state migration into the DB (slices 1-3 committed `a7c0cd6`; slice 4 done,
+UNCOMMITTED).**
 Moving desired state from config.yaml into the SQLite DB so `mch`/API/web can edit it. Full design,
 schema, resolution model, and migration plan are in DESIGN.md "Desired state in the DB"; the dated
 2026-06-11 entries below have the decision log.
-- Done this session: slice 1 (`desired_settings` table + `set/get/delete_desired_setting` in db.py),
-  slice 2 (`overlay_db_settings()` in config.py, wired into `WorkQueue._process_node` so the
-  reconcile path sees DB-overlaid desired state; DB wins over config.yaml + warns), and slice 3
-  (`mch set`/`mch unset` + daemon `set_setting`/`unset_setting` dispatch + `writable_setting_keys()`
-  registry helper).
-- **Working tree is slices 1-3 of the DB migration and is NOT committed** (no pre-existing uncommitted
-  code is mixed in). 733 tests pass, ruff clean. mypy: only the 7 *pre-existing* errors (queue.py
-  union-attr 389/397/404; cli.py int/float overloads; daemon.py delete_fact in clean_facts) - slice 3
-  added none; daemon.py's delete_fact error just shifted to line 629 from my insertions.
-- Slice 3 decision: `set`/`unset` write the DB row **synchronously and do NOT auto-sync**. The
-  plan note said "then trigger a sync", but auto-syncing on every `set` blocks on the mesh and
-  fights traffic-minimisation; instead they print a `mch sync <node>` hint. The slice-2 overlay
-  reads exactly the `(NODE, pubkey)` rows `set` writes, so a `set` is honoured next cycle - the
-  end-to-end loop is closed. `set` validates key (writable settings only), value (`validate_value`,
-  same as the YAML path), and policy; `unset` errors if the key has no DB row. Value is optional
-  (policy-only override) but at least one of value/policy is required.
-- **Next: slice 4** - `mch node` shows the source (db vs config) per setting. Then slice 5
-  (`mch clean settings` mirroring `mch clean facts`), then group/global scopes and config
-  import/sunset.
+- Committed (`a7c0cd6`, on origin/main): slice 1 (`desired_settings` table + DB methods), slice 2
+  (`overlay_db_settings()` wired into `WorkQueue._process_node`), slice 3 (`mch set`/`mch unset` +
+  daemon dispatch + `writable_setting_keys()`).
+- **Uncommitted this session: slice 4** - `mch node`/`mch status <node>` now show a per-setting
+  SOURCE column (`db`/`config`/`-`). report.py (`_settings_report`/`_setting_item` gained a
+  `source`), cli.py (`_node_detail_view` + `_render_node_detail` SOURCE column), plus tests. 739
+  tests pass, ruff clean, mypy unchanged (same 7 pre-existing errors).
+- **Slice 4 also closed a latent gap**: `build_fleet_report` did NOT apply `overlay_db_settings`
+  (only the sync path did), so `mch node`/`mch plan`/the API would not have reflected a `mch set`
+  until a later sync wrote an observed row. The overlay now runs in the report path too. (In
+  practice the exposure window was nil - `mch set` only shipped in slice 3, same uncommitted batch.)
+- Slice 3 decision (still stands): `set`/`unset` write the DB row **synchronously and do NOT
+  auto-sync** (auto-sync would block on the mesh and fight traffic-minimisation); they print a
+  `mch sync <node>` hint. The slice-2 overlay reads exactly the `(NODE, pubkey)` rows `set` writes.
+- **Next: slice 5** - `mch clean settings` mirroring `mch clean facts` (drop observed rows whose key
+  is no longer in resolved-desired + facts). Then group/global scopes and config import/sunset.
 - Decision still open for later: secrets.yaml stays a file for now (not in the DB); revisit.
+- Known scope limit (DESIGN.md slice 4): a DB desired row on a node *not* in config.yaml is not
+  surfaced in reports yet - the report path still needs a config-derived `NodeConfig` to resolve
+  against. Arrives with the config-import / scope slices.
 
 **Also still parked (pre-2026-06-11, unrelated to the DB migration): radio-strand fix + faulkland.**
 
@@ -116,8 +117,36 @@ rows, so a `set` is honoured on the next sync cycle - the loop is end-to-end.
   pass used `tx` and failed, fixed to `txdelay`. Full suite green (733), ruff clean, mypy unchanged
   (7 pre-existing errors, slice 3 added none).
 
-Remaining slices (DESIGN.md): slice 4 `mch node` source display (db vs config), slice 5
-`mch clean settings`, then group/global scopes and config import/sunset.
+Slices 1-3 committed as `a7c0cd6` and pushed to origin/main (push needed the HTTPS URL explicitly -
+`origin` is an SSH remote the sandbox proxy can't auth, and the github secret had to be set on the
+host first).
+
+Slice 4 landed (uncommitted): `mch node` / `mch status <node>` now show a per-setting **SOURCE**
+column - `db` (set via `mch set`), `config` (from config.yaml), or `-` (observed-only history).
+report.py threads a `source` through `_settings_report`/`_setting_item`; cli.py adds the column to
+`_render_node_detail` and carries `source` through `_node_detail_view` and `legacy_node`.
+
+- **Found and fixed a latent gap while doing this.** `build_fleet_report` (which feeds `mch node`,
+  `mch status`, `mch plan`, and the HTTP API) never applied `overlay_db_settings` - slice 2 only
+  wired the overlay into the *sync* path (`_process_node`). So a `mch set` would not have shown up
+  in `mch node`/`mch plan` until a later sync wrote an observed row, directly contradicting the
+  design's "intent visible immediately" promise. Slice 4 runs the overlay in the report path too,
+  so DB desired values and the `mch plan` preview reflect `mch set` at once. Exposure window was
+  effectively nil: `mch set` itself only exists from slice 3 (same uncommitted-then-committed batch),
+  so no released build could write a DB row the report would miss.
+- Source attribution rule: a node-scope DB row wins in the overlay, so its key is `source = "db"`;
+  every other resolved key is `"config"`; observed-only history rows (key dropped from desired but
+  still in the DB observed table) carry `source = None` -> rendered `-`.
+- Scope limit recorded: a DB desired row on a node not in config.yaml is still not surfaced in
+  reports (the report path needs a config-derived `NodeConfig` to resolve against). Deferred to the
+  config-import / group-global-scope slices.
+- Updated 4 pre-existing status-render tests whose regexes assumed DESIRED was immediately followed
+  by TRIES - the new SOURCE column sits between them. Added 4 report tests (config/db source, DB
+  overrides config, legacy_node source) and 2 CLI tests (SOURCE column renders db/config; absent
+  source renders `-`). Full suite green (739), ruff clean, mypy unchanged (same 7 pre-existing).
+
+Remaining slices (DESIGN.md): slice 5 `mch clean settings`, then group/global scopes and config
+import/sunset.
 
 ## 2026-06-04 - bench-confirmed node-name byte cap for the name_prefix feature
 

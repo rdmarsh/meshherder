@@ -8,7 +8,15 @@ import pytest
 
 from mch.config import Config, NodeConfig, SettingConfig
 from mch.db import Database
-from mch.models import Node, NodeFact, NodeState, SettingPolicy, SettingRecord
+from mch.models import (
+    DesiredSetting,
+    Node,
+    NodeFact,
+    NodeState,
+    Scope,
+    SettingPolicy,
+    SettingRecord,
+)
 from mch.report import build_fleet_report, build_node_report, legacy_node
 
 
@@ -138,3 +146,81 @@ async def test_fleet_report_lists_db_nodes_outside_config_as_ghosts(db):
         "last_seen": None,
     }]
     assert report["issues"]["unseen_nodes"] == []
+
+
+# ------------------------------------------------------------------
+# slice 4: per-setting source (db vs config) + DB overlay in reports
+# ------------------------------------------------------------------
+
+async def test_report_marks_config_sourced_setting(db):
+    node = Node(pubkey="aabbccdd" * 8, label="ridge", name="Ridge", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        label="ridge",
+        settings={"name": SettingConfig(desired="Ridge", policy=SettingPolicy.ENFORCE)},
+    )])
+
+    report = await build_fleet_report(db, config)
+    settings = {s["key"]: s for s in report["nodes"][0]["settings"]}
+
+    assert settings["name"]["desired"] == "Ridge"
+    assert settings["name"]["source"] == "config"
+
+
+async def test_report_marks_db_sourced_setting(db):
+    node = Node(pubkey="aabbccdd" * 8, label="ridge", name="Ridge", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge")])
+
+    report = await build_fleet_report(db, config)
+    settings = {s["key"]: s for s in report["nodes"][0]["settings"]}
+
+    # The DB-authored desired value appears in the report (overlay applied) ...
+    assert settings["txdelay"]["desired"] == "14"
+    # ... and is attributed to the DB.
+    assert settings["txdelay"]["source"] == "db"
+
+
+async def test_report_db_desired_overrides_config_and_is_sourced_db(db):
+    node = Node(pubkey="aabbccdd" * 8, label="ridge", name="Ridge", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="name", desired="FromDB",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        label="ridge",
+        settings={"name": SettingConfig(desired="FromYAML", policy=SettingPolicy.ENFORCE)},
+    )])
+
+    report = await build_fleet_report(db, config)
+    settings = {s["key"]: s for s in report["nodes"][0]["settings"]}
+
+    assert settings["name"]["desired"] == "FromDB"
+    assert settings["name"]["source"] == "db"
+
+
+async def test_legacy_node_includes_setting_source(db):
+    node = Node(pubkey="aabbccdd" * 8, label="ridge", name="Ridge", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
+    ))
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        label="ridge",
+        settings={"name": SettingConfig(desired="Ridge", policy=SettingPolicy.ENFORCE)},
+    )])
+
+    report = await build_node_report(db, config, node)
+    detail = legacy_node(report, config)
+    sources = {s["key"]: s["source"] for s in detail["settings"]}
+
+    assert sources["txdelay"] == "db"
+    assert sources["name"] == "config"

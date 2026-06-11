@@ -111,7 +111,15 @@ wanted.
    would block on the mesh and conflict with traffic-minimisation), they print a `mch sync <node>`
    hint instead. The slice-2 overlay reads exactly these `(NODE, pubkey)` rows, so a `set` is
    honoured on the next cycle with no resolver change.
-4. `mch node` shows the source (db vs config) per setting.
+4. [done 2026-06-11] `mch node` shows the source (`db`/`config`) per setting (new SOURCE column).
+   This also closed a gap: the **report** path (`build_fleet_report`, feeding `mch node`/`mch
+   status`/`mch plan`/the HTTP API) did not previously apply `overlay_db_settings` - only the sync
+   path did - so it would not have reflected a `mch set` until the next sync wrote an observed row.
+   The overlay now runs in reporting too, so DB-authored desired values (and the `mch plan`
+   preview) are visible immediately. Observed-only history rows have `source = None` (rendered `-`).
+   Scope note: a DB desired row on a node *not* in config.yaml is not surfaced yet (the report still
+   needs a config-derived `NodeConfig` to resolve against); that arrives with the config-import /
+   group-global-scope slices.
 5. `mch clean settings` removes orphaned observed rows.
 6. Later: group/global scopes, then reserved-key directives, then config.yaml import/export and
    sunset.

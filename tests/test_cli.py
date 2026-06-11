@@ -1263,7 +1263,7 @@ def test_status_single_match_shows_unobserved_settings_in_yellow():
     assert result.exit_code == 0
     assert "unknown = not yet observed" not in result.output
     assert re.search(
-        r"owner\.info\s+-\s+Managed by mch\s+0\s+\x1b\[33mnot observed\x1b\[0m",
+        r"owner\.info\s+-\s+Managed by mch\s+-\s+0\s+\x1b\[33mnot observed\x1b\[0m",
         result.output,
     )
 
@@ -1276,7 +1276,9 @@ def test_status_single_match_shows_tries_as_not_applicable_for_audit():
         "update_attempts": 0,
     }])
     result = _run_multi(["status", "aabb"], status, detail)
-    assert re.search(r"audit\s+owner\.info\s+wrong\s+Managed by mch\s+-\s+drifted", result.output)
+    assert re.search(
+        r"audit\s+owner\.info\s+wrong\s+Managed by mch\s+-\s+-\s+drifted", result.output
+    )
 
 
 def test_status_single_match_shows_approximate_settings_status():
@@ -1291,7 +1293,7 @@ def test_status_single_match_shows_approximate_settings_status():
     assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
-        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+0\s+nominal",
+        r"radio\s+915\.0750122,125,9,5\s+915\.075,125,9,5\s+-\s+0\s+nominal",
         result.output,
     )
 
@@ -1315,7 +1317,7 @@ def test_status_single_match_shows_ok_settings_in_green():
 
     assert result.exit_code == 0
     assert re.search(
-        r"owner\.info\s+Managed by mch\s+Managed by mch\s+0\s+\x1b\[32mok\x1b\[0m",
+        r"owner\.info\s+Managed by mch\s+Managed by mch\s+-\s+0\s+\x1b\[32mok\x1b\[0m",
         result.output,
     )
 
@@ -2749,3 +2751,39 @@ def test_unset_surfaces_daemon_error():
 
     assert result.exit_code != 0
     assert "no DB-set" in result.output
+
+
+def test_status_single_match_shows_setting_source_column():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail(settings=[
+        {
+            "key": "txdelay", "desired": "14", "observed": "14",
+            "policy": "enforce", "source": "db", "drift": False,
+            "approximate": False, "update_attempts": 0,
+        },
+        {
+            "key": "name", "desired": "Tower", "observed": "Tower",
+            "policy": "enforce", "source": "config", "drift": False,
+            "approximate": False, "update_attempts": 0,
+        },
+    ])
+    result = _run_multi(["status", "aabb"], status, detail)
+
+    assert result.exit_code == 0
+    assert "SOURCE" in result.output
+    assert re.search(r"txdelay\s+14\s+14\s+db\s+0\s+ok", result.output)
+    assert re.search(r"name\s+Tower\s+Tower\s+config\s+0\s+ok", result.output)
+
+
+def test_status_single_match_source_defaults_to_dash_when_absent():
+    status = _status_resp(nodes=[_summary()])
+    # A setting with no source (e.g. observed-only history) renders "-".
+    detail = _detail(settings=[{
+        "key": "owner.info", "desired": "x", "observed": "x",
+        "policy": "enforce", "drift": False, "approximate": False,
+        "update_attempts": 0,
+    }])
+    result = _run_multi(["status", "aabb"], status, detail)
+
+    assert result.exit_code == 0
+    assert re.search(r"owner\.info\s+x\s+x\s+-\s+0\s+ok", result.output)
