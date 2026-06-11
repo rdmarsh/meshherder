@@ -29,7 +29,7 @@ from meshcore.events import EventType
 from mch.api import ReadOnlyApi
 from mch.command_registry import validate_value, writable_setting_keys
 from mch.command_safety import blocked_exec_command
-from mch.config import Config, overlay_db_settings
+from mch.config import Config, overlay_db_group_settings, overlay_db_settings
 from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
@@ -212,12 +212,21 @@ async def _wanted_setting_keys(db: Database, config: Config, node: Any) -> set[s
         (nc for nc in config.nodes if node.pubkey.startswith(nc.pubkey_prefix)), None
     )
     db_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
-    wanted = {row.key for row in db_rows}
+    global_rows = await db.get_desired_settings(Scope.GLOBAL, "")
+    # Seed node- and global-scope DB keys directly: a global key is wanted by every node,
+    # and seeding (rather than relying on all_setting_keys) keeps it wanted even for a node
+    # absent from config.yaml. Group-scope keys can only be attributed when the node's group
+    # is known, i.e. when it appears in config; that limitation matches node-scope today.
+    wanted = {row.key for row in db_rows} | {row.key for row in global_rows}
     if node_cfg is not None:
         groups = {group.name: group for group in config.groups}
         group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
         node_cfg, _ = overlay_db_settings(node_cfg, db_rows)
-        wanted |= all_setting_keys(node_cfg, group_cfg, config.global_settings)
+        if group_cfg is not None:
+            group_rows = await db.get_desired_settings(Scope.GROUP, group_cfg.name)
+            group_cfg, _ = overlay_db_group_settings(group_cfg, group_rows)
+        global_cfg, _ = overlay_db_group_settings(config.global_settings, global_rows)
+        wanted |= all_setting_keys(node_cfg, group_cfg, global_cfg)
     return wanted
 
 
