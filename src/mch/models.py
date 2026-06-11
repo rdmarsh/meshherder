@@ -26,6 +26,13 @@ class SettingPolicy(Enum):
     SKIP    = "skip"     # don't touch this setting at all
 
 
+class Scope(Enum):
+    """The layer a desired setting is attached to (most specific wins at resolve time)."""
+    GLOBAL = "global"  # fleet-wide default; scope_id is "" (the singleton)
+    GROUP  = "group"   # applies to a group; scope_id is the group name
+    NODE   = "node"    # applies to one node; scope_id is the node pubkey
+
+
 class OperationStatus(Enum):
     PENDING = "pending"
     SUCCESS = "success"
@@ -74,6 +81,23 @@ class SettingRecord:
     last_set: datetime | None = None
     update_attempts: int = 0      # writes attempted for the current desired value
     drift: bool = False           # True when observed != desired and policy != SKIP
+
+
+@dataclass
+class DesiredSetting:
+    """A desired value/policy for one key at one scope (global/group/node).
+
+    The authoritative, CLI- and API-writable source of desired state. ``scope_id``
+    is "" for global, the group name for group scope, and the node pubkey for node
+    scope. ``policy``/``poll_hours`` of None mean "inherit" - the resolver falls back
+    to a less specific scope or the built-in default.
+    """
+    scope_type: Scope
+    scope_id: str                          # "" for global; group name; or node pubkey
+    key: str                               # e.g. "name", "tx", "lat"
+    desired: str | None = None             # None = policy-only override (no value)
+    policy: SettingPolicy | None = None    # None = inherit
+    poll_hours: int | None = None          # None = inherit / built-in default
 
 
 @dataclass

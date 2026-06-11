@@ -4,7 +4,34 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (paused 2026-06-04) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-06-11) - update or clear this block when you pick up <<<
+
+**Active work: desired-state migration into the DB (slices 1-3 done, UNCOMMITTED).**
+Moving desired state from config.yaml into the SQLite DB so `mch`/API/web can edit it. Full design,
+schema, resolution model, and migration plan are in DESIGN.md "Desired state in the DB"; the dated
+2026-06-11 entries below have the decision log.
+- Done this session: slice 1 (`desired_settings` table + `set/get/delete_desired_setting` in db.py),
+  slice 2 (`overlay_db_settings()` in config.py, wired into `WorkQueue._process_node` so the
+  reconcile path sees DB-overlaid desired state; DB wins over config.yaml + warns), and slice 3
+  (`mch set`/`mch unset` + daemon `set_setting`/`unset_setting` dispatch + `writable_setting_keys()`
+  registry helper).
+- **Working tree is slices 1-3 of the DB migration and is NOT committed** (no pre-existing uncommitted
+  code is mixed in). 733 tests pass, ruff clean. mypy: only the 7 *pre-existing* errors (queue.py
+  union-attr 389/397/404; cli.py int/float overloads; daemon.py delete_fact in clean_facts) - slice 3
+  added none; daemon.py's delete_fact error just shifted to line 629 from my insertions.
+- Slice 3 decision: `set`/`unset` write the DB row **synchronously and do NOT auto-sync**. The
+  plan note said "then trigger a sync", but auto-syncing on every `set` blocks on the mesh and
+  fights traffic-minimisation; instead they print a `mch sync <node>` hint. The slice-2 overlay
+  reads exactly the `(NODE, pubkey)` rows `set` writes, so a `set` is honoured next cycle - the
+  end-to-end loop is closed. `set` validates key (writable settings only), value (`validate_value`,
+  same as the YAML path), and policy; `unset` errors if the key has no DB row. Value is optional
+  (policy-only override) but at least one of value/policy is required.
+- **Next: slice 4** - `mch node` shows the source (db vs config) per setting. Then slice 5
+  (`mch clean settings` mirroring `mch clean facts`), then group/global scopes and config
+  import/sunset.
+- Decision still open for later: secrets.yaml stays a file for now (not in the DB); revisit.
+
+**Also still parked (pre-2026-06-11, unrelated to the DB migration): radio-strand fix + faulkland.**
 
 **Deploy state:** luna's running daemon is `fd1a0f5` (deployed 2026-06-04), which bundles the
 previously-held `ver`-fact-from-probe fix (`e3c5b4e`) and the new `name_prefix` feature. luna
@@ -27,6 +54,70 @@ the dated entry just below. Until fixed, treat `radio` as audit-only / bench-cha
 **Then:** deploy (ver-fact + the radio fix together) and retest faulkland. Other parked work in
 BACKLOG: hunt redesign (SF+-1 & BW+-1 + fleet-in-use radios), anonymous presence probe, and the
 startup-wedge-on-`get_contacts` robustness fix.
+
+## 2026-06-11 - Started moving desired state from config.yaml into the DB
+
+Began the redesign that makes the SQLite DB the source of truth for desired state (was: config.yaml),
+so `mch` commands and a future HTTP API / web frontend can edit it directly. Full rationale, schema,
+resolution model, and migration plan are in DESIGN.md "Desired state in the DB"; the old
+"Source of truth" / "config.yaml is operator-managed" sections are marked superseded (not deleted -
+they remain accurate for un-migrated scopes).
+
+Key decisions locked this session:
+- DB authoritative for desired state; config.yaml becomes import/seed and eventually retires;
+  **secrets.yaml stays a file** (must not be reachable by the read-only/loopback/unauth HTTP API).
+- Three drifting stores (config.yaml, DB, gateway favourites) collapse to two. Favourites become a
+  *downstream mirror* of the DB managed set (favourite managed nodes for eviction protection;
+  unfavourite anything not in the DB). Reading favourites back as inventory is dropped.
+- Schema split: `desired_settings(scope_type, scope_id, key, ...)` layered source of truth +
+  `observed_settings` per-node. `scope_id=''` for global (non-NULL, to dodge SQLite's
+  NULL-in-primary-key uniqueness quirk). Uniformity: every key valid at every scope, no whitelist.
+- Resolution code is unchanged - build the same `NodeConfig`/`GroupConfig` from DB rows and
+  `resolve_desired`/`resolve_policy`/`all_setting_keys` keep working. DB wins over YAML during the
+  transition, with a warning.
+- Retire-don't-delete (lifecycle + free-text reason) replaces kept config.yaml copies. No
+  auto-purge on contact-list absence - eviction is normal on a ~440-repeater mesh, so it is a poor
+  signal; gate any future cleanup on time since retirement.
+- `mch clean settings` will mirror `mch clean facts`: observed rows are only kept while their key is
+  in (resolved desired set + facts).
+
+Slice 1 landed: `desired_settings` table + `set/get/delete_desired_setting` DB methods, with
+tests (tests/test_db.py). Full suite green (704), ruff + mypy clean.
+
+Slice 2 landed: `overlay_db_settings(node_cfg, db_rows) -> (NodeConfig, warnings)` in config.py
+(pure, DB wins + warn-on-conflict, returns a copy; 6 unit tests in test_config.py), wired into
+`WorkQueue._process_node` right after the pubkey is known so the whole reconcile path
+(resolve_desired / all_setting_keys / operations) sees the merged desired state with no resolver
+change. Two integration tests in test_queue.py prove the overlay is actually consulted during a
+real cycle and that a DB value overrides a conflicting config.yaml value (with a warning logged).
+Full suite green (712), ruff clean. mypy: only 3 *pre-existing* union-attr errors in queue.py
+(confirmed via stash they exist on HEAD, lines 387/395/402); slice 2 added none.
+
+Slice 3 landed: `mch set <node> <key> <value> [--policy ...]` and `mch unset <node> <key>`, backed
+by daemon `set_setting`/`unset_setting` dispatch handlers and a `writable_setting_keys()` helper in
+command_registry (keys with `kind == "setting"` and `writable`; excludes facts and the mch-internal
+directives via_radio/name_prefix/default_policy). The CLI writes a node-scope `desired_settings`
+row keyed by the node's full pubkey; the slice-2 overlay already reads those same `(NODE, pubkey)`
+rows, so a `set` is honoured on the next sync cycle - the loop is end-to-end.
+
+- Validation mirrors the YAML path: `set` rejects unknown/non-writable keys, runs `validate_value`
+  on the value (e.g. `txdelay` is a float, so "loud" is rejected), and accepts only enforce/audit/
+  skip policies. `unset` reports a clear error when the key has no DB row rather than silently
+  no-op'ing. Value is optional so a policy-only override (`mch set n txdelay --policy skip`) works;
+  at least one of value/policy is required.
+- **Decided not to auto-sync.** The migration plan note said slice 3 should "then trigger a sync",
+  but `mch`'s whole ethos is gradual, traffic-minimised convergence; auto-syncing on every `set`
+  would block the CLI on mesh round-trips and is wrong when setting several keys in a row. So `set`/
+  `unset` write synchronously (intent visible immediately, the design's "intent recorded != node
+  converged" split) and print a `mch sync <node>` hint. DESIGN.md slice-3 entry records this.
+- Tests: 13 daemon dispatch tests (write/upsert/policy/policy-only/validation/unknown-node/unset)
+  and 8 CLI tests (request shape, policy passthrough, pre-RPC key/value-or-policy guards, error
+  surfacing). Note `tx` is **not** a real key - the firmware setting is `txdelay`; my first test
+  pass used `tx` and failed, fixed to `txdelay`. Full suite green (733), ruff clean, mypy unchanged
+  (7 pre-existing errors, slice 3 added none).
+
+Remaining slices (DESIGN.md): slice 4 `mch node` source display (db vs config), slice 5
+`mch clean settings`, then group/global scopes and config import/sunset.
 
 ## 2026-06-04 - bench-confirmed node-name byte cap for the name_prefix feature
 

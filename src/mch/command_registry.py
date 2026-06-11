@@ -381,6 +381,16 @@ def fire_and_forget_prefixes() -> frozenset[str]:
     return frozenset(spec.key for spec in _SPECS if spec.fire_and_forget)
 
 
+def writable_setting_keys() -> frozenset[str]:
+    """Keys an operator may set as desired state (e.g. via ``mch set``).
+
+    A writable setting maps to a node ``set <key> <value>`` CLI command. This
+    excludes read-only facts and mch-internal directives (via_radio, name_prefix,
+    default_policy) which are not node CLI settings.
+    """
+    return frozenset(spec.key for spec in _SPECS if spec.kind == "setting" and spec.writable)
+
+
 def validate_value(key: str, value: str) -> str | None:
     spec = get_spec(key)
     if spec is None or spec.validator is None:

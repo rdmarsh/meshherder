@@ -6,7 +6,7 @@ import logging
 import os
 import re
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import get_close_matches
 from ipaddress import ip_address
 from pathlib import Path
@@ -20,7 +20,7 @@ from mch.command_registry import (
     validate_value,
 )
 from mch.meshkey import derive_public_key
-from mch.models import SettingPolicy
+from mch.models import DesiredSetting, SettingPolicy
 
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
@@ -278,6 +278,49 @@ def resolve_desired(
         if prefix:
             return prefix + desired
     return desired
+
+
+def overlay_db_settings(
+    node_cfg: NodeConfig,
+    db_rows: list[DesiredSetting],
+) -> tuple[NodeConfig, list[str]]:
+    """Merge DB node-scope desired settings onto a config-derived NodeConfig.
+
+    The DB is the authoritative source of desired state (see DESIGN.md "Desired state
+    in the DB"). Each DB row replaces the same-key setting from config.yaml, so the
+    existing resolve_desired/resolve_policy/all_setting_keys path picks up DB values
+    without any change to the resolver itself.
+
+    During the config.yaml -> DB transition a key may still appear in both places.
+    The DB wins, and we return a warning for every key present in both so the operator
+    can remove the now-ignored YAML entry. A None poll_hours on the DB row means
+    "inherit"; we materialise the SettingConfig default (24h) since node-scope
+    SettingConfig carries a concrete int.
+
+    Returns a *new* NodeConfig (the shared config-loaded object is never mutated) and
+    the list of conflict warnings. With no DB rows the original object is returned
+    unchanged so callers pay nothing on the common path.
+    """
+    if not db_rows:
+        return node_cfg, []
+
+    merged = dict(node_cfg.settings)
+    warnings: list[str] = []
+    ident = node_cfg.label or node_cfg.pubkey_prefix
+    for row in db_rows:
+        yaml_setting = merged.get(row.key)
+        if yaml_setting is not None:
+            warnings.append(
+                f"node {ident!r}: setting {row.key!r} is set in both config.yaml "
+                f"({yaml_setting.desired!r}) and the DB ({row.desired!r}); "
+                "DB wins - remove it from config.yaml"
+            )
+        merged[row.key] = SettingConfig(
+            desired=row.desired,
+            policy=row.policy,
+            poll_hours=row.poll_hours if row.poll_hours is not None else 24,
+        )
+    return replace(node_cfg, settings=merged), warnings
 
 
 @dataclass

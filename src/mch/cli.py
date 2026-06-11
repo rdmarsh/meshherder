@@ -26,6 +26,7 @@ from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     parse_radio_tuple,
     validate_radio_tuple,
+    writable_setting_keys,
 )
 from mch.command_safety import blocked_exec_command, confirm_exec_command
 from mch.config import fact_name_warnings, sanitize_node_label, secrets_identity_warnings
@@ -1793,6 +1794,76 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
     )
     data = _check(resp)
     click.echo(data)
+
+
+# ---------------------------------------------------------------------------
+# set / unset (DB-authored desired state)
+# ---------------------------------------------------------------------------
+
+@cli.command("set")
+@click.argument("node")
+@click.argument("key")
+@click.argument("value", required=False)
+@click.option(
+    "--policy",
+    type=click.Choice(["enforce", "audit", "skip"]),
+    default=None,
+    help="Override this setting's policy (default: inherit).",
+)
+@click.pass_context
+def set_setting(
+    ctx: click.Context,
+    node: str,
+    key: str,
+    value: str | None,
+    policy: str | None,
+) -> None:
+    """Record a desired setting for a node in the DB (the source of truth).
+
+    NODE: pubkey prefix, label substring, or name substring.
+    KEY:  a writable setting, e.g. name, txdelay, advert.interval.
+    VALUE: the desired value (omit for a policy-only override with --policy).
+
+    Writing is synchronous, so `mch node` shows the new intent immediately. The
+    node converges on the next sync cycle, or run `mch sync <node>` to converge now.
+    """
+    if value is None and policy is None:
+        raise click.UsageError("provide a VALUE, --policy, or both")
+    if key not in writable_setting_keys():
+        valid = ", ".join(sorted(writable_setting_keys()))
+        raise click.UsageError(f"{key!r} is not a writable setting (choose from: {valid})")
+
+    resp = _rpc(
+        ctx.obj["socket"],
+        {"cmd": "set_setting", "query": node, "key": key, "value": value, "policy": policy},
+    )
+    data = _check(resp)
+    label = data.get("label") or data["name"]
+    pubkey = data["pubkey"]
+    parts = []
+    if data.get("value") is not None:
+        parts.append(f"= {data['value']!r}")
+    if data.get("policy"):
+        parts.append(f"policy={data['policy']}")
+    detail = " ".join(parts) or "(no change)"
+    click.echo(f"set {key} {detail}  on {label} ({pubkey[:8]})")
+    click.echo(f"run: mch sync {pubkey[:8]}  to converge now")
+
+
+@cli.command("unset")
+@click.argument("node")
+@click.argument("key")
+@click.pass_context
+def unset_setting(ctx: click.Context, node: str, key: str) -> None:
+    """Remove a DB-set desired setting from a node (leaves observed state alone).
+
+    NODE: pubkey prefix, label substring, or name substring.
+    KEY:  the setting key to clear, e.g. name, txdelay.
+    """
+    resp = _rpc(ctx.obj["socket"], {"cmd": "unset_setting", "query": node, "key": key})
+    data = _check(resp)
+    label = data.get("label") or data["name"]
+    click.echo(f"unset {key}  on {label} ({data['pubkey'][:8]})")
 
 
 # ---------------------------------------------------------------------------

@@ -6,8 +6,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from mch.config import ApiConfig, RadioConfig, load
-from mch.models import SettingPolicy
+from mch.config import (
+    ApiConfig,
+    NodeConfig,
+    RadioConfig,
+    SettingConfig,
+    load,
+    overlay_db_settings,
+)
+from mch.models import DesiredSetting, Scope, SettingPolicy
 
 
 def _write_config(tmp_path: Path, text: str) -> Path:
@@ -922,3 +929,65 @@ def test_setting_yaml_float_coerced_to_string(tmp_path):
         """)
     cfg = load(p)
     assert cfg.nodes[0].settings["txdelay"].desired == "1.0"
+
+
+# ------------------------------------------------------------------
+# overlay_db_settings: DB node-scope desired state overrides config.yaml
+# ------------------------------------------------------------------
+
+def _node(prefix="aabbccdd", label="n1", settings=None):
+    return NodeConfig(pubkey_prefix=prefix, label=label, settings=settings or {})
+
+
+def test_overlay_no_db_rows_returns_unchanged():
+    node = _node(settings={"tx": SettingConfig(desired="20")})
+    merged, warnings = overlay_db_settings(node, [])
+    assert merged is node
+    assert warnings == []
+
+
+def test_overlay_adds_db_only_key():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "tx", desired="14",
+                           policy=SettingPolicy.ENFORCE, poll_hours=12)]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.settings["tx"].desired == "14"
+    assert merged.settings["tx"].policy == SettingPolicy.ENFORCE
+    assert merged.settings["tx"].poll_hours == 12
+    assert warnings == []
+
+
+def test_overlay_db_wins_over_yaml_and_warns_on_conflict():
+    node = _node(label="solar1", settings={"tx": SettingConfig(desired="20")})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "tx", desired="14")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.settings["tx"].desired == "14"   # DB wins
+    assert len(warnings) == 1
+    assert "tx" in warnings[0]
+    assert "'20'" in warnings[0] and "'14'" in warnings[0]
+    assert "solar1" in warnings[0]
+
+
+def test_overlay_warns_when_key_present_in_both_even_if_equal():
+    # the YAML line is now dead/ignored regardless of value; operator should remove it
+    node = _node(settings={"tx": SettingConfig(desired="14")})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "tx", desired="14")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert len(warnings) == 1
+
+
+def test_overlay_does_not_mutate_original():
+    node = _node(settings={"tx": SettingConfig(desired="20")})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "tx", desired="14")]
+    overlay_db_settings(node, rows)
+    assert node.settings["tx"].desired == "20"  # original untouched
+
+
+def test_overlay_policy_only_db_row():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "tx", desired=None,
+                           policy=SettingPolicy.AUDIT)]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.settings["tx"].desired is None
+    assert merged.settings["tx"].policy == SettingPolicy.AUDIT
+    assert warnings == []

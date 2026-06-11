@@ -35,6 +35,7 @@ from mch.config import (
     OperationConfig,
     RadioConfig,
     _parse_radio,
+    overlay_db_settings,
     resolve_desired,
     resolve_via_radio,
 )
@@ -51,6 +52,7 @@ from mch.models import (
     NodeState,
     OperationRecord,
     OperationStatus,
+    Scope,
     SettingPolicy,
     SettingRecord,
 )
@@ -1491,6 +1493,17 @@ class WorkQueue:
         pubkey = contact["public_key"]
         name = contact.get("adv_name", node_cfg.label)
         result = NodeResult(pubkey=pubkey, name=name)
+
+        # Overlay DB node-scope desired settings onto the config-derived node_cfg.
+        # The DB is the authoritative source of desired state (DESIGN.md "Desired state
+        # in the DB"); a DB row wins over the same key in config.yaml. Everything below
+        # (resolve_desired/all_setting_keys/operations) then sees the merged desired state
+        # with no change to the resolver. Warnings flag YAML keys now overridden by the DB.
+        db_rows = await self._db.get_desired_settings(Scope.NODE, pubkey)
+        node_cfg, overlay_warnings = overlay_db_settings(node_cfg, db_rows)
+        for warning in overlay_warnings:
+            log.warning("%s", warning)
+            await self._db.write_log(pubkey, "WARNING", warning)
 
         log.info("processing node %r (%s…)", name, pubkey[:12])
         await _progress(progress, f"syncing {name!r} ({pubkey[:12]})")
