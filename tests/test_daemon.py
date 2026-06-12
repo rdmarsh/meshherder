@@ -1818,6 +1818,32 @@ async def test_set_setting_accepts_name_prefix_directive(db, wq, config):
     assert rows[0].desired == "\U0001f31e"
 
 
+async def test_set_setting_accepts_default_policy_directive(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "default_policy", "value": "enforce"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "default_policy"
+    assert rows[0].desired == "enforce"
+
+
+async def test_set_setting_rejects_invalid_default_policy(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "default_policy", "value": "loud"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "default_policy" in resp["error"]
+
+
 async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
     # config fixture has no groups; a typo'd group must error, not silently write a dead row
     resp = await _dispatch(

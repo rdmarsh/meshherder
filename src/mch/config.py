@@ -289,14 +289,26 @@ def _coerce_name_prefix(raw: Any) -> str | None:
     return text or None
 
 
+def _parse_policy_directive(raw: Any) -> SettingPolicy | None:
+    """Parse a default_policy directive value; empty/absent clears (inherit)."""
+    if raw is None or raw == "":
+        return None
+    return SettingPolicy(str(raw))
+
+
 # Directive keys are desired state that maps to a *structured field* on NodeConfig/
 # GroupConfig (resolved by resolve_name_prefix / resolve_via_radio / resolve_policy),
 # not to a node `set <key> <value>` CLI command. Stored as desired_settings rows like
 # any other key, but the overlay routes them to the field instead of the settings dict.
 # Each entry maps the reserved key to (config field name, parser from the row's string).
-# Grows as slice 7 adds default_policy and via_radio.
 _DIRECTIVE_PARSERS: dict[str, tuple[str, Callable[[Any], Any]]] = {
     "name_prefix": ("name_prefix", _coerce_name_prefix),
+    "default_policy": ("default_policy", _parse_policy_directive),
+}
+# Human hint shown when a directive value fails validation at set-time. name_prefix
+# accepts any string, so it needs no hint.
+_DIRECTIVE_VALUE_HINTS = {
+    "default_policy": "must be enforce, audit, or skip",
 }
 DIRECTIVE_KEYS = frozenset(_DIRECTIVE_PARSERS)
 
@@ -304,10 +316,27 @@ DIRECTIVE_KEYS = frozenset(_DIRECTIVE_PARSERS)
 def settable_keys() -> frozenset[str]:
     """Keys an operator may write via ``mch set``: node CLI settings plus directives.
 
-    Directives (name_prefix, later via_radio/default_policy) are not node CLI ``set``
+    Directives (name_prefix, default_policy, via_radio) are not node CLI ``set``
     commands but are operator-authored desired state stored as desired_settings rows.
     """
     return writable_setting_keys() | DIRECTIVE_KEYS
+
+
+def validate_directive_value(key: str, value: str) -> str | None:
+    """Validate an operator-supplied directive value at set-time; None means ok.
+
+    Reuses the overlay parser so set-time validation and read-time parsing cannot
+    drift: a value that fails here is exactly one the overlay would have to skip.
+    """
+    entry = _DIRECTIVE_PARSERS.get(key)
+    if entry is None:
+        return None
+    _, parse = entry
+    try:
+        parse(value)
+    except (ValueError, TypeError):
+        return _DIRECTIVE_VALUE_HINTS.get(key, "is invalid")
+    return None
 
 
 def _directive_overrides(
@@ -326,6 +355,17 @@ def _directive_overrides(
     warnings: list[str] = []
     for row in directive_rows:
         field, parse = _DIRECTIVE_PARSERS[row.key]
+        try:
+            parsed = parse(row.desired)
+        except (ValueError, TypeError):
+            # set-time validation rejects bad values, so this only fires on a hand-edited
+            # or legacy DB row. Skip it (fall back to YAML/inherit) rather than wedge the
+            # whole sync cycle on one malformed directive.
+            warnings.append(
+                f"{scope_noun} {ident!r}: ignoring invalid {row.key} value "
+                f"{row.desired!r} in the DB"
+            )
+            continue
         yaml_val = getattr(current, field)
         if yaml_val is not None:
             warnings.append(
@@ -333,7 +373,7 @@ def _directive_overrides(
                 f"({yaml_val!r}) and the DB ({row.desired!r}); "
                 "DB wins - remove it from config.yaml"
             )
-        overrides[field] = parse(row.desired)
+        overrides[field] = parsed
     return overrides, warnings
 
 

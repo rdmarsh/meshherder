@@ -34,6 +34,7 @@ from mch.config import (
     overlay_db_group_settings,
     overlay_db_settings,
     settable_keys,
+    validate_directive_value,
 )
 from mch.config import load as load_config
 from mch.db import Database
@@ -352,7 +353,9 @@ async def _handle_set_setting(
 
     if value is not None:
         value = str(value)
-        error = validate_value(key, value)
+        # validate_value covers node CLI settings; directives have their own validator
+        # (e.g. default_policy must be enforce/audit/skip) since they carry no spec.
+        error = validate_value(key, value) or validate_directive_value(key, value)
         if error:
             return {"ok": False, "error": f"{key} {error}: {value!r}"}
 

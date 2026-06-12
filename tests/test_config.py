@@ -1109,3 +1109,30 @@ def test_group_overlay_applies_name_prefix_directive():
     assert merged.name_prefix == "\U0001f6f0"
     assert "name_prefix" not in merged.settings
     assert warnings == []
+
+
+def test_overlay_applies_default_policy_directive():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "default_policy", desired="enforce")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.default_policy == SettingPolicy.ENFORCE
+    assert "default_policy" not in merged.settings
+    assert warnings == []
+
+
+def test_group_overlay_applies_default_policy_directive():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "default_policy", desired="audit")]
+    merged, warnings = overlay_db_group_settings(group, rows)
+    assert merged.default_policy == SettingPolicy.AUDIT
+
+
+def test_overlay_invalid_directive_value_is_skipped_with_warning():
+    # defensive: a malformed DB directive value (e.g. hand-edited) must not wedge the
+    # overlay/sync cycle - skip the override and warn, falling back to YAML/inherit.
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "default_policy", desired="bogus")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.default_policy is None
+    assert len(warnings) == 1
+    assert "default_policy" in warnings[0] and "bogus" in warnings[0]
