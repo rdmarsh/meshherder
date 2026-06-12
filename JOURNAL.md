@@ -22,8 +22,15 @@ local, not yet pushed/PR'd).
   end-to-end (cycle test: DB name_prefix -> resolve_desired("name") -> prefixed `set name` write).
   7b added `default_policy` (enum) + `validate_directive_value` + defensive `_directive_overrides`
   (skip+warn on a malformed DB row instead of wedging the cycle). 7c added `via_radio` (radio tuple,
-  empty clears) reusing the same validate/parse path. All three directives now settable at node/
-  group/global via `mch set`. 792 tests pass, ruff clean, mypy unchanged (7 pre-existing).
+  empty clears) reusing the same validate/parse path. 7d normalised directive whitespace
+  (`_normalize_directive_text`): drop leading space, all-space -> cleared, but `name_prefix` keeps a
+  meaningful trailing space (`" 🌞 "` -> `"🌞 "`); applied at read (parsers) and write (daemon).
+  All three directives settable at node/group/global via `mch set`. **Slice 7 (7a-7d) DONE and
+  pushed** to `origin/slice7-reserved-directives`. 799 tests pass, ruff clean, mypy unchanged (7).
+- **New BACKLOG item (Operation Safety):** validate that a desired value is *correct/usable*, not
+  just well-formed, before mch acts on it - esp. `via_radio` (a syntactically valid but wrong tuple
+  can strand a node; ties into the radio-strand item). Now urgent because 7c made `via_radio`
+  operator-settable.
 - **Next: slice 8** - config.yaml import/export + sunset (also closes the slice-6 group-attribution
   -needs-config limitation, since import gives every desired node a resolvable identity).
 - Open follow-up (slice 6): the clean path can only attribute a *group*-scope key to a node when the
