@@ -281,31 +281,49 @@ def resolve_desired(
     return desired
 
 
-def _coerce_name_prefix(raw: Any) -> str | None:
-    """Stringify a name_prefix; treat empty/absent as no prefix."""
+def _normalize_directive_text(key: str, raw: Any) -> str:
+    """Canonical string form of a directive value (see normalize_directive_value).
+
+    Leading whitespace is never meaningful, so it is always dropped. ``name_prefix`` is
+    prepended to the name with no separator, so a *trailing* space is meaningful (e.g.
+    ``"🌞 "``) and is kept; the other directives strip both ends. An all-whitespace value
+    collapses to ``""``, which every directive parser reads as "cleared / inherit".
+    """
     if raw is None:
-        return None
+        return ""
     text = str(raw)
-    return text or None
+    return text.lstrip() if key == "name_prefix" else text.strip()
+
+
+def normalize_directive_value(key: str, value: str) -> str:
+    """Public hook so the daemon stores the canonical directive value (clean DB/display).
+
+    Read-time parsers normalise too, so this is belt-and-suspenders, but storing the
+    normalised form keeps `mch status`/export tidy and matches what the operator meant.
+    """
+    return _normalize_directive_text(key, value)
+
+
+def _coerce_name_prefix(raw: Any) -> str | None:
+    """Stringify a name_prefix; drop leading space, keep trailing, empty -> no prefix."""
+    return _normalize_directive_text("name_prefix", raw) or None
 
 
 def _parse_policy_directive(raw: Any) -> SettingPolicy | None:
-    """Parse a default_policy directive value; empty/absent clears (inherit)."""
-    if raw is None or raw == "":
-        return None
-    return SettingPolicy(str(raw))
+    """Parse a default_policy directive value; empty/all-space clears (inherit)."""
+    text = _normalize_directive_text("default_policy", raw)
+    return SettingPolicy(text) if text else None
 
 
 def _parse_radio_directive(raw: Any) -> RadioConfig | None:
-    """Parse a via_radio directive value; empty/absent clears (inherit).
+    """Parse a via_radio directive value; empty/all-space clears (inherit).
 
     Delegates to _parse_radio (defined later, resolved at call time), which raises
     on a malformed 'freq,bw,sf,cr' tuple - that drives both set-time rejection and
     the defensive skip in _directive_overrides.
     """
-    if raw is None or raw == "":
-        return None
-    return _parse_radio(raw)
+    text = _normalize_directive_text("via_radio", raw)
+    return _parse_radio(text) if text else None
 
 
 # Directive keys are desired state that maps to a *structured field* on NodeConfig/

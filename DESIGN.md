@@ -154,6 +154,12 @@ wanted.
      hand-edited/legacy rows).
    - [done 2026-06-12] 7c: `via_radio` (radio tuple via `_parse_radio`; empty clears). A bad tuple is
      rejected at `mch set` and defensively skipped on read, via the same validate/parse path.
+   - [done 2026-06-12] 7d: directive whitespace normalisation (`_normalize_directive_text`). Leading
+     whitespace is always dropped and an all-whitespace value collapses to `""` (read as cleared/
+     inherit). `name_prefix` is prepended with no separator, so a *trailing* space is meaningful
+     (`" 🌞 "` -> `"🌞 "`) and kept; `default_policy`/`via_radio` strip both ends. Applied in the
+     parsers (read) and at write time in the daemon (`normalize_directive_value`) so the DB stores
+     the canonical value and `mch status`/export stay tidy.
 8. Later: config.yaml import/export and sunset (also closes the group-attribution-needs-config
    limitation from slice 6, since import gives every desired node a resolvable identity).
 

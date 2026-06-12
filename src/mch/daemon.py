@@ -30,7 +30,9 @@ from mch.api import ReadOnlyApi
 from mch.command_registry import validate_value
 from mch.command_safety import blocked_exec_command
 from mch.config import (
+    DIRECTIVE_KEYS,
     Config,
+    normalize_directive_value,
     overlay_db_group_settings,
     overlay_db_settings,
     settable_keys,
@@ -353,6 +355,10 @@ async def _handle_set_setting(
 
     if value is not None:
         value = str(value)
+        # Normalise directive whitespace before validating/storing: leading space dropped
+        # (name_prefix keeps a meaningful trailing space), all-space collapses to "" (cleared).
+        if key in DIRECTIVE_KEYS:
+            value = normalize_directive_value(key, value)
         # validate_value covers node CLI settings; directives have their own validator
         # (e.g. default_policy must be enforce/audit/skip) since they carry no spec.
         error = validate_value(key, value) or validate_directive_value(key, value)
