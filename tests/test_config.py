@@ -1061,3 +1061,51 @@ def test_group_overlay_policy_only_db_row():
     assert merged.settings["tx"].desired is None
     assert merged.settings["tx"].policy == SettingPolicy.AUDIT
     assert warnings == []
+
+
+# ------------------------------------------------------------------
+# directive overlay: reserved keys map to NodeConfig/GroupConfig fields, not settings
+# ------------------------------------------------------------------
+
+def test_overlay_applies_name_prefix_directive():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="\U0001f31e")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.name_prefix == "\U0001f31e"
+    assert "name_prefix" not in merged.settings  # directive, never a setting row
+    assert warnings == []
+
+
+def test_overlay_name_prefix_directive_warns_on_conflict():
+    node = NodeConfig(pubkey_prefix="aabbccdd", label="solar1", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="NEW")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.name_prefix == "NEW"   # DB wins
+    assert len(warnings) == 1
+    assert "name_prefix" in warnings[0]
+    assert "solar1" in warnings[0]
+    assert "'OLD'" in warnings[0] and "'NEW'" in warnings[0]
+
+
+def test_overlay_name_prefix_empty_clears_prefix():
+    # an empty desired coerces to None, so a DB row can clear an inherited prefix
+    node = NodeConfig(pubkey_prefix="aabbccdd", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.name_prefix is None
+
+
+def test_overlay_name_prefix_does_not_mutate_original():
+    node = NodeConfig(pubkey_prefix="aabbccdd", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="NEW")]
+    overlay_db_settings(node, rows)
+    assert node.name_prefix == "OLD"
+
+
+def test_group_overlay_applies_name_prefix_directive():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "name_prefix", desired="\U0001f6f0")]
+    merged, warnings = overlay_db_group_settings(group, rows)
+    assert merged.name_prefix == "\U0001f6f0"
+    assert "name_prefix" not in merged.settings
+    assert warnings == []

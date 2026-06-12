@@ -137,8 +137,20 @@ wanted.
    group can still be cleared. Group conflict warnings are config-level and go to the app log only,
    not per-node DB history. Group attribution in the clean path still needs the node in config to
    know its group (global keys are seeded unconditionally) - same limitation as node scope today.
-7. Later: reserved-key directives (via_radio/name_prefix/default_policy as rows), then
-   config.yaml import/export and sunset.
+7. Reserved-key directives as DB rows. Directives are desired state that maps to a *structured
+   field* on `NodeConfig`/`GroupConfig` (resolved by `resolve_name_prefix`/`resolve_via_radio`/
+   `resolve_policy`), not to a node `set <key> <value>` CLI command. They are stored as ordinary
+   `desired_settings` rows; the overlay routes a directive key to its field instead of the settings
+   dict via `_DIRECTIVE_PARSERS` (key -> field + parser) and `_split_directive_rows`. `settable_keys()`
+   = `writable_setting_keys()` | `DIRECTIVE_KEYS` gates `mch set`/the daemon. DB wins over a YAML
+   field value with a conflict warning, exactly like a setting row.
+   - [done 2026-06-12] 7a: `name_prefix` (plain string via `_coerce_name_prefix`; empty clears).
+     Proven end-to-end - a DB `name_prefix` row flows through the overlay into
+     `resolve_desired("name")` and the enforced `set name` write carries the prefix.
+   - 7b/7c (next): `default_policy` (enum: enforce/audit/skip) and `via_radio` (radio tuple via
+     `_parse_radio`; needs directive-value validation since a bad tuple must be rejected at `set`).
+8. Later: config.yaml import/export and sunset (also closes the group-attribution-needs-config
+   limitation from slice 6, since import gives every desired node a resolvable identity).
 
 ## Convergence Over A Constrained Mesh
 

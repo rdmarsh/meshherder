@@ -26,10 +26,14 @@ from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     parse_radio_tuple,
     validate_radio_tuple,
-    writable_setting_keys,
 )
 from mch.command_safety import blocked_exec_command, confirm_exec_command
-from mch.config import fact_name_warnings, sanitize_node_label, secrets_identity_warnings
+from mch.config import (
+    fact_name_warnings,
+    sanitize_node_label,
+    secrets_identity_warnings,
+    settable_keys,
+)
 from mch.config import load as load_config
 from mch.meshkey import derive_public_key, generate_private_key
 from mch.recommend import load_radio_presets
@@ -1943,8 +1947,8 @@ def set_setting(
 
     if value is None and policy is None:
         raise click.UsageError("provide a VALUE, --policy, or both")
-    if key not in writable_setting_keys():
-        valid = ", ".join(sorted(writable_setting_keys()))
+    if key not in settable_keys():
+        valid = ", ".join(sorted(settable_keys()))
         raise click.UsageError(f"{key!r} is not a writable setting (choose from: {valid})")
 
     req: dict[str, Any] = {"cmd": "set_setting", "key": key, "value": value, "policy": policy}

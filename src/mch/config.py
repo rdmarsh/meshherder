@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field, replace
 from difflib import get_close_matches
 from ipaddress import ip_address
@@ -18,6 +18,7 @@ from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     readable_observation_keys,
     validate_value,
+    writable_setting_keys,
 )
 from mch.meshkey import derive_public_key
 from mch.models import DesiredSetting, SettingPolicy
@@ -280,6 +281,71 @@ def resolve_desired(
     return desired
 
 
+def _coerce_name_prefix(raw: Any) -> str | None:
+    """Stringify a name_prefix; treat empty/absent as no prefix."""
+    if raw is None:
+        return None
+    text = str(raw)
+    return text or None
+
+
+# Directive keys are desired state that maps to a *structured field* on NodeConfig/
+# GroupConfig (resolved by resolve_name_prefix / resolve_via_radio / resolve_policy),
+# not to a node `set <key> <value>` CLI command. Stored as desired_settings rows like
+# any other key, but the overlay routes them to the field instead of the settings dict.
+# Each entry maps the reserved key to (config field name, parser from the row's string).
+# Grows as slice 7 adds default_policy and via_radio.
+_DIRECTIVE_PARSERS: dict[str, tuple[str, Callable[[Any], Any]]] = {
+    "name_prefix": ("name_prefix", _coerce_name_prefix),
+}
+DIRECTIVE_KEYS = frozenset(_DIRECTIVE_PARSERS)
+
+
+def settable_keys() -> frozenset[str]:
+    """Keys an operator may write via ``mch set``: node CLI settings plus directives.
+
+    Directives (name_prefix, later via_radio/default_policy) are not node CLI ``set``
+    commands but are operator-authored desired state stored as desired_settings rows.
+    """
+    return writable_setting_keys() | DIRECTIVE_KEYS
+
+
+def _directive_overrides(
+    directive_rows: list[DesiredSetting],
+    current: NodeConfig | GroupConfig,
+    ident: str,
+    scope_noun: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Field overrides (for ``replace``) from directive rows, plus conflict warnings.
+
+    A directive row sets the corresponding structured field rather than a settings
+    entry. The DB wins over a YAML value for the same field, with a warning so the
+    operator can drop the now-ignored YAML line - mirroring _merge_desired_rows.
+    """
+    overrides: dict[str, Any] = {}
+    warnings: list[str] = []
+    for row in directive_rows:
+        field, parse = _DIRECTIVE_PARSERS[row.key]
+        yaml_val = getattr(current, field)
+        if yaml_val is not None:
+            warnings.append(
+                f"{scope_noun} {ident!r}: {row.key} is set in both config.yaml "
+                f"({yaml_val!r}) and the DB ({row.desired!r}); "
+                "DB wins - remove it from config.yaml"
+            )
+        overrides[field] = parse(row.desired)
+    return overrides, warnings
+
+
+def _split_directive_rows(
+    db_rows: list[DesiredSetting],
+) -> tuple[list[DesiredSetting], list[DesiredSetting]]:
+    """Partition DB rows into (setting rows, directive rows)."""
+    settings_rows = [r for r in db_rows if r.key not in DIRECTIVE_KEYS]
+    directive_rows = [r for r in db_rows if r.key in DIRECTIVE_KEYS]
+    return settings_rows, directive_rows
+
+
 def _merge_desired_rows(
     base_settings: dict[str, SettingConfig],
     db_rows: list[DesiredSetting],
@@ -336,8 +402,10 @@ def overlay_db_settings(
     if not db_rows:
         return node_cfg, []
     ident = node_cfg.label or node_cfg.pubkey_prefix
-    merged, warnings = _merge_desired_rows(node_cfg.settings, db_rows, ident, "node")
-    return replace(node_cfg, settings=merged), warnings
+    setting_rows, directive_rows = _split_directive_rows(db_rows)
+    merged, warnings = _merge_desired_rows(node_cfg.settings, setting_rows, ident, "node")
+    overrides, dir_warnings = _directive_overrides(directive_rows, node_cfg, ident, "node")
+    return replace(node_cfg, settings=merged, **overrides), warnings + dir_warnings
 
 
 def overlay_db_group_settings(
@@ -357,11 +425,15 @@ def overlay_db_group_settings(
     """
     if not db_rows:
         return group_cfg, []
+    setting_rows, directive_rows = _split_directive_rows(db_rows)
     merged, warnings = _merge_desired_rows(
-        group_cfg.settings, db_rows, group_cfg.name, "group",
+        group_cfg.settings, setting_rows, group_cfg.name, "group",
         extra_conflict=group_cfg.setting_overrides,
     )
-    return replace(group_cfg, settings=merged), warnings
+    overrides, dir_warnings = _directive_overrides(
+        directive_rows, group_cfg, group_cfg.name, "group"
+    )
+    return replace(group_cfg, settings=merged, **overrides), warnings + dir_warnings
 
 
 @dataclass
@@ -611,14 +683,6 @@ def _normalize_pubkey_prefix(raw: Any, context: str) -> str:
             " - prefix must represent whole bytes (even number of hex chars)"
         )
     return prefix
-
-
-def _coerce_name_prefix(raw: Any) -> str | None:
-    """Stringify a name_prefix; treat empty/absent as no prefix."""
-    if raw is None:
-        return None
-    text = str(raw)
-    return text or None
 
 
 def _coerce_setting_value(v: Any) -> str | None:

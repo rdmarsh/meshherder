@@ -2789,6 +2789,23 @@ def test_set_global_scope_sends_global_request():
     assert "all managed nodes" in result.output
 
 
+def test_set_accepts_name_prefix_directive():
+    # name_prefix is a directive but still operator-settable; it must not be rejected
+    # as "not a writable setting" before the RPC.
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "scope": "global", "key": "name_prefix", "value": "\U0001f31e", "policy": None,
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "--global", "name_prefix", "\U0001f31e"]
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1]["key"] == "name_prefix"
+    assert rpc.call_args.args[1]["scope"] == "global"
+
+
 def test_set_rejects_group_and_global_together():
     runner = CliRunner()
     rpc = MagicMock()
