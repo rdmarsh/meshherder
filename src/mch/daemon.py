@@ -27,9 +27,17 @@ from typing import Any
 from meshcore.events import EventType
 
 from mch.api import ReadOnlyApi
-from mch.command_registry import validate_value, writable_setting_keys
+from mch.command_registry import validate_value
 from mch.command_safety import blocked_exec_command
-from mch.config import Config, overlay_db_group_settings, overlay_db_settings
+from mch.config import (
+    DIRECTIVE_KEYS,
+    Config,
+    normalize_directive_value,
+    overlay_db_group_settings,
+    overlay_db_settings,
+    settable_keys,
+    validate_directive_value,
+)
 from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
@@ -340,14 +348,20 @@ async def _handle_set_setting(
 
     if not key:
         return {"ok": False, "error": "missing setting key"}
-    if key not in writable_setting_keys():
+    if key not in settable_keys():
         return {"ok": False, "error": f"{key!r} is not a writable setting"}
     if value is None and policy_raw is None:
         return {"ok": False, "error": "provide a value, a --policy, or both"}
 
     if value is not None:
         value = str(value)
-        error = validate_value(key, value)
+        # Normalise directive whitespace before validating/storing: leading space dropped
+        # (name_prefix keeps a meaningful trailing space), all-space collapses to "" (cleared).
+        if key in DIRECTIVE_KEYS:
+            value = normalize_directive_value(key, value)
+        # validate_value covers node CLI settings; directives have their own validator
+        # (e.g. default_policy must be enforce/audit/skip) since they carry no spec.
+        error = validate_value(key, value) or validate_directive_value(key, value)
         if error:
             return {"ok": False, "error": f"{key} {error}: {value!r}"}
 

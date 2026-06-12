@@ -759,6 +759,35 @@ async def test_cycle_applies_db_global_scope_desired_setting(db):
     ]
 
 
+async def test_cycle_db_name_prefix_directive_prepends_to_name(db):
+    # A DB name_prefix *directive* (structured field, not a settings row) must flow
+    # through the overlay into resolve_desired("name"), so the enforced write carries
+    # the prefixed name. Proves slice 7a's directive overlay reaches reconcile.
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"name": SettingConfig(desired="Tower", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.set_desired_setting(DesiredSetting(
+        Scope.NODE, "aabbccdd1122", "name_prefix", desired="\U0001f31e",
+    ))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
+        CommandResult(success=True, text="OldName"),    # name read -> drift
+        CommandResult(success=True, text="ok"),          # set name (enforce write)
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    await wq.run_cycle()
+
+    sent = [c.args[1] for c in gw.send_command.await_args_list]
+    # the enforced write must carry the prefixed name (no auto-space: prefix + base)
+    assert any("\U0001f31eTower" in cmd for cmd in sent), sent
+
+
 async def test_enforced_write_does_not_fallback_to_flood_after_cached_route_failure(db):
     node_cfg = _node(
         pubkey="aabbcc",

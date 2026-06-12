@@ -9,26 +9,25 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 **Workflow: new work goes on a branch + PR, no more direct commits to `main`** (journal/handoff
 commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed direct on `main`.
 
-**Status (2026-06-13): slice 6 MERGED, slice 7 PR open and rebased onto `main`.**
-- **Slice 6 (group/global scopes) MERGED** to `main` via PR #1 (merge commit `8b393e9`). Branch
+**Status (2026-06-13): slices 6 AND 7 MERGED to `main`. Next: slice 8.**
+- **Slice 6 (group/global scopes) MERGED** via PR #1 (merge commit `8b393e9`). Branch
   `slice6-group-global-scopes` deleted (local + remote). 6a `overlay_db_group_settings`,
   6b reconcile (`_process_node`) + clean (`_wanted_setting_keys`) wiring, 6c `mch set/unset
-  --group/--global` + daemon scope dispatch. See DESIGN.md slice 6 for the model.
-- **Slice 7 (reserved directives: name_prefix/default_policy/via_radio as DB rows) DONE, PR #2 OPEN
-  against `main`.** Stack flattened after #1 merged: rebased onto `main` (new SHAs `2de0ec1..c112410`,
-  force-pushed) and PR #2 retargeted to `main`. Clean 5-commit diff. Full slice-7 internals live in
-  the branch's own JOURNAL.md edits and land on merge.
-- **NEXT ACTION: review/merge PR #2.** Then slice 8 (config.yaml import/export + sunset), which also
-  closes the slice-6 group-attribution limitation below.
-- **!! Expect a JOURNAL.md merge conflict when PR #2 merges:** slice 7's commits edit this RESUME
-  block too. Resolve by keeping THIS block (the merged-state version) and discarding the branch's
-  older "slice 7 stacked, PR unmerged" wording; fold in any slice-7 technical detail worth keeping.
-- Open follow-up from slice 6: the clean path can only attribute a *group*-scope key to a node when
-  the node is in config (to know its group); global keys are seeded unconditionally. Closes with
-  config-import (slice 8).
-- Tests: last full run was 799 pass / ruff clean / mypy 7 (slice 7 completion, prior session). NOT
-  re-run this session - it was git plumbing only (no code changed), and the sandbox venv python is a
-  broken xcode stub so pytest can't run here. Re-run `pytest` on a real host before relying on green.
+  --group/--global` + daemon scope dispatch. See DESIGN.md slice 6.
+- **Slice 7 (reserved directives) MERGED** via PR #2. Directives = desired state that maps to a
+  structured `NodeConfig`/`GroupConfig` field (not a node `set` command), stored as `desired_settings`
+  rows: `_DIRECTIVE_PARSERS` (key -> field+parser) + `_split_directive_rows` route them to the field
+  in both overlays; `settable_keys()` = settings | `DIRECTIVE_KEYS` gates `mch set`. 7a `name_prefix`;
+  7b `default_policy` + `validate_directive_value` + defensive `_directive_overrides` (skip+warn on a
+  malformed DB row instead of wedging the cycle); 7c `via_radio`; 7d whitespace normalisation
+  (`_normalize_directive_text`: drop leading space, all-space -> cleared, `name_prefix` keeps a
+  meaningful trailing space `" 🌞 "` -> `"🌞 "`). All settable at node/group/global. DESIGN.md slice 7.
+- **NEXT: slice 8** - config.yaml import/export + sunset. Also closes the slice-6 group-attribution
+  limitation: the clean path can only attribute a *group*-scope key to a node in config (to know its
+  group); global keys are seeded unconditionally.
+- **BACKLOG (Operation Safety):** validate a desired value is *correct/usable*, not just well-formed,
+  before mch acts on it - esp. `via_radio` (a valid-but-wrong tuple can strand a node; ties into the
+  radio-strand item). Relevant now that 7c made `via_radio` operator-settable.
 
 ---
 _Prior block (slices 1-5), kept for context:_
