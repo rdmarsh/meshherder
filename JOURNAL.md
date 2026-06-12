@@ -4,22 +4,31 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (updated 2026-06-11) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-06-13) - update or clear this block when you pick up <<<
 
-**Workflow change (2026-06-11): new work goes on a branch + PR, no more direct commits to `main`.**
-Slices 1-5 + the DESIRED/OBSERVED column swap landed on `main` (the swap + slice 5 pushed there as
-the last direct-to-main change). Slice 6 is on branch `slice6-group-global-scopes` (commits 6a/6b/6c
-local, not yet pushed/PR'd).
+**Workflow: new work goes on a branch + PR, no more direct commits to `main`** (journal/handoff
+commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed direct on `main`.
 
-**Active work: desired-state migration into the DB. Slice 6 (group/global scopes) DONE on a branch.**
-- Slice 6a (`overlay_db_group_settings` pure fn), 6b (wire into reconcile `_process_node` + clean
-  `_wanted_setting_keys`), 6c (`mch set/unset --group/--global` + daemon scope dispatch) all done,
-  774 tests pass, ruff clean, mypy unchanged (7 pre-existing). See DESIGN.md slice 6 for the model.
-- **Next: slice 7** - reserved-key directives (via_radio/name_prefix/default_policy as DB rows),
-  then config.yaml import/export and sunset. secrets.yaml stays a file.
-- Open follow-up surfaced in slice 6: the clean path can only attribute a *group*-scope key to a
-  node when the node is in config (to know its group); global keys are seeded unconditionally.
-  Same class as the node-absent-from-config report-path limitation - closes with config-import.
+**Status (2026-06-13): slice 6 MERGED, slice 7 PR open and rebased onto `main`.**
+- **Slice 6 (group/global scopes) MERGED** to `main` via PR #1 (merge commit `8b393e9`). Branch
+  `slice6-group-global-scopes` deleted (local + remote). 6a `overlay_db_group_settings`,
+  6b reconcile (`_process_node`) + clean (`_wanted_setting_keys`) wiring, 6c `mch set/unset
+  --group/--global` + daemon scope dispatch. See DESIGN.md slice 6 for the model.
+- **Slice 7 (reserved directives: name_prefix/default_policy/via_radio as DB rows) DONE, PR #2 OPEN
+  against `main`.** Stack flattened after #1 merged: rebased onto `main` (new SHAs `2de0ec1..c112410`,
+  force-pushed) and PR #2 retargeted to `main`. Clean 5-commit diff. Full slice-7 internals live in
+  the branch's own JOURNAL.md edits and land on merge.
+- **NEXT ACTION: review/merge PR #2.** Then slice 8 (config.yaml import/export + sunset), which also
+  closes the slice-6 group-attribution limitation below.
+- **!! Expect a JOURNAL.md merge conflict when PR #2 merges:** slice 7's commits edit this RESUME
+  block too. Resolve by keeping THIS block (the merged-state version) and discarding the branch's
+  older "slice 7 stacked, PR unmerged" wording; fold in any slice-7 technical detail worth keeping.
+- Open follow-up from slice 6: the clean path can only attribute a *group*-scope key to a node when
+  the node is in config (to know its group); global keys are seeded unconditionally. Closes with
+  config-import (slice 8).
+- Tests: last full run was 799 pass / ruff clean / mypy 7 (slice 7 completion, prior session). NOT
+  re-run this session - it was git plumbing only (no code changed), and the sandbox venv python is a
+  broken xcode stub so pytest can't run here. Re-run `pytest` on a real host before relying on green.
 
 ---
 _Prior block (slices 1-5), kept for context:_
