@@ -1161,3 +1161,33 @@ def test_overlay_invalid_via_radio_is_skipped_with_warning():
     assert merged.via_radio is None
     assert len(warnings) == 1
     assert "via_radio" in warnings[0]
+
+
+def test_overlay_name_prefix_drops_leading_space_keeps_trailing():
+    # name_prefix is prepended with no separator, so a trailing space is meaningful
+    # ("🌞 " + name); a leading space is not, and is dropped.
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired=" \U0001f31e ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.name_prefix == "\U0001f31e "
+
+
+def test_overlay_name_prefix_all_spaces_clears():
+    node = NodeConfig(pubkey_prefix="aabbccdd", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="   ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.name_prefix is None
+
+
+def test_overlay_default_policy_strips_surrounding_space():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "default_policy", desired=" enforce ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.default_policy == SettingPolicy.ENFORCE
+
+
+def test_overlay_via_radio_strips_surrounding_space():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired=" 915.8,250,11,5 ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.via_radio == RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5)

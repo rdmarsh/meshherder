@@ -1870,6 +1870,46 @@ async def test_set_setting_rejects_invalid_via_radio(db, wq, config):
     assert "via_radio" in resp["error"]
 
 
+async def test_set_setting_name_prefix_drops_leading_keeps_trailing_space(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name_prefix", "value": " \U0001f31e "},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["value"] == "\U0001f31e "  # stored normalised, trailing kept
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].desired == "\U0001f31e "
+
+
+async def test_set_setting_default_policy_strips_surrounding_space(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "default_policy", "value": " enforce "},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].desired == "enforce"
+
+
+async def test_set_setting_name_prefix_all_spaces_stored_empty(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name_prefix", "value": "   "},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].desired == ""  # all-spaces normalises to empty; overlay reads it as cleared
+
+
 async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
     # config fixture has no groups; a typo'd group must error, not silently write a dead row
     resp = await _dispatch(
