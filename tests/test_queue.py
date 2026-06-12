@@ -706,6 +706,59 @@ async def test_cycle_db_setting_overrides_yaml_and_logs_warning(db):
     )
 
 
+async def test_cycle_applies_db_group_scope_desired_setting(db):
+    # The desired value comes only from a DB group-scope row; the node is in group "g"
+    # but carries no settings of its own. Proves overlay_db_group_settings is wired into
+    # _process_node for the group scope.
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", group="g", settings={})
+    cfg = _make_config(node_cfgs=[node_cfg], group_cfgs=[_group()])
+    cfg.facts = []
+    await db.set_desired_setting(DesiredSetting(
+        Scope.GROUP, "g", "powersaving",
+        desired="on", policy=SettingPolicy.ENFORCE,
+    ))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
+        CommandResult(success=True, text="off"),       # powersaving read -> drift
+        CommandResult(success=True, text="ok"),         # powersaving on (enforce write)
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_enforced == 1
+    assert [c.args[1] for c in gw.send_command.await_args_list] == [
+        "ver", "powersaving", "powersaving on",
+    ]
+
+
+async def test_cycle_applies_db_global_scope_desired_setting(db):
+    # The desired value comes only from a DB global-scope row (scope_id="");
+    # the node has no group and no settings. Proves the global overlay is wired in.
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", settings={})
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.set_desired_setting(DesiredSetting(
+        Scope.GLOBAL, "", "powersaving",
+        desired="on", policy=SettingPolicy.ENFORCE,
+    ))
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),  # reachability probe
+        CommandResult(success=True, text="off"),       # powersaving read -> drift
+        CommandResult(success=True, text="ok"),         # powersaving on (enforce write)
+    ])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results[0].settings_enforced == 1
+    assert [c.args[1] for c in gw.send_command.await_args_list] == [
+        "ver", "powersaving", "powersaving on",
+    ]
+
+
 async def test_enforced_write_does_not_fallback_to_flood_after_cached_route_failure(db):
     node_cfg = _node(
         pubkey="aabbcc",

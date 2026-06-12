@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mch.config import Config, NodeConfig, NodeSecrets, SettingConfig, load
+from mch.config import Config, GroupConfig, NodeConfig, NodeSecrets, SettingConfig, load
 from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
 from mch.models import (
@@ -1770,6 +1770,92 @@ async def test_set_setting_requires_value_or_policy(db, wq, config):
     assert resp["ok"] is False
 
 
+async def test_set_setting_group_scope_writes_group_row(db, wq):
+    config = Config(groups=[GroupConfig(name="solar")])
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "scope": "group", "group": "solar",
+         "key": "txdelay", "value": "14"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["scope"] == "group"
+    assert resp["data"]["group"] == "solar"
+    rows = await db.get_desired_settings(Scope.GROUP, "solar")
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+    # node-scope rows must be untouched
+    assert await db.get_desired_settings(Scope.NODE, "solar") == []
+
+
+async def test_set_setting_global_scope_writes_global_row(db, wq, config):
+    resp = await _dispatch(
+        {"cmd": "set_setting", "scope": "global", "key": "txdelay", "value": "14"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["scope"] == "global"
+    rows = await db.get_desired_settings(Scope.GLOBAL, "")
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+
+
+async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
+    # config fixture has no groups; a typo'd group must error, not silently write a dead row
+    resp = await _dispatch(
+        {"cmd": "set_setting", "scope": "group", "group": "ghost",
+         "key": "txdelay", "value": "14"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "ghost" in resp["error"]
+
+
+async def test_unset_setting_group_scope_removes_row(db, wq):
+    config = Config(groups=[GroupConfig(name="solar")])
+    await _dispatch(
+        {"cmd": "set_setting", "scope": "group", "group": "solar",
+         "key": "txdelay", "value": "14"}, wq, db, config,
+    )
+
+    resp = await _dispatch(
+        {"cmd": "unset_setting", "scope": "group", "group": "solar", "key": "txdelay"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    assert await db.get_desired_settings(Scope.GROUP, "solar") == []
+
+
+async def test_unset_setting_global_scope_removes_row(db, wq, config):
+    await _dispatch(
+        {"cmd": "set_setting", "scope": "global", "key": "txdelay", "value": "14"},
+        wq, db, config,
+    )
+
+    resp = await _dispatch(
+        {"cmd": "unset_setting", "scope": "global", "key": "txdelay"}, wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    assert await db.get_desired_settings(Scope.GLOBAL, "") == []
+
+
+async def test_unset_setting_group_scope_missing_row_errors(db, wq):
+    config = Config(groups=[GroupConfig(name="solar")])
+
+    resp = await _dispatch(
+        {"cmd": "unset_setting", "scope": "group", "group": "solar", "key": "txdelay"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "txdelay" in resp["error"]
+
+
 async def test_unset_setting_removes_row(db, wq, config):
     node = await _seed_plain_node(db)
     await _dispatch(
@@ -1861,6 +1947,35 @@ async def test_clean_settings_keeps_db_set_key(db, wq, config):
         scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
     ))
     # node not in config.yaml at all - only the DB row keeps txdelay wanted
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert resp["data"]["candidates"] == []
+
+
+async def test_clean_settings_keeps_db_global_set_key(db, wq, config):
+    """A global-scope DB key keeps the observed row wanted, even for a node absent from config."""
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "txdelay", observed="14")
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="txdelay", desired="14",
+    ))
+    # config fixture is empty: only the global DB row keeps txdelay wanted
+    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
+
+    assert resp["data"]["candidates"] == []
+
+
+async def test_clean_settings_keeps_db_group_set_key(db, wq):
+    """A group-scope DB key keeps the observed row wanted for a node in that group."""
+    node = await _seed_plain_node(db)
+    await _seed_observed_setting(db, node, "txdelay", observed="14")
+    config = Config(
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="test", group="g")],
+        groups=[GroupConfig(name="g")],
+    )
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GROUP, scope_id="g", key="txdelay", desired="14",
+    ))
     resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
 
     assert resp["data"]["candidates"] == []
