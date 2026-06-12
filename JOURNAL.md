@@ -11,15 +11,22 @@ Slices 1-5 + the DESIRED/OBSERVED column swap landed on `main` (the swap + slice
 the last direct-to-main change). Slice 6 is on branch `slice6-group-global-scopes` (commits 6a/6b/6c
 local, not yet pushed/PR'd).
 
-**Active work: desired-state migration into the DB. Slice 6 (group/global scopes) DONE on a branch.**
-- Slice 6a (`overlay_db_group_settings` pure fn), 6b (wire into reconcile `_process_node` + clean
-  `_wanted_setting_keys`), 6c (`mch set/unset --group/--global` + daemon scope dispatch) all done,
-  774 tests pass, ruff clean, mypy unchanged (7 pre-existing). See DESIGN.md slice 6 for the model.
-- **Next: slice 7** - reserved-key directives (via_radio/name_prefix/default_policy as DB rows),
-  then config.yaml import/export and sunset. secrets.yaml stays a file.
-- Open follow-up surfaced in slice 6: the clean path can only attribute a *group*-scope key to a
-  node when the node is in config (to know its group); global keys are seeded unconditionally.
-  Same class as the node-absent-from-config report-path limitation - closes with config-import.
+**Active work: desired-state migration into the DB. Slice 6 done (PR open, unmerged); slice 7a done.**
+- Slice 6 (group/global scopes) on branch `slice6-group-global-scopes`, pushed, PR not yet merged.
+  6a `overlay_db_group_settings`, 6b reconcile+clean wiring, 6c `mch set/unset --group/--global`.
+- **Slice 7a DONE** on branch `slice7-reserved-directives` (stacked on slice 6, not on `main`, so it
+  has the group/global overlay it extends). Reserved-key *directives* as DB rows: a directive maps
+  to a structured `NodeConfig`/`GroupConfig` field, not a node `set` command. `_DIRECTIVE_PARSERS`
+  (key -> field+parser) + `_split_directive_rows` route directive rows to the field in both overlays;
+  `settable_keys()` = settings | `DIRECTIVE_KEYS` gates set. 7a wired `name_prefix` only; proven
+  end-to-end (cycle test: DB name_prefix -> resolve_desired("name") -> prefixed `set name` write).
+  782 tests pass, ruff clean, mypy unchanged (7 pre-existing).
+- **Next: 7b/7c** - `default_policy` (enum) and `via_radio` (radio tuple, needs directive-value
+  validation so a bad tuple is rejected at `set`). Then slice 8: config.yaml import/export + sunset.
+- Open follow-up (slice 6): the clean path can only attribute a *group*-scope key to a node when the
+  node is in config (to know its group); global keys are seeded unconditionally. Closes with import.
+- **Stacked-branch note:** 7a sits on top of slice 6. When the slice 6 PR merges to `main`, rebase
+  `slice7-reserved-directives` onto `main` before its own PR (or it will carry slice 6's commits).
 
 ---
 _Prior block (slices 1-5), kept for context:_

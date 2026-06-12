@@ -1802,6 +1802,22 @@ async def test_set_setting_global_scope_writes_global_row(db, wq, config):
     assert rows[0].desired == "14"
 
 
+async def test_set_setting_accepts_name_prefix_directive(db, wq, config):
+    # name_prefix is a directive (structured field), not a node CLI setting, but it is
+    # operator-settable and stored as a desired_settings row like any other key.
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name_prefix", "value": "\U0001f31e"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "name_prefix"
+    assert rows[0].desired == "\U0001f31e"
+
+
 async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
     # config fixture has no groups; a typo'd group must error, not silently write a dead row
     resp = await _dispatch(
