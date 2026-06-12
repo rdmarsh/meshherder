@@ -147,8 +147,13 @@ wanted.
    - [done 2026-06-12] 7a: `name_prefix` (plain string via `_coerce_name_prefix`; empty clears).
      Proven end-to-end - a DB `name_prefix` row flows through the overlay into
      `resolve_desired("name")` and the enforced `set name` write carries the prefix.
-   - 7b/7c (next): `default_policy` (enum: enforce/audit/skip) and `via_radio` (radio tuple via
-     `_parse_radio`; needs directive-value validation since a bad tuple must be rejected at `set`).
+   - [done 2026-06-12] 7b: `default_policy` (enum enforce/audit/skip). Added `validate_directive_value`
+     (reuses the overlay parser so set-time validation and read-time parsing cannot drift) and made
+     `_directive_overrides` defensive: a malformed DB directive value is skipped with a warning
+     rather than wedging the sync cycle (set-time validation prevents bad writes; this guards
+     hand-edited/legacy rows).
+   - [done 2026-06-12] 7c: `via_radio` (radio tuple via `_parse_radio`; empty clears). A bad tuple is
+     rejected at `mch set` and defensively skipped on read, via the same validate/parse path.
 8. Later: config.yaml import/export and sunset (also closes the group-attribution-needs-config
    limitation from slice 6, since import gives every desired node a resolvable identity).
 

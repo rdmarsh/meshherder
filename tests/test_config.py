@@ -1136,3 +1136,28 @@ def test_overlay_invalid_directive_value_is_skipped_with_warning():
     assert merged.default_policy is None
     assert len(warnings) == 1
     assert "default_policy" in warnings[0] and "bogus" in warnings[0]
+
+
+def test_overlay_applies_via_radio_directive():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired="915.8,250,11,5")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.via_radio == RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5)
+    assert "via_radio" not in merged.settings
+    assert warnings == []
+
+
+def test_group_overlay_applies_via_radio_directive():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "via_radio", desired="915.075,125,9,5")]
+    merged, _ = overlay_db_group_settings(group, rows)
+    assert merged.via_radio == RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5)
+
+
+def test_overlay_invalid_via_radio_is_skipped_with_warning():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired="not-a-tuple")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.via_radio is None
+    assert len(warnings) == 1
+    assert "via_radio" in warnings[0]
