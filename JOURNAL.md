@@ -11,7 +11,7 @@ Slices 1-5 + the DESIRED/OBSERVED column swap landed on `main` (the swap + slice
 the last direct-to-main change). Slice 6 is on branch `slice6-group-global-scopes` (commits 6a/6b/6c
 local, not yet pushed/PR'd).
 
-**Active work: desired-state migration into the DB. Slice 6 done (PR open, unmerged); slice 7a done.**
+**Active work: desired-state migration into the DB. Slice 6 done (PR open, unmerged); slice 7 done.**
 - Slice 6 (group/global scopes) on branch `slice6-group-global-scopes`, pushed, PR not yet merged.
   6a `overlay_db_group_settings`, 6b reconcile+clean wiring, 6c `mch set/unset --group/--global`.
 - **Slice 7a DONE** on branch `slice7-reserved-directives` (stacked on slice 6, not on `main`, so it
@@ -20,9 +20,12 @@ local, not yet pushed/PR'd).
   (key -> field+parser) + `_split_directive_rows` route directive rows to the field in both overlays;
   `settable_keys()` = settings | `DIRECTIVE_KEYS` gates set. 7a wired `name_prefix` only; proven
   end-to-end (cycle test: DB name_prefix -> resolve_desired("name") -> prefixed `set name` write).
-  782 tests pass, ruff clean, mypy unchanged (7 pre-existing).
-- **Next: 7b/7c** - `default_policy` (enum) and `via_radio` (radio tuple, needs directive-value
-  validation so a bad tuple is rejected at `set`). Then slice 8: config.yaml import/export + sunset.
+  7b added `default_policy` (enum) + `validate_directive_value` + defensive `_directive_overrides`
+  (skip+warn on a malformed DB row instead of wedging the cycle). 7c added `via_radio` (radio tuple,
+  empty clears) reusing the same validate/parse path. All three directives now settable at node/
+  group/global via `mch set`. 792 tests pass, ruff clean, mypy unchanged (7 pre-existing).
+- **Next: slice 8** - config.yaml import/export + sunset (also closes the slice-6 group-attribution
+  -needs-config limitation, since import gives every desired node a resolvable identity).
 - Open follow-up (slice 6): the clean path can only attribute a *group*-scope key to a node when the
   node is in config (to know its group); global keys are seeded unconditionally. Closes with import.
 - **Stacked-branch note:** 7a sits on top of slice 6. When the slice 6 PR merges to `main`, rebase

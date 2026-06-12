@@ -1844,6 +1844,32 @@ async def test_set_setting_rejects_invalid_default_policy(db, wq, config):
     assert "default_policy" in resp["error"]
 
 
+async def test_set_setting_accepts_via_radio_directive(db, wq, config):
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "via_radio", "value": "915.8,250,11,5"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "via_radio"
+    assert rows[0].desired == "915.8,250,11,5"
+
+
+async def test_set_setting_rejects_invalid_via_radio(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "via_radio", "value": "nonsense"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "via_radio" in resp["error"]
+
+
 async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
     # config fixture has no groups; a typo'd group must error, not silently write a dead row
     resp = await _dispatch(

@@ -296,6 +296,18 @@ def _parse_policy_directive(raw: Any) -> SettingPolicy | None:
     return SettingPolicy(str(raw))
 
 
+def _parse_radio_directive(raw: Any) -> RadioConfig | None:
+    """Parse a via_radio directive value; empty/absent clears (inherit).
+
+    Delegates to _parse_radio (defined later, resolved at call time), which raises
+    on a malformed 'freq,bw,sf,cr' tuple - that drives both set-time rejection and
+    the defensive skip in _directive_overrides.
+    """
+    if raw is None or raw == "":
+        return None
+    return _parse_radio(raw)
+
+
 # Directive keys are desired state that maps to a *structured field* on NodeConfig/
 # GroupConfig (resolved by resolve_name_prefix / resolve_via_radio / resolve_policy),
 # not to a node `set <key> <value>` CLI command. Stored as desired_settings rows like
@@ -304,11 +316,13 @@ def _parse_policy_directive(raw: Any) -> SettingPolicy | None:
 _DIRECTIVE_PARSERS: dict[str, tuple[str, Callable[[Any], Any]]] = {
     "name_prefix": ("name_prefix", _coerce_name_prefix),
     "default_policy": ("default_policy", _parse_policy_directive),
+    "via_radio": ("via_radio", _parse_radio_directive),
 }
 # Human hint shown when a directive value fails validation at set-time. name_prefix
 # accepts any string, so it needs no hint.
 _DIRECTIVE_VALUE_HINTS = {
     "default_policy": "must be enforce, audit, or skip",
+    "via_radio": "must be a radio tuple 'freq,bw,sf,cr'",
 }
 DIRECTIVE_KEYS = frozenset(_DIRECTIVE_PARSERS)
 
