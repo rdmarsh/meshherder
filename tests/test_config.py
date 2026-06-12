@@ -1061,3 +1061,133 @@ def test_group_overlay_policy_only_db_row():
     assert merged.settings["tx"].desired is None
     assert merged.settings["tx"].policy == SettingPolicy.AUDIT
     assert warnings == []
+
+
+# ------------------------------------------------------------------
+# directive overlay: reserved keys map to NodeConfig/GroupConfig fields, not settings
+# ------------------------------------------------------------------
+
+def test_overlay_applies_name_prefix_directive():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="\U0001f31e")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.name_prefix == "\U0001f31e"
+    assert "name_prefix" not in merged.settings  # directive, never a setting row
+    assert warnings == []
+
+
+def test_overlay_name_prefix_directive_warns_on_conflict():
+    node = NodeConfig(pubkey_prefix="aabbccdd", label="solar1", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="NEW")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.name_prefix == "NEW"   # DB wins
+    assert len(warnings) == 1
+    assert "name_prefix" in warnings[0]
+    assert "solar1" in warnings[0]
+    assert "'OLD'" in warnings[0] and "'NEW'" in warnings[0]
+
+
+def test_overlay_name_prefix_empty_clears_prefix():
+    # an empty desired coerces to None, so a DB row can clear an inherited prefix
+    node = NodeConfig(pubkey_prefix="aabbccdd", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.name_prefix is None
+
+
+def test_overlay_name_prefix_does_not_mutate_original():
+    node = NodeConfig(pubkey_prefix="aabbccdd", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="NEW")]
+    overlay_db_settings(node, rows)
+    assert node.name_prefix == "OLD"
+
+
+def test_group_overlay_applies_name_prefix_directive():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "name_prefix", desired="\U0001f6f0")]
+    merged, warnings = overlay_db_group_settings(group, rows)
+    assert merged.name_prefix == "\U0001f6f0"
+    assert "name_prefix" not in merged.settings
+    assert warnings == []
+
+
+def test_overlay_applies_default_policy_directive():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "default_policy", desired="enforce")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.default_policy == SettingPolicy.ENFORCE
+    assert "default_policy" not in merged.settings
+    assert warnings == []
+
+
+def test_group_overlay_applies_default_policy_directive():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "default_policy", desired="audit")]
+    merged, warnings = overlay_db_group_settings(group, rows)
+    assert merged.default_policy == SettingPolicy.AUDIT
+
+
+def test_overlay_invalid_directive_value_is_skipped_with_warning():
+    # defensive: a malformed DB directive value (e.g. hand-edited) must not wedge the
+    # overlay/sync cycle - skip the override and warn, falling back to YAML/inherit.
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "default_policy", desired="bogus")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.default_policy is None
+    assert len(warnings) == 1
+    assert "default_policy" in warnings[0] and "bogus" in warnings[0]
+
+
+def test_overlay_applies_via_radio_directive():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired="915.8,250,11,5")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.via_radio == RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5)
+    assert "via_radio" not in merged.settings
+    assert warnings == []
+
+
+def test_group_overlay_applies_via_radio_directive():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "via_radio", desired="915.075,125,9,5")]
+    merged, _ = overlay_db_group_settings(group, rows)
+    assert merged.via_radio == RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5)
+
+
+def test_overlay_invalid_via_radio_is_skipped_with_warning():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired="not-a-tuple")]
+    merged, warnings = overlay_db_settings(node, rows)
+    assert merged.via_radio is None
+    assert len(warnings) == 1
+    assert "via_radio" in warnings[0]
+
+
+def test_overlay_name_prefix_drops_leading_space_keeps_trailing():
+    # name_prefix is prepended with no separator, so a trailing space is meaningful
+    # ("🌞 " + name); a leading space is not, and is dropped.
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired=" \U0001f31e ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.name_prefix == "\U0001f31e "
+
+
+def test_overlay_name_prefix_all_spaces_clears():
+    node = NodeConfig(pubkey_prefix="aabbccdd", name_prefix="OLD")
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "name_prefix", desired="   ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.name_prefix is None
+
+
+def test_overlay_default_policy_strips_surrounding_space():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "default_policy", desired=" enforce ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.default_policy == SettingPolicy.ENFORCE
+
+
+def test_overlay_via_radio_strips_surrounding_space():
+    node = _node(settings={})
+    rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired=" 915.8,250,11,5 ")]
+    merged, _ = overlay_db_settings(node, rows)
+    assert merged.via_radio == RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5)

@@ -31,6 +31,19 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
       auto-reverts after the timeout) instead of a bare `set radio` that can strand on a bad value.
   Until fixed, consider `radio` an audit-only setting in practice, or change it on the bench.
   Related: the `tempradio` live-test item and "keep desired node radio distinct from reach radio".
+- **Validate that a desired value is *correct/usable*, not just well-formed, before mch acts on it -
+  especially `via_radio`.** Slice 7c made `via_radio` operator-settable via `mch set` (node/group/
+  global). Set-time validation only checks *format* (`validate_directive_value` parses the
+  `freq,bw,sf,cr` tuple); a syntactically valid but *wrong* tuple (typo'd freq/SF, or a radio the
+  node isn't actually on) is accepted. mch then switches the gateway to that radio to reach the
+  node, the probe gets no answer, and - combined with the radio-strand bug above - the node can be
+  mislabeled unreachable with no self-recovery. The new directive surface makes this easy to trip.
+  Wanted: a "confirm before commit" guard for reachability-affecting values - e.g. confirm the node
+  actually answers on a new `via_radio` before adopting it (tie into the `tempradio` safe-migration /
+  gateway-follow approach), sanity-check radio params against radios known in use across the fleet,
+  and warn when `via_radio` diverges from the node's own desired `radio`. More generally: some
+  settings should be validated for *semantic* correctness (or proven reachable) before use, not only
+  rejected for bad syntax at `mch set` time.
 - **Proactively log in to auth-required nodes that silently drop unauthenticated commands.**
   (Confirmed root cause of the faulkland "unreachable" saga - see JOURNAL 2026-06-03 RESOLVED.)
   faulkland (v1.15.0) drops a directed command from a peer not in its ACL with no reply and no

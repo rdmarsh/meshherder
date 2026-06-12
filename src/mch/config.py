@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field, replace
 from difflib import get_close_matches
 from ipaddress import ip_address
@@ -18,6 +18,7 @@ from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     readable_observation_keys,
     validate_value,
+    writable_setting_keys,
 )
 from mch.meshkey import derive_public_key
 from mch.models import DesiredSetting, SettingPolicy
@@ -280,6 +281,143 @@ def resolve_desired(
     return desired
 
 
+def _normalize_directive_text(key: str, raw: Any) -> str:
+    """Canonical string form of a directive value (see normalize_directive_value).
+
+    Leading whitespace is never meaningful, so it is always dropped. ``name_prefix`` is
+    prepended to the name with no separator, so a *trailing* space is meaningful (e.g.
+    ``"🌞 "``) and is kept; the other directives strip both ends. An all-whitespace value
+    collapses to ``""``, which every directive parser reads as "cleared / inherit".
+    """
+    if raw is None:
+        return ""
+    text = str(raw)
+    return text.lstrip() if key == "name_prefix" else text.strip()
+
+
+def normalize_directive_value(key: str, value: str) -> str:
+    """Public hook so the daemon stores the canonical directive value (clean DB/display).
+
+    Read-time parsers normalise too, so this is belt-and-suspenders, but storing the
+    normalised form keeps `mch status`/export tidy and matches what the operator meant.
+    """
+    return _normalize_directive_text(key, value)
+
+
+def _coerce_name_prefix(raw: Any) -> str | None:
+    """Stringify a name_prefix; drop leading space, keep trailing, empty -> no prefix."""
+    return _normalize_directive_text("name_prefix", raw) or None
+
+
+def _parse_policy_directive(raw: Any) -> SettingPolicy | None:
+    """Parse a default_policy directive value; empty/all-space clears (inherit)."""
+    text = _normalize_directive_text("default_policy", raw)
+    return SettingPolicy(text) if text else None
+
+
+def _parse_radio_directive(raw: Any) -> RadioConfig | None:
+    """Parse a via_radio directive value; empty/all-space clears (inherit).
+
+    Delegates to _parse_radio (defined later, resolved at call time), which raises
+    on a malformed 'freq,bw,sf,cr' tuple - that drives both set-time rejection and
+    the defensive skip in _directive_overrides.
+    """
+    text = _normalize_directive_text("via_radio", raw)
+    return _parse_radio(text) if text else None
+
+
+# Directive keys are desired state that maps to a *structured field* on NodeConfig/
+# GroupConfig (resolved by resolve_name_prefix / resolve_via_radio / resolve_policy),
+# not to a node `set <key> <value>` CLI command. Stored as desired_settings rows like
+# any other key, but the overlay routes them to the field instead of the settings dict.
+# Each entry maps the reserved key to (config field name, parser from the row's string).
+_DIRECTIVE_PARSERS: dict[str, tuple[str, Callable[[Any], Any]]] = {
+    "name_prefix": ("name_prefix", _coerce_name_prefix),
+    "default_policy": ("default_policy", _parse_policy_directive),
+    "via_radio": ("via_radio", _parse_radio_directive),
+}
+# Human hint shown when a directive value fails validation at set-time. name_prefix
+# accepts any string, so it needs no hint.
+_DIRECTIVE_VALUE_HINTS = {
+    "default_policy": "must be enforce, audit, or skip",
+    "via_radio": "must be a radio tuple 'freq,bw,sf,cr'",
+}
+DIRECTIVE_KEYS = frozenset(_DIRECTIVE_PARSERS)
+
+
+def settable_keys() -> frozenset[str]:
+    """Keys an operator may write via ``mch set``: node CLI settings plus directives.
+
+    Directives (name_prefix, default_policy, via_radio) are not node CLI ``set``
+    commands but are operator-authored desired state stored as desired_settings rows.
+    """
+    return writable_setting_keys() | DIRECTIVE_KEYS
+
+
+def validate_directive_value(key: str, value: str) -> str | None:
+    """Validate an operator-supplied directive value at set-time; None means ok.
+
+    Reuses the overlay parser so set-time validation and read-time parsing cannot
+    drift: a value that fails here is exactly one the overlay would have to skip.
+    """
+    entry = _DIRECTIVE_PARSERS.get(key)
+    if entry is None:
+        return None
+    _, parse = entry
+    try:
+        parse(value)
+    except (ValueError, TypeError):
+        return _DIRECTIVE_VALUE_HINTS.get(key, "is invalid")
+    return None
+
+
+def _directive_overrides(
+    directive_rows: list[DesiredSetting],
+    current: NodeConfig | GroupConfig,
+    ident: str,
+    scope_noun: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Field overrides (for ``replace``) from directive rows, plus conflict warnings.
+
+    A directive row sets the corresponding structured field rather than a settings
+    entry. The DB wins over a YAML value for the same field, with a warning so the
+    operator can drop the now-ignored YAML line - mirroring _merge_desired_rows.
+    """
+    overrides: dict[str, Any] = {}
+    warnings: list[str] = []
+    for row in directive_rows:
+        field, parse = _DIRECTIVE_PARSERS[row.key]
+        try:
+            parsed = parse(row.desired)
+        except (ValueError, TypeError):
+            # set-time validation rejects bad values, so this only fires on a hand-edited
+            # or legacy DB row. Skip it (fall back to YAML/inherit) rather than wedge the
+            # whole sync cycle on one malformed directive.
+            warnings.append(
+                f"{scope_noun} {ident!r}: ignoring invalid {row.key} value "
+                f"{row.desired!r} in the DB"
+            )
+            continue
+        yaml_val = getattr(current, field)
+        if yaml_val is not None:
+            warnings.append(
+                f"{scope_noun} {ident!r}: {row.key} is set in both config.yaml "
+                f"({yaml_val!r}) and the DB ({row.desired!r}); "
+                "DB wins - remove it from config.yaml"
+            )
+        overrides[field] = parsed
+    return overrides, warnings
+
+
+def _split_directive_rows(
+    db_rows: list[DesiredSetting],
+) -> tuple[list[DesiredSetting], list[DesiredSetting]]:
+    """Partition DB rows into (setting rows, directive rows)."""
+    settings_rows = [r for r in db_rows if r.key not in DIRECTIVE_KEYS]
+    directive_rows = [r for r in db_rows if r.key in DIRECTIVE_KEYS]
+    return settings_rows, directive_rows
+
+
 def _merge_desired_rows(
     base_settings: dict[str, SettingConfig],
     db_rows: list[DesiredSetting],
@@ -336,8 +474,10 @@ def overlay_db_settings(
     if not db_rows:
         return node_cfg, []
     ident = node_cfg.label or node_cfg.pubkey_prefix
-    merged, warnings = _merge_desired_rows(node_cfg.settings, db_rows, ident, "node")
-    return replace(node_cfg, settings=merged), warnings
+    setting_rows, directive_rows = _split_directive_rows(db_rows)
+    merged, warnings = _merge_desired_rows(node_cfg.settings, setting_rows, ident, "node")
+    overrides, dir_warnings = _directive_overrides(directive_rows, node_cfg, ident, "node")
+    return replace(node_cfg, settings=merged, **overrides), warnings + dir_warnings
 
 
 def overlay_db_group_settings(
@@ -357,11 +497,15 @@ def overlay_db_group_settings(
     """
     if not db_rows:
         return group_cfg, []
+    setting_rows, directive_rows = _split_directive_rows(db_rows)
     merged, warnings = _merge_desired_rows(
-        group_cfg.settings, db_rows, group_cfg.name, "group",
+        group_cfg.settings, setting_rows, group_cfg.name, "group",
         extra_conflict=group_cfg.setting_overrides,
     )
-    return replace(group_cfg, settings=merged), warnings
+    overrides, dir_warnings = _directive_overrides(
+        directive_rows, group_cfg, group_cfg.name, "group"
+    )
+    return replace(group_cfg, settings=merged, **overrides), warnings + dir_warnings
 
 
 @dataclass
@@ -611,14 +755,6 @@ def _normalize_pubkey_prefix(raw: Any, context: str) -> str:
             " - prefix must represent whole bytes (even number of hex chars)"
         )
     return prefix
-
-
-def _coerce_name_prefix(raw: Any) -> str | None:
-    """Stringify a name_prefix; treat empty/absent as no prefix."""
-    if raw is None:
-        return None
-    text = str(raw)
-    return text or None
 
 
 def _coerce_setting_value(v: Any) -> str | None:
