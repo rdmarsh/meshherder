@@ -8,10 +8,12 @@ import yaml
 
 from mch.config import (
     ApiConfig,
+    GroupConfig,
     NodeConfig,
     RadioConfig,
     SettingConfig,
     load,
+    overlay_db_group_settings,
     overlay_db_settings,
 )
 from mch.models import DesiredSetting, Scope, SettingPolicy
@@ -988,6 +990,74 @@ def test_overlay_policy_only_db_row():
     rows = [DesiredSetting(Scope.NODE, "aabbccdd", "tx", desired=None,
                            policy=SettingPolicy.AUDIT)]
     merged, warnings = overlay_db_settings(node, rows)
+    assert merged.settings["tx"].desired is None
+    assert merged.settings["tx"].policy == SettingPolicy.AUDIT
+    assert warnings == []
+
+
+# ------------------------------------------------------------------
+# overlay_db_group_settings: DB group/global-scope desired state overrides config.yaml
+# ------------------------------------------------------------------
+
+def _group(name="g1", settings=None, setting_overrides=None):
+    return GroupConfig(
+        name=name,
+        settings=settings or {},
+        setting_overrides=setting_overrides or {},
+    )
+
+
+def test_group_overlay_no_db_rows_returns_unchanged():
+    group = _group(settings={"tx": SettingConfig(desired="20")})
+    merged, warnings = overlay_db_group_settings(group, [])
+    assert merged is group
+    assert warnings == []
+
+
+def test_group_overlay_adds_db_only_key():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "tx", desired="14",
+                           policy=SettingPolicy.ENFORCE, poll_hours=12)]
+    merged, warnings = overlay_db_group_settings(group, rows)
+    assert merged.settings["tx"].desired == "14"
+    assert merged.settings["tx"].policy == SettingPolicy.ENFORCE
+    assert merged.settings["tx"].poll_hours == 12
+    assert warnings == []
+
+
+def test_group_overlay_db_wins_over_yaml_and_warns_on_conflict():
+    group = _group(name="solar", settings={"tx": SettingConfig(desired="20")})
+    rows = [DesiredSetting(Scope.GROUP, "solar", "tx", desired="14")]
+    merged, warnings = overlay_db_group_settings(group, rows)
+    assert merged.settings["tx"].desired == "14"   # DB wins
+    assert len(warnings) == 1
+    assert "tx" in warnings[0]
+    assert "'20'" in warnings[0] and "'14'" in warnings[0]
+    assert "solar" in warnings[0]
+
+
+def test_group_overlay_warns_on_conflict_with_policy_only_override():
+    # A YAML setting_override (policy-only) is shadowed once the DB sets the key.
+    group = _group(setting_overrides={"tx": SettingConfig(policy=SettingPolicy.SKIP)})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "tx", desired="14")]
+    merged, warnings = overlay_db_group_settings(group, rows)
+    assert merged.settings["tx"].desired == "14"
+    assert len(warnings) == 1
+    assert "tx" in warnings[0]
+
+
+def test_group_overlay_does_not_mutate_original():
+    group = _group(settings={"tx": SettingConfig(desired="20")})
+    rows = [DesiredSetting(Scope.GROUP, "g1", "tx", desired="14")]
+    overlay_db_group_settings(group, rows)
+    assert group.settings["tx"].desired == "20"  # original untouched
+
+
+def test_group_overlay_policy_only_db_row():
+    group = _group(settings={})
+    rows = [DesiredSetting(Scope.GLOBAL, "", "tx", desired=None,
+                           policy=SettingPolicy.AUDIT)]
+    merged, warnings = overlay_db_group_settings(group, rows)
     assert merged.settings["tx"].desired is None
     assert merged.settings["tx"].policy == SettingPolicy.AUDIT
     assert warnings == []

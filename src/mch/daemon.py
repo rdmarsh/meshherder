@@ -29,7 +29,7 @@ from meshcore.events import EventType
 from mch.api import ReadOnlyApi
 from mch.command_registry import validate_value, writable_setting_keys
 from mch.command_safety import blocked_exec_command
-from mch.config import Config, overlay_db_settings
+from mch.config import Config, overlay_db_group_settings, overlay_db_settings
 from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
@@ -212,12 +212,21 @@ async def _wanted_setting_keys(db: Database, config: Config, node: Any) -> set[s
         (nc for nc in config.nodes if node.pubkey.startswith(nc.pubkey_prefix)), None
     )
     db_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
-    wanted = {row.key for row in db_rows}
+    global_rows = await db.get_desired_settings(Scope.GLOBAL, "")
+    # Seed node- and global-scope DB keys directly: a global key is wanted by every node,
+    # and seeding (rather than relying on all_setting_keys) keeps it wanted even for a node
+    # absent from config.yaml. Group-scope keys can only be attributed when the node's group
+    # is known, i.e. when it appears in config; that limitation matches node-scope today.
+    wanted = {row.key for row in db_rows} | {row.key for row in global_rows}
     if node_cfg is not None:
         groups = {group.name: group for group in config.groups}
         group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
         node_cfg, _ = overlay_db_settings(node_cfg, db_rows)
-        wanted |= all_setting_keys(node_cfg, group_cfg, config.global_settings)
+        if group_cfg is not None:
+            group_rows = await db.get_desired_settings(Scope.GROUP, group_cfg.name)
+            group_cfg, _ = overlay_db_group_settings(group_cfg, group_rows)
+        global_cfg, _ = overlay_db_group_settings(config.global_settings, global_rows)
+        wanted |= all_setting_keys(node_cfg, group_cfg, global_cfg)
     return wanted
 
 
@@ -267,21 +276,68 @@ async def _stale_setting_candidates(
     return candidates
 
 
-async def _handle_set_setting(req: dict[str, Any], db: Database) -> dict[str, Any]:
-    """Write a node-scope desired setting to the DB (the authoritative source).
+async def _resolve_setting_scope(
+    req: dict[str, Any], db: Database
+) -> tuple[Scope | None, str, dict[str, Any], str | None]:
+    """Resolve the (scope, scope_id, display data) for a set/unset request.
 
-    Validates the key (must be a writable node setting), the value, and the policy
-    before recording intent synchronously. Convergence is left to the next sync cycle
-    or an explicit ``mch sync`` - recording intent and reaching the node are decoupled
-    (DESIGN.md "Desired state in the DB").
+    Returns ``(scope, scope_id, data, error)``; on failure ``scope`` is None and
+    ``error`` is set. Node scope resolves the node query to a pubkey and surfaces
+    label/name for display; group scope passes the group name through as the scope_id
+    (whether it is a real configured group is the caller's concern - set validates it,
+    unset does not so a row for a now-removed group can still be cleared); global scope
+    needs no target. ``scope`` defaults to ``node`` so pre-scope clients keep working.
     """
-    query = str(req.get("query") or "")
+    scope_raw = str(req.get("scope") or "node")
+    if scope_raw == "node":
+        query = str(req.get("query") or "")
+        if not query:
+            return None, "", {}, "missing node"
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return None, "", {}, str(exc)
+        if not node:
+            return None, "", {}, f"node {query!r} not found"
+        return Scope.NODE, node.pubkey, {
+            "scope": "node",
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+        }, None
+    if scope_raw == "group":
+        group = str(req.get("group") or "")
+        if not group:
+            return None, "", {}, "missing group name"
+        return Scope.GROUP, group, {"scope": "group", "group": group}, None
+    if scope_raw == "global":
+        return Scope.GLOBAL, "", {"scope": "global"}, None
+    return None, "", {}, f"invalid scope {scope_raw!r} (choose node, group, or global)"
+
+
+def _scope_target_label(data: dict[str, Any]) -> str:
+    """Human label for a resolved scope, used in error messages."""
+    if data.get("scope") == "node":
+        return data.get("label") or str(data.get("pubkey", ""))[:8]
+    if data.get("scope") == "group":
+        return f"group {data.get('group')!r}"
+    return "global"
+
+
+async def _handle_set_setting(
+    req: dict[str, Any], db: Database, config: Config
+) -> dict[str, Any]:
+    """Write a desired setting to the DB (the authoritative source) at the given scope.
+
+    Validates the key (must be a writable setting), the value, and the policy before
+    recording intent synchronously. Scope is node (default), group, or global.
+    Convergence is left to the next sync cycle or an explicit ``mch sync`` - recording
+    intent and reaching the node are decoupled (DESIGN.md "Desired state in the DB").
+    """
     key = str(req.get("key") or "")
     value = req.get("value")
     policy_raw = req.get("policy")
 
-    if not query:
-        return {"ok": False, "error": "missing node"}
     if not key:
         return {"ok": False, "error": "missing setting key"}
     if key not in writable_setting_keys():
@@ -303,67 +359,39 @@ async def _handle_set_setting(req: dict[str, Any], db: Database) -> dict[str, An
             valid = ", ".join(p.value for p in SettingPolicy)
             return {"ok": False, "error": f"invalid policy {policy_raw!r} (choose from: {valid})"}
 
-    try:
-        node = await _resolve_node(query, db)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-    if not node:
-        return {"ok": False, "error": f"node {query!r} not found"}
+    scope, scope_id, data, error = await _resolve_setting_scope(req, db)
+    if error or scope is None:
+        return {"ok": False, "error": error or "could not resolve scope"}
+    # Catch a typo'd group name at write time: a desired row for a group that no node
+    # is in would silently never apply. unset does not check this (see resolver docstring).
+    if scope is Scope.GROUP and scope_id not in {g.name for g in config.groups}:
+        return {"ok": False, "error": f"group {scope_id!r} is not defined in config.yaml"}
 
     await db.set_desired_setting(
-        DesiredSetting(
-            scope_type=Scope.NODE,
-            scope_id=node.pubkey,
-            key=key,
-            desired=value,
-            policy=policy,
-        )
+        DesiredSetting(scope_type=scope, scope_id=scope_id, key=key, desired=value, policy=policy)
     )
-    return {
-        "ok": True,
-        "data": {
-            "pubkey": node.pubkey,
-            "label": node.label,
-            "name": node.name,
-            "key": key,
-            "value": value,
-            "policy": policy.value if policy else None,
-        },
-    }
+    data.update({"key": key, "value": value, "policy": policy.value if policy else None})
+    return {"ok": True, "data": data}
 
 
-async def _handle_unset_setting(req: dict[str, Any], db: Database) -> dict[str, Any]:
-    """Delete a node-scope desired setting from the DB; observed state is left intact."""
-    query = str(req.get("query") or "")
+async def _handle_unset_setting(
+    req: dict[str, Any], db: Database, config: Config
+) -> dict[str, Any]:
+    """Delete a desired setting at the given scope; observed state is left intact."""
     key = str(req.get("key") or "")
-    if not query:
-        return {"ok": False, "error": "missing node"}
     if not key:
         return {"ok": False, "error": "missing setting key"}
 
-    try:
-        node = await _resolve_node(query, db)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-    if not node:
-        return {"ok": False, "error": f"node {query!r} not found"}
+    scope, scope_id, data, error = await _resolve_setting_scope(req, db)
+    if error or scope is None:
+        return {"ok": False, "error": error or "could not resolve scope"}
 
-    existing = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    existing = await db.get_desired_settings(scope, scope_id)
     if not any(row.key == key for row in existing):
-        return {
-            "ok": False,
-            "error": f"no DB-set {key!r} on {node.label or node.pubkey[:8]!r}",
-        }
-    await db.delete_desired_setting(Scope.NODE, node.pubkey, key)
-    return {
-        "ok": True,
-        "data": {
-            "pubkey": node.pubkey,
-            "label": node.label,
-            "name": node.name,
-            "key": key,
-        },
-    }
+        return {"ok": False, "error": f"no DB-set {key!r} on {_scope_target_label(data)}"}
+    await db.delete_desired_setting(scope, scope_id, key)
+    data["key"] = key
+    return {"ok": True, "data": data}
 
 
 async def _dispatch(
@@ -733,10 +761,10 @@ async def _dispatch(
         }
 
     if cmd == "set_setting":
-        return await _handle_set_setting(req, db)
+        return await _handle_set_setting(req, db, config)
 
     if cmd == "unset_setting":
-        return await _handle_unset_setting(req, db)
+        return await _handle_unset_setting(req, db, config)
 
     if cmd == "remove":
         query = str(req.get("query") or "")
