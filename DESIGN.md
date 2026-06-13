@@ -172,7 +172,14 @@ wanted.
      imported (not part of desired_settings). Daemon `_handle_import` builds the DB-backed resolver;
      dry-run by default, `--yes` upserts (idempotent). After import every key lives in both YAML and
      DB, so the overlay's "DB wins + warn" nudges cleanup - export + sunset (8b+) finish the job.
-   - 8b (next): `mch export` - dump DB desired state back to YAML (review/backup; round-trip check).
+   - [done 2026-06-13] 8b: `mch export` - the inverse of import. `desired_rows_to_config_dict` rebuilds
+     the config.yaml structure from all `desired_settings` rows (shorthand `key: value` when only a
+     desired value, mapping form with policy/poll_hours otherwise; policy-only -> group/global
+     `setting_overrides` or node `settings.<key>.policy`; directives -> top-level fields; node
+     scope_id -> `pubkey_prefix`). `config_dict_to_yaml` serialises it; new DB `get_all_desired_settings`
+     fetches every row. Daemon `_handle_export` returns the YAML; CLI `mch export` prints to stdout
+     (`mch export > desired.yaml`). A round-trip test proves config -> rows -> YAML -> load -> rows is
+     stable. Observed state and operations are not exported.
    - 8c+ (sunset): build `NodeConfig`/`GroupConfig` directly from DB rows so the daemon can run with
      no desired state in config.yaml; DB owns inventory, favourites become a downstream mirror,
      retire-don't-delete lifecycle. secrets.yaml stays a file. Open call: does config.yaml remain a

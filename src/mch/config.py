@@ -585,6 +585,74 @@ def config_to_desired_rows(
     return rows, warnings
 
 
+def desired_rows_to_config_dict(rows: list[DesiredSetting]) -> dict[str, Any]:
+    """Inverse of config_to_desired_rows: rebuild a config.yaml-shaped dict from rows.
+
+    A setting with only a desired value renders as the `key: value` shorthand; one that
+    also carries policy/poll_hours uses the mapping form. A policy-only row (desired=None)
+    becomes a group/global `setting_overrides` entry, or - since nodes have no overrides -
+    a node `settings.<key>: {policy: ...}`. Directives render as the scope's top-level
+    field. Node scope_ids (full pubkeys) become `pubkey_prefix`.
+    """
+    by_scope: dict[tuple[Scope, str], list[DesiredSetting]] = {}
+    for row in rows:
+        by_scope.setdefault((row.scope_type, row.scope_id), []).append(row)
+
+    def block_for(scope_rows: list[DesiredSetting], *, is_node: bool) -> dict[str, Any]:
+        block: dict[str, Any] = {}
+        settings: dict[str, Any] = {}
+        overrides: dict[str, Any] = {}
+        for row in sorted(scope_rows, key=lambda r: r.key):
+            if row.key in DIRECTIVE_KEYS:
+                block[row.key] = row.desired
+                continue
+            policy = row.policy.value if row.policy is not None else None
+            if row.desired is None:
+                if policy is None:
+                    continue  # nothing to represent
+                if is_node:
+                    settings[row.key] = {"policy": policy}
+                else:
+                    overrides[row.key] = policy
+            elif policy is None and row.poll_hours is None:
+                settings[row.key] = row.desired
+            else:
+                mapping: dict[str, Any] = {"desired": row.desired}
+                if policy is not None:
+                    mapping["policy"] = policy
+                if row.poll_hours is not None:
+                    mapping["poll_hours"] = row.poll_hours
+                settings[row.key] = mapping
+        if settings:
+            block["settings"] = settings
+        if overrides:
+            block["setting_overrides"] = overrides
+        return block
+
+    result: dict[str, Any] = {}
+    global_rows = by_scope.get((Scope.GLOBAL, ""))
+    if global_rows:
+        result["global"] = block_for(global_rows, is_node=False)
+    groups = [
+        {"name": sid, **block_for(rs, is_node=False)}
+        for (st, sid), rs in by_scope.items() if st == Scope.GROUP
+    ]
+    if groups:
+        result["groups"] = sorted(groups, key=lambda g: g["name"])
+    nodes = [
+        {"pubkey_prefix": sid, **block_for(rs, is_node=True)}
+        for (st, sid), rs in by_scope.items() if st == Scope.NODE
+    ]
+    if nodes:
+        result["nodes"] = sorted(nodes, key=lambda n: n["pubkey_prefix"])
+    return result
+
+
+def config_dict_to_yaml(data: dict[str, Any]) -> str:
+    """Serialise an exported config dict to YAML (stable key order, block style)."""
+    return yaml.safe_dump(data, sort_keys=True, default_flow_style=False, allow_unicode=True)
+
+
 @dataclass
 class ApiConfig:
     """Read-only HTTP API configuration for local dashboard and integration clients."""

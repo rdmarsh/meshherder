@@ -29,9 +29,15 @@ commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed d
   nodes (unresolvable = warn + skip). `_radio_to_str` serialises via_radio (round-trips `_parse_radio`);
   default poll_hours 24 -> None to match `mch set`; operations not imported. Daemon `_handle_import`
   (dry-run default, `--yes` upserts, idempotent) + CLI `mch import`. 812 tests pass, ruff clean, mypy 7.
-- **NEXT in slice 8: 8b `mch export`** (DB desired -> YAML), then 8c+ sunset (DB-first config build,
-  DB-owned inventory, favourite mirror, retire-don't-delete). Open call for sunset: does config.yaml
-  stay a readable seed, or error if it still carries desired state?
+- **8b `mch export` DONE.** Inverse of import: `desired_rows_to_config_dict` (settings shorthand vs
+  mapping; policy-only -> setting_overrides / node settings.policy; directives -> top-level; node
+  scope_id -> pubkey_prefix) + `config_dict_to_yaml` + new DB `get_all_desired_settings`. Daemon
+  `_handle_export`, CLI `mch export` (stdout). Round-trip test proves config->rows->YAML->load->rows
+  is stable. 827 tests pass, ruff clean, mypy 7.
+- **NEXT: 8c+ sunset** - build NodeConfig/GroupConfig directly from DB rows so the daemon can run with
+  no desired state in config.yaml; DB owns inventory, favourites become a downstream mirror,
+  retire-don't-delete lifecycle. Open call: does config.yaml stay a readable seed after sunset, or
+  error if it still carries desired state? This is the big, one-way step - decompose before starting.
 - Slice-6 group-attribution limitation (clean path needs node-in-config to know its group) closes
   with sunset/inventory, since import+inventory give every desired node a DB identity.
 - **BACKLOG (Operation Safety):** validate a desired value is *correct/usable*, not just well-formed,

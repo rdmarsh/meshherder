@@ -32,7 +32,9 @@ from mch.command_safety import blocked_exec_command
 from mch.config import (
     DIRECTIVE_KEYS,
     Config,
+    config_dict_to_yaml,
     config_to_desired_rows,
+    desired_rows_to_config_dict,
     normalize_directive_value,
     overlay_db_group_settings,
     overlay_db_settings,
@@ -446,6 +448,14 @@ async def _handle_import(
     }
 
 
+async def _handle_export(db: Database) -> dict[str, Any]:
+    """Dump all DB desired_settings as config.yaml-shaped YAML (the inverse of import)."""
+    rows = await db.get_all_desired_settings()
+    data = desired_rows_to_config_dict(rows)
+    yaml_text = config_dict_to_yaml(data) if data else ""
+    return {"ok": True, "data": {"yaml": yaml_text, "total": len(rows)}}
+
+
 async def _dispatch(
     req: dict[str, Any],
     wq: WorkQueue,
@@ -820,6 +830,9 @@ async def _dispatch(
 
     if cmd == "import":
         return await _handle_import(req, db, config)
+
+    if cmd == "export":
+        return await _handle_export(db)
 
     if cmd == "remove":
         query = str(req.get("query") or "")

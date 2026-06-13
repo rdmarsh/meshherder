@@ -2164,6 +2164,25 @@ def import_config(ctx: click.Context, yes: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# export
+# ---------------------------------------------------------------------------
+
+@cli.command("export")
+@click.pass_context
+def export_config(ctx: click.Context) -> None:
+    """Dump the DB's desired state as config.yaml-shaped YAML (the inverse of import).
+
+    Prints to stdout - redirect to save (`mch export > desired.yaml`). Round-trips with
+    `mch import`. Observed state and operations are not included.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "export"}))
+    if not data.get("total"):
+        click.echo("no desired state in the DB to export")
+        return
+    click.echo(data["yaml"], nl=False)
+
+
+# ---------------------------------------------------------------------------
 # new
 # ---------------------------------------------------------------------------
 
