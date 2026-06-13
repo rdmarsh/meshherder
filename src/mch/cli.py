@@ -2129,6 +2129,41 @@ def plan(ctx: click.Context, query: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# import
+# ---------------------------------------------------------------------------
+
+@cli.command("import")
+@click.option("--yes", "-y", is_flag=True, help="Write the imported rows to the DB.")
+@click.pass_context
+def import_config(ctx: click.Context, yes: bool) -> None:
+    """Seed the DB's desired state from config.yaml (the migration on-ramp).
+
+    Flattens config.yaml settings and directives (name_prefix/default_policy/via_radio) at
+    node/group/global scope into desired_settings rows. Dry-run by default; --yes writes.
+    Idempotent - re-running upserts the same rows. Operations are not imported. A node not
+    yet seen by the gateway is skipped with a warning until it appears in the DB.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "import", "dry_run": not yes}))
+    counts = data["counts"]
+    total = data["total"]
+    if yes:
+        click.echo(
+            f"imported {data['written']} desired setting(s) into the DB "
+            f"(global {counts['global']}, groups {counts['group']}, nodes {counts['node']})"
+        )
+    else:
+        click.echo("import preview (dry run):")
+        click.echo(f"  global: {counts['global']}")
+        click.echo(f"  groups: {counts['group']}")
+        click.echo(f"  nodes:  {counts['node']}")
+        click.echo(f"  total:  {total}")
+    for warning in data.get("warnings", []):
+        click.echo(click.style(f"  warning: {warning}", fg="yellow"))
+    if not yes and total:
+        click.echo("run again with --yes to write these to the DB")
+
+
+# ---------------------------------------------------------------------------
 # new
 # ---------------------------------------------------------------------------
 

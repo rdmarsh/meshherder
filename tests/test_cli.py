@@ -2928,6 +2928,54 @@ def test_clean_settings_requires_scope():
     assert "choose exactly one scope" in result.output
 
 
+# ------ import ------
+
+def _import_resp(counts=None, total=0, warnings=None, written=0, dry_run=True):
+    return {"ok": True, "data": {
+        "counts": counts or {"global": 0, "group": 0, "node": 0},
+        "total": total,
+        "warnings": warnings or [],
+        "written": written,
+        "dry_run": dry_run,
+    }}
+
+
+def test_import_dry_run_previews_counts():
+    rpc = MagicMock(return_value=_import_resp(
+        counts={"global": 1, "group": 0, "node": 2}, total=3,
+    ))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "import", "dry_run": True}
+    assert "3" in result.output
+    assert "--yes" in result.output
+
+
+def test_import_yes_applies_and_reports_written():
+    rpc = MagicMock(return_value=_import_resp(
+        counts={"global": 1, "group": 0, "node": 2}, total=3, written=3, dry_run=False,
+    ))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import", "--yes"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "import", "dry_run": False}
+    assert "imported 3" in result.output
+
+
+def test_import_surfaces_warnings():
+    rpc = MagicMock(return_value=_import_resp(
+        warnings=["node 'ghost' (deadbeef) is not known to the DB yet - skipped"],
+    ))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import"])
+
+    assert result.exit_code == 0
+    assert "ghost" in result.output
+
+
 def test_clean_settings_lists_candidates_without_deleting():
     rpc = MagicMock(return_value=_clean_settings_resp(candidates=[{
         "pubkey": "aabbccdd" * 8,
