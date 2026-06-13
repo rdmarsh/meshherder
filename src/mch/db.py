@@ -362,6 +362,15 @@ class Database:
             rows = await cur.fetchall()
         return [_row_to_desired_setting(r) for r in rows]
 
+    async def get_all_desired_settings(self) -> list[DesiredSetting]:
+        """Return every desired setting across all scopes (for ``mch export``)."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM desired_settings ORDER BY scope_type, scope_id, key"
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_desired_setting(r) for r in rows]
+
     async def delete_desired_setting(
         self, scope_type: Scope, scope_id: str, key: str
     ) -> None:

@@ -2976,6 +2976,28 @@ def test_import_surfaces_warnings():
     assert "ghost" in result.output
 
 
+# ------ export ------
+
+def test_export_prints_yaml():
+    yaml_text = "global:\n  settings:\n    owner.info: rdm\n"
+    rpc = MagicMock(return_value={"ok": True, "data": {"yaml": yaml_text, "total": 1}})
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "export"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "export"}
+    assert "owner.info: rdm" in result.output
+
+
+def test_export_empty_reports_nothing_to_export():
+    rpc = MagicMock(return_value={"ok": True, "data": {"yaml": "", "total": 0}})
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "export"])
+
+    assert result.exit_code == 0
+    assert "no desired state" in result.output.lower()
+
+
 def test_clean_settings_lists_candidates_without_deleting():
     rpc = MagicMock(return_value=_clean_settings_resp(candidates=[{
         "pubkey": "aabbccdd" * 8,

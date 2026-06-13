@@ -13,7 +13,9 @@ from mch.config import (
     NodeConfig,
     RadioConfig,
     SettingConfig,
+    config_dict_to_yaml,
     config_to_desired_rows,
+    desired_rows_to_config_dict,
     load,
     overlay_db_group_settings,
     overlay_db_settings,
@@ -1286,3 +1288,103 @@ def test_import_via_radio_row_round_trips_through_parser():
     rows, _ = config_to_desired_rows(cfg, _resolver())
     via = next(r for r in rows if r.key == "via_radio")
     assert _parse_radio(via.desired) == RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5)
+
+
+# ------------------------------------------------------------------
+# desired_rows_to_config_dict: rows -> config.yaml structure (mch export, inverse of import)
+# ------------------------------------------------------------------
+
+def test_export_empty_rows_is_empty_dict():
+    assert desired_rows_to_config_dict([]) == {}
+
+
+def test_export_node_setting_uses_shorthand():
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14")]
+    assert desired_rows_to_config_dict(rows) == {
+        "nodes": [{"pubkey_prefix": _PK, "settings": {"txdelay": "14"}}],
+    }
+
+
+def test_export_setting_with_policy_uses_mapping():
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14",
+                           policy=SettingPolicy.ENFORCE)]
+    node = desired_rows_to_config_dict(rows)["nodes"][0]
+    assert node["settings"]["txdelay"] == {"desired": "14", "policy": "enforce"}
+
+
+def test_export_poll_hours_preserved_in_mapping():
+    rows = [DesiredSetting(Scope.NODE, _PK, "owner.info", desired="x", poll_hours=6)]
+    node = desired_rows_to_config_dict(rows)["nodes"][0]
+    assert node["settings"]["owner.info"] == {"desired": "x", "poll_hours": 6}
+
+
+def test_export_node_policy_only_uses_settings_mapping():
+    # nodes have no setting_overrides; a policy-only row renders as settings.<key>.policy
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired=None,
+                           policy=SettingPolicy.SKIP)]
+    node = desired_rows_to_config_dict(rows)["nodes"][0]
+    assert node["settings"]["txdelay"] == {"policy": "skip"}
+
+
+def test_export_group_settings_and_overrides():
+    rows = [
+        DesiredSetting(Scope.GROUP, "solar", "txdelay", desired="20"),
+        DesiredSetting(Scope.GROUP, "solar", "powersaving", desired=None,
+                       policy=SettingPolicy.SKIP),
+    ]
+    group = desired_rows_to_config_dict(rows)["groups"][0]
+    assert group["name"] == "solar"
+    assert group["settings"] == {"txdelay": "20"}
+    assert group["setting_overrides"] == {"powersaving": "skip"}
+
+
+def test_export_global_directives():
+    rows = [
+        DesiredSetting(Scope.GLOBAL, "", "name_prefix", desired="G"),
+        DesiredSetting(Scope.GLOBAL, "", "default_policy", desired="audit"),
+        DesiredSetting(Scope.GLOBAL, "", "via_radio", desired="915.8,250,11,5"),
+    ]
+    g = desired_rows_to_config_dict(rows)["global"]
+    assert g["name_prefix"] == "G"
+    assert g["default_policy"] == "audit"
+    assert g["via_radio"] == "915.8,250,11,5"
+
+
+def test_config_dict_to_yaml_is_loadable(tmp_path):
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14")]
+    text = config_dict_to_yaml(desired_rows_to_config_dict(rows))
+    p = tmp_path / "exported.yaml"
+    p.write_text(text)
+    cfg = load(p, load_secrets=False)
+    assert cfg.nodes[0].pubkey_prefix == _PK
+    assert cfg.nodes[0].settings["txdelay"].desired == "14"
+
+
+def test_import_export_round_trip_through_load(tmp_path):
+    cfg = Config(
+        global_settings=GroupConfig(
+            name="global", settings={"owner.info": SettingConfig(desired="rdm")},
+        ),
+        groups=[GroupConfig(
+            name="solar",
+            settings={"txdelay": SettingConfig(desired="20", policy=SettingPolicy.ENFORCE)},
+            setting_overrides={"powersaving": SettingConfig(policy=SettingPolicy.SKIP)},
+        )],
+        nodes=[NodeConfig(
+            pubkey_prefix=_PK,
+            settings={"owner.info": SettingConfig(desired="x", poll_hours=6)},
+            via_radio=RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5),
+        )],
+    )
+    resolve = {_PK: _PK}.get
+    rows, warnings = config_to_desired_rows(cfg, resolve)
+    assert warnings == []
+
+    text = config_dict_to_yaml(desired_rows_to_config_dict(rows))
+    p = tmp_path / "exported.yaml"
+    p.write_text(text)
+    rows2, _ = config_to_desired_rows(load(p, load_secrets=False), resolve)
+
+    def key(r):
+        return (r.scope_type.value, r.scope_id, r.key)
+    assert sorted(rows, key=key) == sorted(rows2, key=key)

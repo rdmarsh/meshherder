@@ -2177,3 +2177,32 @@ async def test_import_warns_unresolvable_node(db, wq):
     assert resp["ok"] is True
     assert resp["data"]["written"] == 0
     assert any("ghost" in w or "deadbeef" in w for w in resp["data"]["warnings"])
+
+
+# ------ export ------
+
+async def test_export_returns_yaml_of_db_desired_state(db, wq, config):
+    await db.set_desired_setting(DesiredSetting(Scope.GROUP, "solar", "txdelay", desired="20"))
+    await db.set_desired_setting(
+        DesiredSetting(Scope.GLOBAL, "", "owner.info", desired="rdm")
+    )
+
+    resp = await _dispatch({"cmd": "export"}, wq, db, config)
+
+    assert resp["ok"] is True
+    text = resp["data"]["yaml"]
+    assert "solar" in text and "txdelay" in text and "owner.info" in text
+    # the emitted YAML must parse back to the expected structure
+    import yaml as _yaml
+    parsed = _yaml.safe_load(text)
+    assert parsed["groups"][0]["name"] == "solar"
+    assert parsed["global"]["settings"]["owner.info"] == "rdm"
+    assert resp["data"]["total"] == 2
+
+
+async def test_export_empty_db_is_empty(db, wq, config):
+    resp = await _dispatch({"cmd": "export"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["total"] == 0
+    assert resp["data"]["yaml"].strip() in ("", "{}")

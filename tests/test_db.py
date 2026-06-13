@@ -116,6 +116,22 @@ async def test_set_and_get_desired_setting_node_scope(db):
     assert got.poll_hours == 12
 
 
+async def test_get_all_desired_settings_spans_scopes(db):
+    await db.set_desired_setting(DesiredSetting(Scope.GLOBAL, "", "owner.info", desired="rdm"))
+    await db.set_desired_setting(DesiredSetting(Scope.GROUP, "solar", "tx", desired="20"))
+    await db.set_desired_setting(DesiredSetting(Scope.NODE, "aabbcc", "tx", desired="14"))
+
+    rows = await db.get_all_desired_settings()
+
+    assert len(rows) == 3
+    scopes = {(r.scope_type, r.scope_id) for r in rows}
+    assert scopes == {(Scope.GLOBAL, ""), (Scope.GROUP, "solar"), (Scope.NODE, "aabbcc")}
+
+
+async def test_get_all_desired_settings_empty(db):
+    assert await db.get_all_desired_settings() == []
+
+
 async def test_set_desired_setting_upserts_on_conflict(db):
     await db.set_desired_setting(
         DesiredSetting(scope_type=Scope.NODE, scope_id="aabbcc", key="tx", desired="14")
