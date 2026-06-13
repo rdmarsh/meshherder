@@ -22,9 +22,18 @@ commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed d
   malformed DB row instead of wedging the cycle); 7c `via_radio`; 7d whitespace normalisation
   (`_normalize_directive_text`: drop leading space, all-space -> cleared, `name_prefix` keeps a
   meaningful trailing space `" 🌞 "` -> `"🌞 "`). All settable at node/group/global. DESIGN.md slice 7.
-- **NEXT: slice 8** - config.yaml import/export + sunset. Also closes the slice-6 group-attribution
-  limitation: the clean path can only attribute a *group*-scope key to a node in config (to know its
-  group); global keys are seeded unconditionally.
+- **Slice 8 STARTED on branch `slice8-config-import`** (off `main` after #2 merged). **8a `mch import`
+  DONE** (uncommitted as of writing this line, then committed). Pure `config_to_desired_rows(cfg,
+  resolve_pubkey)` flattens config desired state (settings + directives, all scopes) into
+  `desired_settings` rows; node scope needs the full pubkey, resolved from the prefix against DB-known
+  nodes (unresolvable = warn + skip). `_radio_to_str` serialises via_radio (round-trips `_parse_radio`);
+  default poll_hours 24 -> None to match `mch set`; operations not imported. Daemon `_handle_import`
+  (dry-run default, `--yes` upserts, idempotent) + CLI `mch import`. 812 tests pass, ruff clean, mypy 7.
+- **NEXT in slice 8: 8b `mch export`** (DB desired -> YAML), then 8c+ sunset (DB-first config build,
+  DB-owned inventory, favourite mirror, retire-don't-delete). Open call for sunset: does config.yaml
+  stay a readable seed, or error if it still carries desired state?
+- Slice-6 group-attribution limitation (clean path needs node-in-config to know its group) closes
+  with sunset/inventory, since import+inventory give every desired node a DB identity.
 - **BACKLOG (Operation Safety):** validate a desired value is *correct/usable*, not just well-formed,
   before mch acts on it - esp. `via_radio` (a valid-but-wrong tuple can strand a node; ties into the
   radio-strand item). Relevant now that 7c made `via_radio` operator-settable.

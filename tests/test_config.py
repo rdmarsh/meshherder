@@ -8,10 +8,12 @@ import yaml
 
 from mch.config import (
     ApiConfig,
+    Config,
     GroupConfig,
     NodeConfig,
     RadioConfig,
     SettingConfig,
+    config_to_desired_rows,
     load,
     overlay_db_group_settings,
     overlay_db_settings,
@@ -1191,3 +1193,96 @@ def test_overlay_via_radio_strips_surrounding_space():
     rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired=" 915.8,250,11,5 ")]
     merged, _ = overlay_db_settings(node, rows)
     assert merged.via_radio == RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5)
+
+
+# ------------------------------------------------------------------
+# config_to_desired_rows: flatten loaded config -> desired_settings rows (mch import)
+# ------------------------------------------------------------------
+
+_PK = "aabbccdd" + "0" * 56  # a full 64-hex pubkey for prefix aabbccdd
+
+
+def _resolver(mapping=None):
+    return (mapping or {"aabbccdd": _PK}).get
+
+
+def test_import_node_settings_to_node_scope_rows():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="n1",
+        settings={"txdelay": SettingConfig(desired="14", policy=SettingPolicy.ENFORCE)},
+    )])
+    rows, warnings = config_to_desired_rows(cfg, _resolver())
+    assert warnings == []
+    # default poll_hours (24) stores as None (inherit), matching `mch set`
+    assert rows == [
+        DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14",
+                       policy=SettingPolicy.ENFORCE, poll_hours=None),
+    ]
+
+
+def test_import_preserves_non_default_poll_hours():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        settings={"owner.info": SettingConfig(desired="x", poll_hours=6)},
+    )])
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    assert rows[0].poll_hours == 6
+
+
+def test_import_unresolvable_node_is_warned_and_skipped():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="deadbeef", label="ghost",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+    rows, warnings = config_to_desired_rows(cfg, _resolver())  # no deadbeef mapping
+    assert rows == []
+    assert len(warnings) == 1
+    assert "deadbeef" in warnings[0] or "ghost" in warnings[0]
+
+
+def test_import_group_settings_and_overrides_to_group_scope():
+    cfg = Config(groups=[GroupConfig(
+        name="solar",
+        settings={"txdelay": SettingConfig(desired="20")},
+        setting_overrides={"powersaving": SettingConfig(policy=SettingPolicy.SKIP)},
+    )])
+    rows, warnings = config_to_desired_rows(cfg, _resolver())
+    assert warnings == []
+    assert DesiredSetting(Scope.GROUP, "solar", "txdelay", desired="20",
+                          policy=None, poll_hours=None) in rows
+    # policy-only override -> desired=None row
+    assert DesiredSetting(Scope.GROUP, "solar", "powersaving", desired=None,
+                          policy=SettingPolicy.SKIP, poll_hours=None) in rows
+
+
+def test_import_global_settings_to_global_scope():
+    cfg = Config(global_settings=GroupConfig(
+        name="global", settings={"owner.info": SettingConfig(desired="rdm")},
+    ))
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    assert DesiredSetting(Scope.GLOBAL, "", "owner.info", desired="rdm",
+                          policy=None, poll_hours=None) in rows
+
+
+def test_import_directives_serialize_to_rows():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        name_prefix="\U0001f31e ",
+        default_policy=SettingPolicy.AUDIT,
+        via_radio=RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5),
+    )])
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    by_key = {r.key: r.desired for r in rows}
+    assert by_key["name_prefix"] == "\U0001f31e "
+    assert by_key["default_policy"] == "audit"
+    assert by_key["via_radio"] == "915.8,250,11,5"  # bw 250.0 -> "250" (round-trips)
+
+
+def test_import_via_radio_row_round_trips_through_parser():
+    from mch.config import _parse_radio
+    cfg = Config(groups=[GroupConfig(
+        name="g", via_radio=RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5),
+    )])
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    via = next(r for r in rows if r.key == "via_radio")
+    assert _parse_radio(via.desired) == RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5)

@@ -2129,3 +2129,51 @@ async def test_clean_settings_unknown_node_errors(db, wq, config):
 
     assert resp["ok"] is False
     assert "not found" in resp["error"]
+
+
+# ------ import ------
+
+async def test_import_writes_desired_rows_with_yes(db, wq):
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 1
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+
+
+async def test_import_dry_run_does_not_write(db, wq):
+    node = await _seed_plain_node(db)
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+
+    resp = await _dispatch({"cmd": "import"}, wq, db, config)  # dry_run defaults True
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 0
+    assert resp["data"]["total"] == 1
+    assert resp["data"]["counts"]["node"] == 1
+    assert await db.get_desired_settings(Scope.NODE, node.pubkey) == []
+
+
+async def test_import_warns_unresolvable_node(db, wq):
+    # node never seeded into the DB, so its prefix cannot resolve to a full pubkey
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="deadbeef", label="ghost",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 0
+    assert any("ghost" in w or "deadbeef" in w for w in resp["data"]["warnings"])

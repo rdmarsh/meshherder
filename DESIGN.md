@@ -160,8 +160,23 @@ wanted.
      (`" 🌞 "` -> `"🌞 "`) and kept; `default_policy`/`via_radio` strip both ends. Applied in the
      parsers (read) and at write time in the daemon (`normalize_directive_value`) so the DB stores
      the canonical value and `mch status`/export stay tidy.
-8. Later: config.yaml import/export and sunset (also closes the group-attribution-needs-config
-   limitation from slice 6, since import gives every desired node a resolvable identity).
+8. config.yaml import/export and sunset (also closes the group-attribution-needs-config limitation
+   from slice 6, since import gives every desired node a resolvable identity).
+   - [done 2026-06-13] 8a: `mch import` - the migration on-ramp. Pure `config_to_desired_rows(cfg,
+     resolve_pubkey)` flattens config desired state (settings + the three directives, all scopes)
+     into `desired_settings` rows: global `scope_id ""`, group = group name, node = full pubkey
+     resolved from `pubkey_prefix` against nodes the DB already knows. A node not yet seen is
+     skipped with a warning (its full pubkey is unknowable from a prefix alone). Directives
+     serialise back to their reserved-key string form (`_radio_to_str` round-trips through
+     `_parse_radio`; default poll_hours 24 stores as None to match `mch set`). Operations are *not*
+     imported (not part of desired_settings). Daemon `_handle_import` builds the DB-backed resolver;
+     dry-run by default, `--yes` upserts (idempotent). After import every key lives in both YAML and
+     DB, so the overlay's "DB wins + warn" nudges cleanup - export + sunset (8b+) finish the job.
+   - 8b (next): `mch export` - dump DB desired state back to YAML (review/backup; round-trip check).
+   - 8c+ (sunset): build `NodeConfig`/`GroupConfig` directly from DB rows so the daemon can run with
+     no desired state in config.yaml; DB owns inventory, favourites become a downstream mirror,
+     retire-don't-delete lifecycle. secrets.yaml stays a file. Open call: does config.yaml remain a
+     readable seed after sunset, or error if it still carries desired state?
 
 ## Convergence Over A Constrained Mesh
 

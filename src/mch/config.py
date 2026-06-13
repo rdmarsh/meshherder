@@ -21,7 +21,7 @@ from mch.command_registry import (
     writable_setting_keys,
 )
 from mch.meshkey import derive_public_key
-from mch.models import DesiredSetting, SettingPolicy
+from mch.models import DesiredSetting, Scope, SettingPolicy
 
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
@@ -506,6 +506,83 @@ def overlay_db_group_settings(
         directive_rows, group_cfg, group_cfg.name, "group"
     )
     return replace(group_cfg, settings=merged, **overrides), warnings + dir_warnings
+
+
+def _radio_to_str(radio: RadioConfig) -> str:
+    """Serialise a RadioConfig to the 'freq,bw,sf,cr' string `_parse_radio` accepts.
+
+    Integral floats render without a trailing '.0' (bw 250.0 -> '250') so the result
+    matches how operators write it in config.yaml and round-trips through `_parse_radio`.
+    """
+    def num(x: float) -> str:
+        return str(int(x)) if float(x).is_integer() else str(x)
+    return f"{num(radio.freq)},{num(radio.bw)},{radio.sf},{radio.cr}"
+
+
+def _scope_rows(
+    scope: Scope,
+    scope_id: str,
+    cfg: NodeConfig | GroupConfig,
+) -> list[DesiredSetting]:
+    """All desired_settings rows for one scope object (settings + directives).
+
+    A default poll_hours (24) stores as None (inherit) to match `mch set` and keep rows
+    tidy; a non-default value is preserved. Policy-only group/global ``setting_overrides``
+    become desired=None rows. The three directives serialise to their reserved keys.
+    """
+    rows: list[DesiredSetting] = []
+    settings = dict(cfg.settings)
+    settings.update(getattr(cfg, "setting_overrides", {}))  # group/global only
+    for key, sc in settings.items():
+        rows.append(DesiredSetting(
+            scope, scope_id, key,
+            desired=sc.desired,
+            policy=sc.policy,
+            poll_hours=None if sc.poll_hours == 24 else sc.poll_hours,
+        ))
+    if cfg.name_prefix is not None:
+        rows.append(DesiredSetting(scope, scope_id, "name_prefix", desired=cfg.name_prefix))
+    if cfg.default_policy is not None:
+        rows.append(
+            DesiredSetting(scope, scope_id, "default_policy", desired=cfg.default_policy.value)
+        )
+    if cfg.via_radio is not None:
+        rows.append(
+            DesiredSetting(scope, scope_id, "via_radio", desired=_radio_to_str(cfg.via_radio))
+        )
+    return rows
+
+
+def config_to_desired_rows(
+    cfg: Config,
+    resolve_pubkey: Callable[[str], str | None],
+) -> tuple[list[DesiredSetting], list[str]]:
+    """Flatten a loaded Config's desired state into desired_settings rows (for `mch import`).
+
+    Emits one row per setting and per set directive at each scope: global (scope_id ``""``),
+    each group (scope_id = group name), and each node (scope_id = full pubkey, resolved from
+    its ``pubkey_prefix`` via ``resolve_pubkey``). A node whose prefix cannot be resolved -
+    not yet seen by the gateway/DB - is skipped with a warning. Operations are *not* imported;
+    they are not part of desired_settings.
+    """
+    rows: list[DesiredSetting] = []
+    warnings: list[str] = []
+
+    rows += _scope_rows(Scope.GLOBAL, "", cfg.global_settings)
+    for group in cfg.groups:
+        rows += _scope_rows(Scope.GROUP, group.name, group)
+    for node in cfg.nodes:
+        pubkey = resolve_pubkey(node.pubkey_prefix)
+        if pubkey is None:
+            ident = node.label or node.pubkey_prefix
+            warnings.append(
+                f"node {ident!r} ({node.pubkey_prefix}) is not known to the DB yet - "
+                "skipped; it will import once the gateway has seen it"
+            )
+            continue
+        rows += _scope_rows(Scope.NODE, pubkey, node)
+
+    return rows, warnings
 
 
 @dataclass

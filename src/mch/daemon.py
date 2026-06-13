@@ -32,6 +32,7 @@ from mch.command_safety import blocked_exec_command
 from mch.config import (
     DIRECTIVE_KEYS,
     Config,
+    config_to_desired_rows,
     normalize_directive_value,
     overlay_db_group_settings,
     overlay_db_settings,
@@ -408,6 +409,43 @@ async def _handle_unset_setting(
     return {"ok": True, "data": data}
 
 
+async def _handle_import(
+    req: dict[str, Any], db: Database, config: Config
+) -> dict[str, Any]:
+    """Seed the DB's desired_settings from the loaded config.yaml (the migration on-ramp).
+
+    Flattens config desired state (settings + directives, all scopes) into rows and upserts
+    them. Node scope_ids need the full pubkey, resolved from each prefix against nodes the DB
+    already knows; a node not yet seen is skipped with a warning. Dry-run by default - it only
+    writes when ``dry_run`` is false. Idempotent: re-importing upserts the same rows.
+    """
+    dry_run = bool(req.get("dry_run", True))
+    nodes = await db.get_all_nodes()
+
+    def resolve_pubkey(prefix: str) -> str | None:
+        return next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
+
+    rows, warnings = config_to_desired_rows(config, resolve_pubkey)
+    if not dry_run:
+        for row in rows:
+            await db.set_desired_setting(row)
+
+    counts = {Scope.GLOBAL.value: 0, Scope.GROUP.value: 0, Scope.NODE.value: 0}
+    for row in rows:
+        counts[row.scope_type.value] += 1
+    return {
+        "ok": True,
+        "data": {
+            "counts": {"global": counts["global"], "group": counts["group"],
+                       "node": counts["node"]},
+            "total": len(rows),
+            "warnings": warnings,
+            "written": 0 if dry_run else len(rows),
+            "dry_run": dry_run,
+        },
+    }
+
+
 async def _dispatch(
     req: dict[str, Any],
     wq: WorkQueue,
@@ -779,6 +817,9 @@ async def _dispatch(
 
     if cmd == "unset_setting":
         return await _handle_unset_setting(req, db, config)
+
+    if cmd == "import":
+        return await _handle_import(req, db, config)
 
     if cmd == "remove":
         query = str(req.get("query") or "")
