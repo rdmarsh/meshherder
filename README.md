@@ -322,6 +322,29 @@ mch discover --radio F,B,S,C  # active bounded scan on a temporary gateway radio
 readable values, for example `powersavings` to `powersaving`. Unknown fact keys are still allowed
 so newly added firmware reads can be evaluated before mch metadata catches up.
 
+### Editing desired state in the database
+
+Desired state can live in the SQLite database as well as `config.yaml`. The database is the
+authoritative source and wins where both set the same key (the daemon logs a warning so the now-dead
+YAML line can be removed), and `mch` — and, later, an HTTP API and web UI — can edit it directly.
+Writes are synchronous, so `mch status <node>` shows the new intent immediately; convergence still
+waits for the next sync (or `mch sync <node>`).
+
+```
+mch set <prefix> txdelay 14          # node scope
+mch set --group solar txdelay 20     # group scope
+mch set --global default_policy audit
+mch set <prefix> name_prefix "🌞 "    # directives: name_prefix, default_policy, via_radio
+mch unset <prefix> txdelay           # remove a DB-set value (observed state untouched)
+mch import                           # preview seeding the DB from config.yaml (dry run)
+mch import --yes                     # write it (idempotent; nodes not yet seen are skipped)
+mch export > desired.yaml            # dump DB desired state as YAML (the inverse of import)
+mch clean settings <prefix>          # drop observed rows for keys no longer desired (dry run)
+```
+
+The `SOURCE` column in `mch status <prefix>` shows whether each setting came from the database
+(`db`) or `config.yaml` (`config`).
+
 ### Forcing a sync
 
 ```

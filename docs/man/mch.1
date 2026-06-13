@@ -65,6 +65,46 @@ nodes.
 .B plan \fILABEL_OR_PREFIX\fR
 Filter planned writes, audit drift, and unknown values.
 .TP
+.B set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]
+Record a desired setting in the database, the authoritative source of desired
+state. \fIKEY\fR is a writable setting (for example \fBname\fR or \fBtxdelay\fR) or
+a directive (\fBname_prefix\fR, \fBdefault_policy\fR, \fBvia_radio\fR). The write is
+synchronous and does not trigger a sync; run
+.B sync
+.I NODE
+to converge. Use
+.B \-\-group
+.I NAME
+or
+.B \-\-global
+to set the value at group or global scope instead of one node.
+.TP
+.B unset \fINODE KEY\fR
+Remove a database-set desired setting; observed state is left intact. Accepts
+.B \-\-group
+.I NAME
+and
+.B \-\-global
+like
+.BR set .
+.TP
+.B import [\-\-yes]
+Seed the database's desired state from
+.IR config.yaml ,
+flattening settings and directives at node, group, and global scope into desired
+rows. Without
+.B \-\-yes
+this is a dry-run preview. A node not yet known to the gateway is skipped with a
+warning. Re-running is idempotent.
+.TP
+.B export
+Print the database's desired state as config.yaml-shaped YAML on standard output
+(the inverse of
+.BR import ).
+Redirect to save, for example
+.BR "mch export > desired.yaml" .
+Observed state and operations are not exported.
+.TP
 .B suggest
 Show suggested settings for all nodes based on neighbour count.
 .TP
@@ -101,6 +141,18 @@ or
 Without
 .B \-\-yes
 this is a dry run.
+.TP
+.B clean settings \fINODE\fR [\-\-setting \fIKEY\fR] [\-\-yes]
+List or delete observed setting rows whose key is no longer in the node's resolved
+desired set (config plus database). Scope may be one node,
+.B \-\-group
+.IR NAME ,
+or
+.B \-\-all .
+Without
+.B \-\-yes
+this is a dry run. Observed rows are a cache and are re-read on the next sync if
+still wanted.
 .TP
 .B remove \fILABEL_OR_PREFIX\fR
 Delete one node's local database state after confirmation. This deletes local
