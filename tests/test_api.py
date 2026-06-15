@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mch.api import ReadOnlyApi
-from mch.config import ApiConfig, Config, NodeConfig, SettingConfig
+from mch.config import ApiConfig, Config, NodeConfig
 from mch.db import Database
-from mch.models import Node, NodeState, SettingPolicy, SettingRecord
+from mch.models import DesiredSetting, Node, NodeState, Scope, SettingPolicy, SettingRecord
 
 
 @pytest.fixture
@@ -27,11 +27,7 @@ async def db(tmp_path):
 def config():
     return Config(
         api=ApiConfig(enabled=True, port=0),
-        nodes=[NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="tower",
-            settings={"name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
-        )],
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="tower")],
     )
 
 
@@ -49,6 +45,11 @@ async def _seed_node(db):
         key="name",
         desired="Old",
         observed="Old",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    # Desired state lives in the DB now (sunset): name should converge to "New".
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="name", desired="New",
         policy=SettingPolicy.ENFORCE,
     ))
     return node

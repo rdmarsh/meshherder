@@ -6,9 +6,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from mch.command_registry import write_command_for_key
-from mch.config import Config, GroupConfig, NodeConfig, overlay_db_settings, resolve_desired
+from mch.config import (
+    Config,
+    GroupConfig,
+    NodeConfig,
+    resolve_desired,
+    resolve_desired_configs,
+)
 from mch.db import Database
-from mch.models import Node, NodeState, Scope, SettingPolicy, SettingRecord
+from mch.models import Node, NodeState, SettingPolicy, SettingRecord
 from mch.queue import all_setting_keys, resolve_policy
 from mch.settings_compare import compare_setting
 
@@ -26,30 +32,19 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
     """Build the canonical read-only representation of desired and observed fleet state."""
     nodes = await db.get_all_nodes()
     node_reports: list[dict[str, Any]] = []
-    groups = {group.name: group for group in config.groups}
 
     for node in nodes:
-        node_cfg = _node_config(node, config)
-        group_cfg = groups.get(node_cfg.group) if node_cfg and node_cfg.group else None
-        # Overlay DB node-scope desired settings so the report reflects the authoritative
-        # source (DESIGN.md "Desired state in the DB") - the same merge the sync path uses,
-        # so `mch node`/`mch plan` show DB-authored intent immediately after `mch set`.
-        # db_keys records which keys the DB supplied, surfaced as each setting's "source".
-        db_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
-        db_keys = {row.key for row in db_rows}
-        if node_cfg is not None and db_rows:
-            node_cfg, _ = overlay_db_settings(node_cfg, db_rows)
+        # Desired state is resolved entirely from the DB (DESIGN.md "Desired state in the
+        # DB" / sunset): node, group, and global configs are all rebuilt from DB rows, so
+        # `mch node`/`mch plan` show DB-authored intent immediately after `mch set` and a
+        # node never listed in config.yaml still resolves fully.
+        node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
+        configured = _node_config(node, config) is not None
         fact_records = await db.get_fact_records(node.pubkey)
         facts = {fact.key: fact.value for fact in fact_records}
         facts_collected_at = {fact.key: _iso(fact.collected_at) for fact in fact_records}
         known_settings = {setting.key: setting for setting in await db.get_settings(node.pubkey)}
-        settings = _settings_report(
-            node_cfg,
-            group_cfg,
-            config,
-            known_settings,
-            db_keys,
-        )
+        settings = _settings_report(node_cfg, group_cfg, global_cfg, known_settings)
         open_node = _is_open_node(node, config)
         node_issues = _node_issues(node, settings, open_node)
         health = _node_health(node, node_issues)
@@ -58,7 +53,7 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             "label": node.label,
             "name": node.name,
             "group": node.group,
-            "configured": node_cfg is not None,
+            "configured": configured,
             "state": node.state.value,
             "health": health,
             "issues": node_issues,
@@ -182,27 +177,24 @@ def legacy_node(node: dict[str, Any], config: Config) -> dict[str, Any]:
 
 
 def _settings_report(
-    node_cfg: NodeConfig | None,
+    node_cfg: NodeConfig,
     group_cfg: GroupConfig | None,
-    config: Config,
+    global_cfg: GroupConfig | None,
     known_settings: dict[str, SettingRecord],
-    db_keys: set[str],
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     configured_keys: set[str] = set()
-    if node_cfg:
-        for key in sorted(all_setting_keys(node_cfg, group_cfg, config.global_settings)):
-            configured_keys.add(key)
-            policy = resolve_policy(key, node_cfg, group_cfg, config.global_settings)
-            desired = resolve_desired(key, node_cfg, group_cfg, config.global_settings)
-            known = known_settings.get(key)
-            observed = known.observed if known else None
-            # A node-scope DB row wins in the overlay, so its key's desired value came
-            # from the DB; everything else resolved from config.yaml.
-            source = "db" if key in db_keys else "config"
-            items.append(_setting_item(key, desired, observed, policy, known, source))
+    # All desired state comes from the DB now (sunset), so every resolved key's source is
+    # the DB; the "source" field is retained for the API/CLI schema.
+    for key in sorted(all_setting_keys(node_cfg, group_cfg, global_cfg)):
+        configured_keys.add(key)
+        policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
+        desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
+        known = known_settings.get(key)
+        observed = known.observed if known else None
+        items.append(_setting_item(key, desired, observed, policy, known, "db"))
 
-    # Keep observations for values removed from config visible as history/evidence.
+    # Keep observations for keys with no current desired state visible as history/evidence.
     for key, known in sorted(known_settings.items()):
         if key not in configured_keys:
             items.append(
