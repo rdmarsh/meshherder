@@ -283,6 +283,42 @@ def _make_config(node_cfgs=None, group_cfgs=None) -> Config:
     )
 
 
+async def _seed_desired(db: Database, cfg: Config, contacts: list[dict]) -> None:
+    """Seed the DB with the desired state a test expresses via its Config (sunset bridge).
+
+    The sync engine now resolves desired state and node group from the DB, not config.yaml.
+    This mirrors `mch import`: it upserts a DB node (with its group) for each config node it
+    can match to a contact, then writes every desired setting/directive as a desired_settings
+    row via the production config_to_desired_rows. Tests keep declaring intent as a Config; this
+    bridges it into the DB so run_cycle/sync paths see it.
+    """
+    from mch.config import config_to_desired_rows
+
+    def resolve(prefix: str) -> str | None:
+        return next(
+            (c["public_key"] for c in contacts if c["public_key"].startswith(prefix)), None
+        )
+
+    for nc in cfg.nodes:
+        pubkey = resolve(nc.pubkey_prefix)
+        if pubkey is None:
+            continue
+        existing = await db.get_node(pubkey)
+        if existing is None:
+            await db.upsert_node(Node(
+                pubkey=pubkey, name="", label=nc.label, group=nc.group,
+                state=NodeState.UNKNOWN,
+            ))
+        else:
+            existing.label = nc.label or existing.label
+            existing.group = nc.group or existing.group
+            await db.upsert_node(existing)
+
+    rows, _ = config_to_desired_rows(cfg, resolve)
+    for row in rows:
+        await db.set_desired_setting(row)
+
+
 def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:
     gw = MagicMock(spec=Gateway)
     gw.get_contacts = AsyncMock(return_value=contacts or [])
@@ -520,6 +556,7 @@ async def test_scheduled_sync_operation_name_uses_config_label_when_db_label_mis
     contact = _contact("aabbccdd" * 8)
     gw = _make_gateway(contacts=[contact])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     wq._contacts = [contact]
 
     captured: list[str] = []
@@ -641,6 +678,7 @@ async def test_cycle_enforces_drifted_setting(db):
         CommandResult(success=True, text="ok"),    # powersaving on
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].settings_enforced == 1
@@ -675,37 +713,6 @@ async def test_cycle_applies_db_node_scope_desired_setting(db):
     ]
 
 
-async def test_cycle_db_setting_overrides_yaml_and_logs_warning(db):
-    # YAML wants powersaving off; DB wants on -> DB wins, a conflict warning is logged,
-    # and the node is enforced to the DB value.
-    node_cfg = _node(
-        pubkey="aabbcc",
-        label="TestNode",
-        settings={"powersaving": SettingConfig(desired="off", policy=SettingPolicy.ENFORCE)},
-    )
-    cfg = _make_config(node_cfgs=[node_cfg])
-    cfg.facts = []
-    await db.set_desired_setting(DesiredSetting(
-        Scope.NODE, "aabbccdd1122", "powersaving",
-        desired="on", policy=SettingPolicy.ENFORCE,
-    ))
-    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
-    gw.send_command = AsyncMock(side_effect=[
-        CommandResult(success=True, text="v1.14.1"),  # reachability probe
-        CommandResult(success=True, text="off"),       # observed off; DB wants on -> drift
-        CommandResult(success=True, text="ok"),         # powersaving on
-    ])
-    wq = WorkQueue(cfg, gw, db)
-
-    results = await wq.run_cycle()
-
-    assert results[0].settings_enforced == 1
-    logs = await db.get_logs("aabbccdd1122")
-    assert any(
-        "both config.yaml" in e["message"] and "DB wins" in e["message"] for e in logs
-    )
-
-
 async def test_cycle_applies_db_group_scope_desired_setting(db):
     # The desired value comes only from a DB group-scope row; the node is in group "g"
     # but carries no settings of its own. Proves overlay_db_group_settings is wired into
@@ -724,6 +731,7 @@ async def test_cycle_applies_db_group_scope_desired_setting(db):
         CommandResult(success=True, text="ok"),         # powersaving on (enforce write)
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -780,6 +788,7 @@ async def test_cycle_db_name_prefix_directive_prepends_to_name(db):
         CommandResult(success=True, text="ok"),          # set name (enforce write)
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -805,6 +814,7 @@ async def test_enforced_write_does_not_fallback_to_flood_after_cached_route_fail
         CommandResult(success=False, error="timeout"), # write fails on cached route
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -834,6 +844,7 @@ async def test_stored_path_setting_read_retries_one_miss(db):
         CommandResult(success=True, text="on"),        # retry succeeds
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -995,6 +1006,7 @@ async def test_flood_routed_contact_tries_desired_radio_before_unreachable(db):
     gw.restore_radio = AsyncMock(side_effect=_restore)
     gw.send_command = AsyncMock(side_effect=_send)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1041,6 +1053,7 @@ async def test_stored_path_read_retry_budget_applies_after_successful_probe(db):
         CommandResult(success=False, error="timeout"), # read 4, budget exhausted
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1072,13 +1085,17 @@ async def test_failed_enforcement_counts_attempts_for_current_desired_value(db):
         CommandResult(success=False, error="timeout"),
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
     await wq.run_cycle()
     settings = await db.get_settings("aabbccdd1122")
     assert settings[0].update_attempts == 2
 
-    node_cfg.settings["powersaving"].desired = "off"
+    # desired now lives in the DB (sunset), so change it there
+    await db.set_desired_setting(DesiredSetting(
+        Scope.NODE, "aabbccdd1122", "powersaving", desired="off", policy=SettingPolicy.ENFORCE,
+    ))
     await wq.run_cycle()
     settings = await db.get_settings("aabbccdd1122")
     assert settings[0].update_attempts == 1
@@ -1102,6 +1119,7 @@ async def test_cycle_does_not_enforce_close_enough_radio_roundoff(db):
         text="915.0750122,125,9,5",
     ))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1130,6 +1148,7 @@ async def test_cycle_enforced_radio_write_uses_registered_slow_timeout(db):
         CommandResult(success=True, text="ok"),
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -1159,6 +1178,7 @@ async def test_bare_command_key_uses_bare_read_and_write(db):
         CommandResult(success=True, text="ok"),   # write: powersaving on
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -1185,6 +1205,7 @@ async def test_cycle_updates_db_name_when_name_is_enforced(db):
         CommandResult(success=True, text="ok"),        # set name New Name
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -1204,6 +1225,7 @@ async def test_cycle_audit_does_not_set(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="off"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].settings_drifted == 1
@@ -1233,11 +1255,15 @@ async def test_changing_enforced_setting_to_audit_clears_update_attempts(db):
         CommandResult(success=True, text="off"),
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
     assert (await db.get_settings("aabbccdd1122"))[0].update_attempts == 1
 
-    node_cfg.settings["powersaving"].policy = SettingPolicy.AUDIT
+    # policy now lives in the DB (sunset), so change it there
+    await db.set_desired_setting(DesiredSetting(
+        Scope.NODE, "aabbccdd1122", "powersaving", desired="on", policy=SettingPolicy.AUDIT,
+    ))
     await wq.run_cycle()
     assert (await db.get_settings("aabbccdd1122"))[0].update_attempts == 0
 
@@ -1254,6 +1280,7 @@ async def test_cycle_desired_setting_without_policy_audits_only(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="off"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1377,6 +1404,7 @@ async def test_config_operations_seeded_on_first_run(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].operations_run == 1
@@ -1393,6 +1421,7 @@ async def test_group_operations_seeded_for_member_node(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1437,6 +1466,7 @@ async def test_config_operations_reseeded_when_due(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].operations_run == 1
@@ -1457,6 +1487,7 @@ async def test_failed_config_operations_reseeded_when_retry_due(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1505,6 +1536,7 @@ async def test_fire_and_forget_op_marked_success_on_timeout(db):
         CommandResult(success=False, error="timeout"),     # reboot — faf
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].operations_run == 1
@@ -1531,6 +1563,7 @@ async def test_fire_and_forget_false_still_fails_on_timeout(db):
         CommandResult(success=False, error="timeout"),     # clock sync — fails
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].operations_run == 0
@@ -1552,6 +1585,7 @@ async def test_clock_sync_success_refreshes_clock_fact(db):
         CommandResult(success=True, text="09:57 - 2/6/2026 UTC"),    # refreshed clock
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1574,6 +1608,7 @@ async def test_operation_err_reply_counts_as_failure(db):
         CommandResult(success=True, text="ERR: clock cannot go backwards"),
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1717,6 +1752,7 @@ async def test_run_node_reports_fact_and_setting_progress(db):
 
     gw.send_command = AsyncMock(side_effect=_send)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     wq._contacts = [_contact("aabbccdd1122")]
     messages: list[str] = []
 
@@ -1747,6 +1783,7 @@ async def test_run_node_progress_describes_radio_switch_without_mesh_hop_wording
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     wq._contacts = [contact]
     messages: list[str] = []
 
@@ -2404,6 +2441,7 @@ async def test_cycle_state_partial_when_setting_cannot_be_read(db):
     # probe succeeds so the node is reachable; the setting read then times out
     gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -2423,6 +2461,7 @@ async def test_setting_read_timeout_is_retained_in_activity_log(db):
     # probe succeeds so the node is reachable; the setting read then times out
     gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2456,6 +2495,7 @@ async def test_cycle_state_configured_when_audit_setting_cannot_be_read(db):
     # probe succeeds so the node is reachable; the audit setting read then times out
     gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -2529,6 +2569,7 @@ async def test_stop_cancels_forced_sync_and_restores_temporary_radio(db):
     gw.switch_radio_temporarily = AsyncMock(return_value=(869.618, 62.5, 8, 5))
     gw.send_command = AsyncMock(side_effect=blocked_send)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     wq._contacts = [contact]
 
     task = asyncio.create_task(wq.run_node("aabbcc"))
@@ -2561,6 +2602,7 @@ async def test_cycle_observed_updated_after_set(db):
         CommandResult(success=True, text="ok"),    # set powersaving on — success
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     await wq.run_cycle()
     settings = await db.get_settings("aabbccdd1122")
     ps = next(s for s in settings if s.key == "powersaving")
@@ -2583,6 +2625,7 @@ async def test_successful_enforcement_records_setting_history(db):
         CommandResult(success=True, text="OK - reboot to apply"),
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2625,6 +2668,7 @@ async def test_node_on_different_freq_switches_radio(db):
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
     gw.switch_radio_temporarily.assert_awaited_once_with(916.575, 62.5, 7, 8)
@@ -2665,6 +2709,7 @@ async def test_node_on_same_freq_with_different_sf_switches_radio(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.info = {"radio_freq": 915.800, "radio_bw": 250, "radio_sf": 10, "radio_cr": 5}
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2681,6 +2726,7 @@ async def test_node_inherits_group_via_radio(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2701,6 +2747,7 @@ async def test_node_via_radio_overrides_group_via_radio(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2717,6 +2764,7 @@ async def test_node_inherits_global_via_radio(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2733,6 +2781,7 @@ async def test_group_via_radio_overrides_global_via_radio(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.info = {"radio_freq": 869.618, "radio_bw": 62.5, "radio_sf": 8, "radio_cr": 5}
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2875,6 +2924,7 @@ async def test_unreachable_node_tries_bounded_config_radio_fallback(db):
     gw.restore_radio = AsyncMock(side_effect=_restore)
     gw.send_command = AsyncMock(side_effect=_send)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     result = await wq.run_cycle()
 
@@ -2903,6 +2953,7 @@ async def test_radio_recovery_exhaustion_restores_home_once(db):
     gw.restore_radio = AsyncMock()
     gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -2942,6 +2993,7 @@ async def test_radio_recovery_skipped_when_radio_confirmed(db):
     ))
 
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     results = await wq.run_cycle()
 
     assert results[0].reachable is False
@@ -2969,6 +3021,7 @@ async def test_radio_restored_on_relogin_failure(db):
     gw.login = AsyncMock(return_value=False)  # re-login fails → _ReloginFailed
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
     gw.switch_radio_temporarily.assert_awaited_once()
@@ -2986,6 +3039,7 @@ async def test_label_written_to_db_on_sync(db):
     cfg.facts = []
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
