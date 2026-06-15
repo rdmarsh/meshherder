@@ -11,9 +11,11 @@ from mch.config import (
     Config,
     GroupConfig,
     NodeConfig,
+    OperationConfig,
     RadioConfig,
     SettingConfig,
     config_dict_to_yaml,
+    config_to_desired_operations,
     config_to_desired_rows,
     desired_rows_to_config_dict,
     load,
@@ -24,7 +26,7 @@ from mch.config import (
     resolve_name_prefix,
 )
 from mch.db import Database
-from mch.models import DesiredSetting, Node, Scope, SettingPolicy
+from mch.models import DesiredOperation, DesiredSetting, Node, Scope, SettingPolicy
 from mch.queue import all_setting_keys
 
 
@@ -1467,3 +1469,80 @@ async def test_resolve_desired_configs_no_group(tmp_path):
         assert resolve_desired("name", node_cfg, group_cfg, global_cfg) == "Solo"
     finally:
         await db.close()
+
+
+# ------------------------------------------------------------------
+# slice 8i: operations migrate to the DB (desired_operations)
+# ------------------------------------------------------------------
+
+def test_import_operations_to_scope_rows():
+    cfg = Config(
+        global_settings=GroupConfig(
+            name="global", operations=[OperationConfig(command="clock sync")],
+        ),
+        groups=[GroupConfig(
+            name="solar", operations=[OperationConfig(command="reboot", every_hours=168,
+                                                      fire_and_forget=True)],
+        )],
+        nodes=[NodeConfig(
+            pubkey_prefix="aabbccdd",
+            operations=[OperationConfig(command="advert", every_hours=12)],
+        )],
+    )
+    ops, warnings = config_to_desired_operations(cfg, _resolver())
+    assert warnings == []
+    assert DesiredOperation(Scope.GLOBAL, "", "clock sync") in ops
+    assert DesiredOperation(Scope.GROUP, "solar", "reboot", every_hours=168,
+                            fire_and_forget=True) in ops
+    assert DesiredOperation(Scope.NODE, _PK, "advert", every_hours=12) in ops
+
+
+def test_import_unresolvable_node_operations_warned_and_skipped():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="deadbeef", label="ghost",
+        operations=[OperationConfig(command="clock sync")],
+    )])
+    ops, warnings = config_to_desired_operations(cfg, _resolver())  # no deadbeef mapping
+    assert ops == []
+    assert len(warnings) == 1
+    assert "deadbeef" in warnings[0] or "ghost" in warnings[0]
+
+
+def test_export_operation_shorthand_when_all_default():
+    ops = [DesiredOperation(Scope.NODE, _PK, "clock sync")]
+    node = desired_rows_to_config_dict([], ops)["nodes"][0]
+    assert node["operations"] == ["clock sync"]
+
+
+def test_export_operation_mapping_when_non_default():
+    ops = [DesiredOperation(Scope.GROUP, "solar", "reboot", every_hours=168,
+                            fire_and_forget=True)]
+    group = desired_rows_to_config_dict([], ops)["groups"][0]
+    assert group["operations"] == [
+        {"command": "reboot", "every_hours": 168, "fire_and_forget": True},
+    ]
+
+
+def test_import_export_operations_round_trip_through_load(tmp_path):
+    cfg = Config(
+        global_settings=GroupConfig(
+            name="global", operations=[OperationConfig(command="clock sync")],
+        ),
+        nodes=[NodeConfig(
+            pubkey_prefix=_PK,
+            operations=[OperationConfig(command="reboot", every_hours=168,
+                                        fire_and_forget=True)],
+        )],
+    )
+    resolve = {_PK: _PK}.get
+    ops, warnings = config_to_desired_operations(cfg, resolve)
+    assert warnings == []
+
+    text = config_dict_to_yaml(desired_rows_to_config_dict([], ops))
+    p = tmp_path / "exported.yaml"
+    p.write_text(text)
+    ops2, _ = config_to_desired_operations(load(p, load_secrets=False), resolve)
+
+    def key(o):
+        return (o.scope_type.value, o.scope_id, o.command)
+    assert sorted(ops, key=key) == sorted(ops2, key=key)

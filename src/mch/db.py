@@ -10,6 +10,7 @@ from typing import Any
 import aiosqlite
 
 from mch.models import (
+    DesiredOperation,
     DesiredSetting,
     Node,
     NodeFact,
@@ -61,6 +62,15 @@ CREATE TABLE IF NOT EXISTS desired_settings (
     policy          TEXT,                     -- NULL = inherit from a less specific scope
     poll_hours      INTEGER,                  -- NULL = inherit / built-in default
     PRIMARY KEY (scope_type, scope_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS desired_operations (
+    scope_type      TEXT NOT NULL,           -- 'global' | 'group' | 'node'
+    scope_id        TEXT NOT NULL DEFAULT '', -- '' for global; group name; node pubkey
+    command         TEXT NOT NULL,
+    every_hours     INTEGER NOT NULL DEFAULT 24,
+    fire_and_forget INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope_type, scope_id, command)
 );
 
 CREATE TABLE IF NOT EXISTS node_facts (
@@ -383,6 +393,66 @@ class Database:
         await db.commit()
 
     # ------------------------------------------------------------------
+    # desired operations (recurring commands; the DB home for operations)
+    # ------------------------------------------------------------------
+
+    async def set_desired_operation(self, op: DesiredOperation) -> None:
+        """Upsert one desired operation at its scope. (scope_type, scope_id, command) is unique."""
+        db = self._db_required()
+        await db.execute(
+            """
+            INSERT INTO desired_operations
+                (scope_type, scope_id, command, every_hours, fire_and_forget)
+            VALUES (:scope_type, :scope_id, :command, :every_hours, :fire_and_forget)
+            ON CONFLICT(scope_type, scope_id, command) DO UPDATE SET
+                every_hours     = excluded.every_hours,
+                fire_and_forget = excluded.fire_and_forget
+            """,
+            {
+                "scope_type":      op.scope_type.value,
+                "scope_id":        op.scope_id,
+                "command":         op.command,
+                "every_hours":     op.every_hours,
+                "fire_and_forget": int(op.fire_and_forget),
+            },
+        )
+        await db.commit()
+
+    async def get_desired_operations(
+        self, scope_type: Scope, scope_id: str
+    ) -> list[DesiredOperation]:
+        """Return all desired operations authored at one scope, ordered by command."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM desired_operations WHERE scope_type = ? AND scope_id = ? "
+            "ORDER BY command",
+            (scope_type.value, scope_id),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_desired_operation(r) for r in rows]
+
+    async def get_all_desired_operations(self) -> list[DesiredOperation]:
+        """Return every desired operation across all scopes (for ``mch export``)."""
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM desired_operations ORDER BY scope_type, scope_id, command"
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_desired_operation(r) for r in rows]
+
+    async def delete_desired_operation(
+        self, scope_type: Scope, scope_id: str, command: str
+    ) -> None:
+        """Remove one desired operation; leaves run history (the operations table) alone."""
+        db = self._db_required()
+        await db.execute(
+            "DELETE FROM desired_operations WHERE scope_type = ? AND scope_id = ? "
+            "AND command = ?",
+            (scope_type.value, scope_id, command),
+        )
+        await db.commit()
+
+    # ------------------------------------------------------------------
     # facts (read-only CMDB inventory)
     # ------------------------------------------------------------------
 
@@ -594,6 +664,16 @@ def _row_to_desired_setting(row: aiosqlite.Row) -> DesiredSetting:
         desired=row["desired"],
         policy=SettingPolicy(row["policy"]) if row["policy"] else None,
         poll_hours=row["poll_hours"],
+    )
+
+
+def _row_to_desired_operation(row: aiosqlite.Row) -> DesiredOperation:
+    return DesiredOperation(
+        scope_type=Scope(row["scope_type"]),
+        scope_id=row["scope_id"],
+        command=row["command"],
+        every_hours=row["every_hours"],
+        fire_and_forget=bool(row["fire_and_forget"]),
     )
 
 

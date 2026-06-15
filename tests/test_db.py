@@ -8,6 +8,7 @@ import pytest
 
 from mch.db import Database
 from mch.models import (
+    DesiredOperation,
     DesiredSetting,
     Node,
     NodeFact,
@@ -130,6 +131,48 @@ async def test_get_all_desired_settings_spans_scopes(db):
 
 async def test_get_all_desired_settings_empty(db):
     assert await db.get_all_desired_settings() == []
+
+
+# ------------------------------------------------------------------
+# desired_operations (the DB home for operations; slice 8i)
+# ------------------------------------------------------------------
+
+async def test_set_and_get_desired_operation_node_scope(db):
+    op = DesiredOperation(
+        scope_type=Scope.NODE, scope_id="aabbcc", command="reboot",
+        every_hours=168, fire_and_forget=True,
+    )
+    await db.set_desired_operation(op)
+
+    rows = await db.get_desired_operations(Scope.NODE, "aabbcc")
+    assert rows == [op]
+
+
+async def test_set_desired_operation_upserts_on_conflict(db):
+    await db.set_desired_operation(DesiredOperation(Scope.NODE, "aabbcc", "advert"))
+    await db.set_desired_operation(
+        DesiredOperation(Scope.NODE, "aabbcc", "advert", every_hours=6)
+    )
+    rows = await db.get_desired_operations(Scope.NODE, "aabbcc")
+    assert len(rows) == 1
+    assert rows[0].every_hours == 6
+
+
+async def test_get_all_desired_operations_spans_scopes(db):
+    await db.set_desired_operation(DesiredOperation(Scope.GLOBAL, "", "clock sync"))
+    await db.set_desired_operation(DesiredOperation(Scope.GROUP, "solar", "reboot"))
+    await db.set_desired_operation(DesiredOperation(Scope.NODE, "aabbcc", "advert"))
+
+    rows = await db.get_all_desired_operations()
+
+    scopes = {(r.scope_type, r.scope_id) for r in rows}
+    assert scopes == {(Scope.GLOBAL, ""), (Scope.GROUP, "solar"), (Scope.NODE, "aabbcc")}
+
+
+async def test_delete_desired_operation(db):
+    await db.set_desired_operation(DesiredOperation(Scope.NODE, "aabbcc", "advert"))
+    await db.delete_desired_operation(Scope.NODE, "aabbcc", "advert")
+    assert await db.get_desired_operations(Scope.NODE, "aabbcc") == []
 
 
 async def test_set_desired_setting_upserts_on_conflict(db):

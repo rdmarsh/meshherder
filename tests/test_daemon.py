@@ -9,10 +9,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mch.config import Config, GroupConfig, NodeConfig, NodeSecrets, SettingConfig, load
+from mch.config import (
+    Config,
+    GroupConfig,
+    NodeConfig,
+    NodeSecrets,
+    OperationConfig,
+    SettingConfig,
+    load,
+)
 from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
 from mch.models import (
+    DesiredOperation,
     DesiredSetting,
     Node,
     NodeFact,
@@ -2175,3 +2184,33 @@ async def test_export_empty_db_is_empty(db, wq, config):
     assert resp["ok"] is True
     assert resp["data"]["total"] == 0
     assert resp["data"]["yaml"].strip() in ("", "{}")
+
+
+async def test_import_writes_operations_to_db(db, wq):
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        operations=[OperationConfig(command="clock sync", every_hours=12)],
+    )])
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["operations"] == 1
+    ops = await db.get_desired_operations(Scope.NODE, node.pubkey)
+    assert ops[0].command == "clock sync"
+    assert ops[0].every_hours == 12
+
+
+async def test_export_includes_db_operations(db, wq, config):
+    await db.set_desired_operation(
+        DesiredOperation(Scope.GLOBAL, "", "clock sync")
+    )
+
+    resp = await _dispatch({"cmd": "export"}, wq, db, config)
+
+    assert resp["ok"] is True
+    import yaml as _yaml
+    parsed = _yaml.safe_load(resp["data"]["yaml"])
+    assert parsed["global"]["operations"] == ["clock sync"]
+    assert resp["data"]["total"] == 1

@@ -21,7 +21,7 @@ from mch.command_registry import (
     writable_setting_keys,
 )
 from mch.meshkey import derive_public_key
-from mch.models import DesiredSetting, Scope, SettingPolicy
+from mch.models import DesiredOperation, DesiredSetting, Scope, SettingPolicy
 
 if TYPE_CHECKING:
     from mch.db import Database
@@ -639,7 +639,61 @@ def config_to_desired_rows(
     return rows, warnings
 
 
-def desired_rows_to_config_dict(rows: list[DesiredSetting]) -> dict[str, Any]:
+def config_to_desired_operations(
+    cfg: Config,
+    resolve_pubkey: Callable[[str], str | None],
+) -> tuple[list[DesiredOperation], list[str]]:
+    """Flatten a loaded Config's operations into desired_operations rows (for `mch import`).
+
+    The operations analogue of config_to_desired_rows: one row per operation at each scope -
+    global (scope_id ``""``), each group (scope_id = group name), and each node (scope_id =
+    full pubkey, resolved from its prefix). A node whose prefix cannot be resolved is skipped
+    with a warning, matching the settings import.
+    """
+    ops: list[DesiredOperation] = []
+    warnings: list[str] = []
+
+    def rows_for(scope: Scope, scope_id: str, source: NodeConfig | GroupConfig) -> None:
+        for op in source.operations:
+            ops.append(DesiredOperation(
+                scope, scope_id, op.command,
+                every_hours=op.every_hours, fire_and_forget=op.fire_and_forget,
+            ))
+
+    rows_for(Scope.GLOBAL, "", cfg.global_settings)
+    for group in cfg.groups:
+        rows_for(Scope.GROUP, group.name, group)
+    for node in cfg.nodes:
+        pubkey = resolve_pubkey(node.pubkey_prefix)
+        if pubkey is None:
+            if node.operations:
+                ident = node.label or node.pubkey_prefix
+                warnings.append(
+                    f"node {ident!r} ({node.pubkey_prefix}) is not known to the DB yet - "
+                    "operations skipped; they import once the gateway has seen it"
+                )
+            continue
+        rows_for(Scope.NODE, pubkey, node)
+
+    return ops, warnings
+
+
+def _operation_to_yaml(op: DesiredOperation) -> Any:
+    """Serialise an operation back to its config.yaml form (shorthand when all-default)."""
+    if op.every_hours == 24 and not op.fire_and_forget:
+        return op.command
+    out: dict[str, Any] = {"command": op.command}
+    if op.every_hours != 24:
+        out["every_hours"] = op.every_hours
+    if op.fire_and_forget:
+        out["fire_and_forget"] = True
+    return out
+
+
+def desired_rows_to_config_dict(
+    rows: list[DesiredSetting],
+    operations: list[DesiredOperation] | None = None,
+) -> dict[str, Any]:
     """Inverse of config_to_desired_rows: rebuild a config.yaml-shaped dict from rows.
 
     A setting with only a desired value renders as the `key: value` shorthand; one that
@@ -652,11 +706,15 @@ def desired_rows_to_config_dict(rows: list[DesiredSetting]) -> dict[str, Any]:
     for row in rows:
         by_scope.setdefault((row.scope_type, row.scope_id), []).append(row)
 
-    def block_for(scope_rows: list[DesiredSetting], *, is_node: bool) -> dict[str, Any]:
+    ops_by_scope: dict[tuple[Scope, str], list[DesiredOperation]] = {}
+    for op in operations or []:
+        ops_by_scope.setdefault((op.scope_type, op.scope_id), []).append(op)
+
+    def block_for(scope: tuple[Scope, str], *, is_node: bool) -> dict[str, Any]:
         block: dict[str, Any] = {}
         settings: dict[str, Any] = {}
         overrides: dict[str, Any] = {}
-        for row in sorted(scope_rows, key=lambda r: r.key):
+        for row in sorted(by_scope.get(scope, []), key=lambda r: r.key):
             if row.key in DIRECTIVE_KEYS:
                 block[row.key] = row.desired
                 continue
@@ -681,21 +739,26 @@ def desired_rows_to_config_dict(rows: list[DesiredSetting]) -> dict[str, Any]:
             block["settings"] = settings
         if overrides:
             block["setting_overrides"] = overrides
+        scope_ops = sorted(ops_by_scope.get(scope, []), key=lambda o: o.command)
+        if scope_ops:
+            block["operations"] = [_operation_to_yaml(o) for o in scope_ops]
         return block
 
+    # union of scopes that carry settings and/or operations
+    all_scopes = set(by_scope) | set(ops_by_scope)
+
     result: dict[str, Any] = {}
-    global_rows = by_scope.get((Scope.GLOBAL, ""))
-    if global_rows:
-        result["global"] = block_for(global_rows, is_node=False)
+    if (Scope.GLOBAL, "") in all_scopes:
+        result["global"] = block_for((Scope.GLOBAL, ""), is_node=False)
     groups = [
-        {"name": sid, **block_for(rs, is_node=False)}
-        for (st, sid), rs in by_scope.items() if st == Scope.GROUP
+        {"name": sid, **block_for((st, sid), is_node=False)}
+        for (st, sid) in all_scopes if st == Scope.GROUP
     ]
     if groups:
         result["groups"] = sorted(groups, key=lambda g: g["name"])
     nodes = [
-        {"pubkey_prefix": sid, **block_for(rs, is_node=True)}
-        for (st, sid), rs in by_scope.items() if st == Scope.NODE
+        {"pubkey_prefix": sid, **block_for((st, sid), is_node=True)}
+        for (st, sid) in all_scopes if st == Scope.NODE
     ]
     if nodes:
         result["nodes"] = sorted(nodes, key=lambda n: n["pubkey_prefix"])
