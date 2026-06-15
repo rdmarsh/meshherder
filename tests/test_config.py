@@ -19,8 +19,13 @@ from mch.config import (
     load,
     overlay_db_group_settings,
     overlay_db_settings,
+    resolve_desired,
+    resolve_desired_configs,
+    resolve_name_prefix,
 )
-from mch.models import DesiredSetting, Scope, SettingPolicy
+from mch.db import Database
+from mch.models import DesiredSetting, Node, Scope, SettingPolicy
+from mch.queue import all_setting_keys
 
 
 def _write_config(tmp_path: Path, text: str) -> Path:
@@ -1388,3 +1393,77 @@ def test_import_export_round_trip_through_load(tmp_path):
     def key(r):
         return (r.scope_type.value, r.scope_id, r.key)
     assert sorted(rows, key=key) == sorted(rows2, key=key)
+
+
+async def _open_db(tmp_path) -> Database:
+    db = Database(tmp_path / "resolve.db")
+    await db.open()
+    return db
+
+
+async def test_resolve_desired_configs_db_only_node(tmp_path):
+    """A node present only in the DB (never in config.yaml) resolves fully.
+
+    This closes the slice-6 group-attribution limitation: with sunset, desired state is
+    built from DB rows alone, so a node, its group, and global all resolve without any
+    config-derived NodeConfig/GroupConfig base.
+    """
+    db = await _open_db(tmp_path)
+    try:
+        pubkey = "aa11bb22cc33dd44ee55"
+        await db.upsert_node(Node(pubkey=pubkey, name="MeshName", label="NodeA", group="solar"))
+        # node-scope desired value + a node directive
+        await db.set_desired_setting(
+            DesiredSetting(
+                Scope.NODE, pubkey, "name", desired="NodeA", policy=SettingPolicy.ENFORCE
+            )
+        )
+        await db.set_desired_setting(
+            DesiredSetting(Scope.NODE, pubkey, "name_prefix", desired="🌞 ")
+        )
+        # group-scope desired value applied to members
+        await db.set_desired_setting(
+            DesiredSetting(Scope.GROUP, "solar", "tx", desired="20", policy=SettingPolicy.ENFORCE)
+        )
+        # global-scope default
+        await db.set_desired_setting(
+            DesiredSetting(Scope.GLOBAL, "", "role", desired="repeater", policy=SettingPolicy.AUDIT)
+        )
+
+        node = await db.get_node(pubkey)
+        node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(db, node)
+
+        assert warnings == []
+        assert node_cfg.pubkey_prefix == pubkey
+        assert node_cfg.label == "NodeA"
+        assert node_cfg.group == "solar"
+        assert group_cfg is not None and group_cfg.name == "solar"
+        # name with the node name_prefix prepended (no separator)
+        assert resolve_desired("name", node_cfg, group_cfg, global_cfg) == "🌞 NodeA"
+        assert resolve_name_prefix(node_cfg, group_cfg, global_cfg) == "🌞 "
+        # group value reaches the node
+        assert resolve_desired("tx", node_cfg, group_cfg, global_cfg) == "20"
+        # global value reaches the node
+        assert resolve_desired("role", node_cfg, group_cfg, global_cfg) == "repeater"
+        # all three scopes contribute keys
+        assert {"name", "tx", "role"} <= all_setting_keys(node_cfg, group_cfg, global_cfg)
+    finally:
+        await db.close()
+
+
+async def test_resolve_desired_configs_no_group(tmp_path):
+    """A DB node with no group yields group_cfg None and still resolves node + global."""
+    db = await _open_db(tmp_path)
+    try:
+        pubkey = "ffeeddccbbaa99887766"
+        await db.upsert_node(Node(pubkey=pubkey, name="Solo", label="Solo", group=None))
+        await db.set_desired_setting(
+            DesiredSetting(Scope.NODE, pubkey, "name", desired="Solo")
+        )
+        node = await db.get_node(pubkey)
+        node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(db, node)
+        assert group_cfg is None
+        assert warnings == []
+        assert resolve_desired("name", node_cfg, group_cfg, global_cfg) == "Solo"
+    finally:
+        await db.close()

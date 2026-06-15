@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from difflib import get_close_matches
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -22,6 +22,10 @@ from mch.command_registry import (
 )
 from mch.meshkey import derive_public_key
 from mch.models import DesiredSetting, Scope, SettingPolicy
+
+if TYPE_CHECKING:
+    from mch.db import Database
+    from mch.models import Node
 
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
@@ -506,6 +510,56 @@ def overlay_db_group_settings(
         directive_rows, group_cfg, group_cfg.name, "group"
     )
     return replace(group_cfg, settings=merged, **overrides), warnings + dir_warnings
+
+
+async def resolve_desired_configs(
+    db: Database, node: Node
+) -> tuple[NodeConfig, GroupConfig | None, GroupConfig, list[str]]:
+    """Build a node's resolved (node, group, global) desired-state configs from the DB.
+
+    The DB is the authoritative source of desired state (DESIGN.md "Desired state in the
+    DB" / sunset). Each config object is reconstructed by overlaying the node/group/global
+    ``desired_settings`` rows onto an *empty* base whose identity comes from the DB node
+    row (full pubkey, label, group). Overlaying onto an empty base reuses the exact
+    overlay_db_settings/overlay_db_group_settings machinery already used during the
+    transition - "build config from DB rows" is just "overlay rows with nothing
+    underneath", so there is no parallel rows->config builder to keep in sync.
+
+    Because the base needs no config.yaml entry, a node that exists only in the DB - never
+    listed in config.yaml - resolves fully, closing the slice-6 group-attribution
+    limitation (the clean/report paths previously needed a config-derived NodeConfig to
+    know a node's group).
+
+    Returns the node config, its group config (None when the node has no group), the
+    global config, and the concatenated overlay warnings (DB/YAML conflicts and any
+    skipped malformed directive rows).
+    """
+    warnings: list[str] = []
+
+    node_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    base_node = NodeConfig(
+        pubkey_prefix=node.pubkey, label=node.label or "", group=node.group
+    )
+    node_cfg, node_warnings = overlay_db_settings(base_node, node_rows)
+    warnings += node_warnings
+
+    group_cfg: GroupConfig | None = None
+    if node.group:
+        group_rows = await db.get_desired_settings(Scope.GROUP, node.group)
+        group_cfg, group_warnings = overlay_db_group_settings(
+            GroupConfig(name=node.group), group_rows
+        )
+        warnings += group_warnings
+
+    global_rows = await db.get_desired_settings(Scope.GLOBAL, "")
+    # Global scope_id is the empty-string singleton; the GroupConfig name is unused by the
+    # resolver for global, so "" is fine.
+    global_cfg, global_warnings = overlay_db_group_settings(
+        GroupConfig(name=""), global_rows
+    )
+    warnings += global_warnings
+
+    return node_cfg, group_cfg, global_cfg, warnings
 
 
 def _radio_to_str(radio: RadioConfig) -> str:
