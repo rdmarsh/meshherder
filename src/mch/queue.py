@@ -35,9 +35,8 @@ from mch.config import (
     OperationConfig,
     RadioConfig,
     _parse_radio,
-    overlay_db_group_settings,
-    overlay_db_settings,
     resolve_desired,
+    resolve_desired_configs,
     resolve_via_radio,
 )
 from mch.db import Database
@@ -53,7 +52,6 @@ from mch.models import (
     NodeState,
     OperationRecord,
     OperationStatus,
-    Scope,
     SettingPolicy,
     SettingRecord,
 )
@@ -1159,16 +1157,6 @@ class WorkQueue:
             None,
         )
 
-        # find config entry
-        node_cfg = next(
-            (nc for nc in self._config.nodes if node.pubkey.startswith(nc.pubkey_prefix)),
-            None,
-        )
-        group_cfg = (
-            {g.name: g for g in self._config.groups}.get(node_cfg.group)
-            if node_cfg and node_cfg.group else None
-        )
-
         log.debug(
             "gateway radio: %.3f/%.0f/SF%d/CR%d",
             self._gateway.info.get("radio_freq", 0),
@@ -1181,19 +1169,16 @@ class WorkQueue:
         await self._paused.wait()
 
         operation_label = (
-            (node_cfg.label if node_cfg else "")
-            or node.label
+            node.label
             or node.name
             or node.pubkey[:12]
         )
         async with self.operation(f"scheduled sync {operation_label}", wait=True):
-            if contact and node_cfg:
-                await self._process_node(
-                    node_cfg, group_cfg, self._config.global_settings, contact
-                )
+            if contact:
+                await self._process_node(contact)
             else:
                 log.warning(
-                    "node %r not in current contacts or config — skipping",
+                    "node %r not in current contacts — skipping",
                     node.pubkey[:12],
                 )
 
@@ -1343,27 +1328,9 @@ class WorkQueue:
             contact = matches[0]
             pubkey = contact["public_key"]
 
-            node_cfg = next(
-                (nc for nc in self._config.nodes if pubkey.startswith(nc.pubkey_prefix)),
-                None,
-            )
-            group_cfg = (
-                {g.name: g for g in self._config.groups}.get(node_cfg.group)
-                if node_cfg and node_cfg.group else None
-            )
-
-            global_cfg: GroupConfig | None = self._config.global_settings
-            if node_cfg is None:
-                # not in config — create a minimal NodeConfig so we can at least process it
-                from mch.config import NodeConfig as _NC
-                node_cfg = _NC(pubkey_prefix=pubkey[:8])
-                global_cfg = None
-
             await self._db.write_log(pubkey, "INFO", "manual sync started")
             try:
-                result = await self._process_node(
-                    node_cfg, group_cfg, global_cfg, contact, progress=progress
-                )
+                result = await self._process_node(contact, progress=progress)
             except asyncio.CancelledError:
                 await self._db.write_log(pubkey, "WARNING", "manual sync aborted")
                 raise
@@ -1424,7 +1391,6 @@ class WorkQueue:
             for c in self._contacts:
                 self._messenger.register_contact(c["public_key"][:12], c)
 
-        group_configs = {g.name: g for g in self._config.groups}
         results: list[NodeResult] = []
 
         for node_cfg in self._config.nodes:
@@ -1451,10 +1417,7 @@ class WorkQueue:
                 ))
                 continue
 
-            group_cfg = group_configs.get(node_cfg.group) if node_cfg.group else None
-            result = await self._process_node(
-                node_cfg, group_cfg, self._config.global_settings, contact
-            )
+            result = await self._process_node(contact)
             results.append(result)
 
             if len(self._config.nodes) > 1:
@@ -1484,48 +1447,35 @@ class WorkQueue:
 
     async def _process_node(
         self,
-        node_cfg: NodeConfig,
-        group_cfg: GroupConfig | None,
-        global_cfg: GroupConfig | None,
         contact: dict[str, Any],
         *,
         progress: ProgressCallback = None,
     ) -> NodeResult:
         pubkey = contact["public_key"]
-        name = contact.get("adv_name", node_cfg.label)
-        result = NodeResult(pubkey=pubkey, name=name)
 
-        # Overlay DB node-scope desired settings onto the config-derived node_cfg.
-        # The DB is the authoritative source of desired state (DESIGN.md "Desired state
-        # in the DB"); a DB row wins over the same key in config.yaml. Everything below
-        # (resolve_desired/all_setting_keys/operations) then sees the merged desired state
-        # with no change to the resolver. Warnings flag YAML keys now overridden by the DB.
-        db_rows = await self._db.get_desired_settings(Scope.NODE, pubkey)
-        node_cfg, overlay_warnings = overlay_db_settings(node_cfg, db_rows)
-        for warning in overlay_warnings:
+        # ensure node exists in db so we can resolve desired state keyed on its identity
+        node = await self._db.get_node(pubkey) or Node(
+            pubkey=pubkey, name=contact.get("adv_name", "")
+        )
+
+        # Resolve desired state entirely from the DB (DESIGN.md "Desired state in the DB"
+        # / sunset): the node, its group, and global configs are rebuilt from DB rows, so
+        # a value set with `mch set` (any scope) reconciles without any config.yaml entry.
+        # Warnings flag malformed/duplicate DB rows; they are rare once config.yaml no
+        # longer carries desired state.
+        node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(
+            self._db, node
+        )
+        for warning in warnings:
             log.warning("%s", warning)
             await self._db.write_log(pubkey, "WARNING", warning)
 
-        # Overlay DB group- and global-scope desired settings the same way, so a value
-        # set with `mch set --group/--global` reconciles like a node-scope one. These
-        # conflict warnings are config-level (not node-specific), so they go to the app
-        # log only — writing them to every group member's per-node DB history is noise.
-        if group_cfg is not None:
-            group_rows = await self._db.get_desired_settings(Scope.GROUP, group_cfg.name)
-            group_cfg, group_warnings = overlay_db_group_settings(group_cfg, group_rows)
-            for warning in group_warnings:
-                log.warning("%s", warning)
-        if global_cfg is not None:
-            global_rows = await self._db.get_desired_settings(Scope.GLOBAL, "")
-            global_cfg, global_warnings = overlay_db_group_settings(global_cfg, global_rows)
-            for warning in global_warnings:
-                log.warning("%s", warning)
+        name = contact.get("adv_name", node_cfg.label)
+        result = NodeResult(pubkey=pubkey, name=name)
 
         log.info("processing node %r (%s…)", name, pubkey[:12])
         await _progress(progress, f"syncing {name!r} ({pubkey[:12]})")
 
-        # ensure node exists in db
-        node = await self._db.get_node(pubkey) or Node(pubkey=pubkey, name=name)
         node.name = name
         node.label = node_cfg.label
         node.state = NodeState.CONFIGURING
@@ -1745,8 +1695,12 @@ class WorkQueue:
             result.enforced_settings_drifted = enforce_drifted
             result.enforced_settings_failed = enforce_failed
 
-            # seed operations from config into DB, then run what's pending
-            operations = _resolve_operations(node_cfg, group_cfg, global_cfg)
+            # seed operations from config into DB, then run what's pending.
+            # Operations are NOT part of desired_settings (slice 8a deliberately excluded
+            # them), so they have no DB home yet and are still sourced from config.yaml -
+            # an explicit carve-out from the desired-state sunset, pending a DB
+            # representation for operations.
+            operations = self._config_operations(pubkey)
             await self._seed_operations(pubkey, operations)
             op_run, op_failed = await self._run_operations(
                 pubkey, contact, node_cfg, node, operations, progress=progress
@@ -2323,6 +2277,25 @@ class WorkQueue:
             await self._db.upsert_setting(setting)
 
         return checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed
+
+    def _config_operations(self, pubkey: str) -> list[OperationConfig]:
+        """Operations (Node > Group > Global) for a node, sourced from config.yaml.
+
+        Operations are not stored in the DB (slice 8a left them out of desired_settings),
+        so unlike settings/directives they are still resolved from config: the config node
+        is matched by pubkey prefix, plus its group and the global block.
+        """
+        node_cfg = next(
+            (nc for nc in self._config.nodes if pubkey.startswith(nc.pubkey_prefix)), None
+        )
+        if node_cfg is None:
+            return _resolve_operations(NodeConfig(pubkey_prefix=pubkey[:8]), None,
+                                       self._config.global_settings)
+        group_cfg = (
+            {g.name: g for g in self._config.groups}.get(node_cfg.group)
+            if node_cfg.group else None
+        )
+        return _resolve_operations(node_cfg, group_cfg, self._config.global_settings)
 
     async def _seed_operations(self, pubkey: str, operations: list[OperationConfig]) -> None:
         """Queue any config operations that are due (never run, or past every_hours)."""
