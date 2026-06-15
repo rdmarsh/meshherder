@@ -33,6 +33,7 @@ from mch.config import (
     DIRECTIVE_KEYS,
     Config,
     config_dict_to_yaml,
+    config_to_desired_operations,
     config_to_desired_rows,
     desired_rows_to_config_dict,
     normalize_directive_value,
@@ -411,32 +412,42 @@ async def _handle_import(
         return next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
 
     rows, warnings = config_to_desired_rows(config, resolve_pubkey)
+    operations, op_warnings = config_to_desired_operations(config, resolve_pubkey)
+    warnings = warnings + op_warnings
     if not dry_run:
         for row in rows:
             await db.set_desired_setting(row)
+        for op in operations:
+            await db.set_desired_operation(op)
 
     counts = {Scope.GLOBAL.value: 0, Scope.GROUP.value: 0, Scope.NODE.value: 0}
     for row in rows:
         counts[row.scope_type.value] += 1
+    total = len(rows) + len(operations)
     return {
         "ok": True,
         "data": {
             "counts": {"global": counts["global"], "group": counts["group"],
                        "node": counts["node"]},
-            "total": len(rows),
+            "operations": len(operations),
+            "total": total,
             "warnings": warnings,
-            "written": 0 if dry_run else len(rows),
+            "written": 0 if dry_run else total,
             "dry_run": dry_run,
         },
     }
 
 
 async def _handle_export(db: Database) -> dict[str, Any]:
-    """Dump all DB desired_settings as config.yaml-shaped YAML (the inverse of import)."""
+    """Dump all DB desired state (settings + operations) as config.yaml-shaped YAML."""
     rows = await db.get_all_desired_settings()
-    data = desired_rows_to_config_dict(rows)
+    operations = await db.get_all_desired_operations()
+    data = desired_rows_to_config_dict(rows, operations)
     yaml_text = config_dict_to_yaml(data) if data else ""
-    return {"ok": True, "data": {"yaml": yaml_text, "total": len(rows)}}
+    return {
+        "ok": True,
+        "data": {"yaml": yaml_text, "total": len(rows) + len(operations)},
+    }
 
 
 async def _dispatch(

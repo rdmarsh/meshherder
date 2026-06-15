@@ -101,6 +101,23 @@ class DesiredSetting:
 
 
 @dataclass
+class DesiredOperation:
+    """A declared recurring/one-shot command for one scope (global/group/node).
+
+    The desired-state analogue of OperationConfig, stored in the DB so operations
+    sunset out of config.yaml like settings and directives (DESIGN.md sunset). Unlike
+    DesiredSetting there is no policy: an operation is simply run when due. ``scope_id``
+    is "" for global, the group name for group scope, the node pubkey for node scope.
+    Resolution is Node > Group > Global by command.
+    """
+    scope_type: Scope
+    scope_id: str
+    command: str              # raw CLI string, e.g. "clock sync"
+    every_hours: int = 24
+    fire_and_forget: bool = False  # treat timeout/no-response as success (e.g. reboot)
+
+
+@dataclass
 class OperationRecord:
     """Tracks a one-shot command (e.g. clock sync) that runs on a schedule."""
     node_pubkey: str

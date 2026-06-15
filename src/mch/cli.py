@@ -2146,17 +2146,20 @@ def import_config(ctx: click.Context, yes: bool) -> None:
     data = _check(_rpc(ctx.obj["socket"], {"cmd": "import", "dry_run": not yes}))
     counts = data["counts"]
     total = data["total"]
+    operations = data.get("operations", 0)
     if yes:
         click.echo(
-            f"imported {data['written']} desired setting(s) into the DB "
-            f"(global {counts['global']}, groups {counts['group']}, nodes {counts['node']})"
+            f"imported {data['written']} desired item(s) into the DB "
+            f"(global {counts['global']}, groups {counts['group']}, nodes {counts['node']}, "
+            f"operations {operations})"
         )
     else:
         click.echo("import preview (dry run):")
-        click.echo(f"  global: {counts['global']}")
-        click.echo(f"  groups: {counts['group']}")
-        click.echo(f"  nodes:  {counts['node']}")
-        click.echo(f"  total:  {total}")
+        click.echo(f"  global:     {counts['global']}")
+        click.echo(f"  groups:     {counts['group']}")
+        click.echo(f"  nodes:      {counts['node']}")
+        click.echo(f"  operations: {operations}")
+        click.echo(f"  total:      {total}")
     for warning in data.get("warnings", []):
         click.echo(click.style(f"  warning: {warning}", fg="yellow"))
     if not yes and total:

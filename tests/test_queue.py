@@ -292,7 +292,7 @@ async def _seed_desired(db: Database, cfg: Config, contacts: list[dict]) -> None
     row via the production config_to_desired_rows. Tests keep declaring intent as a Config; this
     bridges it into the DB so run_cycle/sync paths see it.
     """
-    from mch.config import config_to_desired_rows
+    from mch.config import config_to_desired_operations, config_to_desired_rows
 
     def resolve(prefix: str) -> str | None:
         return next(
@@ -317,6 +317,9 @@ async def _seed_desired(db: Database, cfg: Config, contacts: list[dict]) -> None
     rows, _ = config_to_desired_rows(cfg, resolve)
     for row in rows:
         await db.set_desired_setting(row)
+    operations, _ = config_to_desired_operations(cfg, resolve)
+    for op in operations:
+        await db.set_desired_operation(op)
 
 
 def _make_gateway(contacts=None, cmd_text="ok") -> Gateway:

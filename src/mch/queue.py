@@ -52,6 +52,7 @@ from mch.models import (
     NodeState,
     OperationRecord,
     OperationStatus,
+    Scope,
     SettingPolicy,
     SettingRecord,
 )
@@ -79,20 +80,6 @@ def _format_radio(freq: Any, bw: Any, sf: Any, cr: Any) -> str:
 def _format_radio_tuple(radio: tuple[float, float, int, int]) -> str:
     return _format_radio(*radio)
 
-
-def _resolve_operations(
-    node_cfg: NodeConfig,
-    group_cfg: GroupConfig | None,
-    global_cfg: GroupConfig | None,
-) -> list[OperationConfig]:
-    """Return operations with Node > Group > Global precedence by command."""
-    by_command: dict[str, OperationConfig] = {}
-    for source in (global_cfg, group_cfg, node_cfg):
-        if source is None:
-            continue
-        for op in source.operations:
-            by_command[op.command] = op
-    return list(by_command.values())
 
 
 def _operation_succeeded(res: CommandResult) -> bool:
@@ -1695,12 +1682,9 @@ class WorkQueue:
             result.enforced_settings_drifted = enforce_drifted
             result.enforced_settings_failed = enforce_failed
 
-            # seed operations from config into DB, then run what's pending.
-            # Operations are NOT part of desired_settings (slice 8a deliberately excluded
-            # them), so they have no DB home yet and are still sourced from config.yaml -
-            # an explicit carve-out from the desired-state sunset, pending a DB
-            # representation for operations.
-            operations = self._config_operations(pubkey)
+            # resolve operations from the DB (desired_operations), seed the run queue, then
+            # run what's pending. Operations sunset out of config.yaml like settings.
+            operations = await self._resolve_db_operations(node)
             await self._seed_operations(pubkey, operations)
             op_run, op_failed = await self._run_operations(
                 pubkey, contact, node_cfg, node, operations, progress=progress
@@ -2278,24 +2262,26 @@ class WorkQueue:
 
         return checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed
 
-    def _config_operations(self, pubkey: str) -> list[OperationConfig]:
-        """Operations (Node > Group > Global) for a node, sourced from config.yaml.
+    async def _resolve_db_operations(self, node: Node) -> list[OperationConfig]:
+        """Operations (Node > Group > Global) for a node, resolved from the DB.
 
-        Operations are not stored in the DB (slice 8a left them out of desired_settings),
-        so unlike settings/directives they are still resolved from config: the config node
-        is matched by pubkey prefix, plus its group and the global block.
+        Operations now live in the desired_operations table (sunset), so they resolve the
+        same way settings/directives do: global, then the node's group, then node scope,
+        with a later scope's command overriding an earlier one.
         """
-        node_cfg = next(
-            (nc for nc in self._config.nodes if pubkey.startswith(nc.pubkey_prefix)), None
-        )
-        if node_cfg is None:
-            return _resolve_operations(NodeConfig(pubkey_prefix=pubkey[:8]), None,
-                                       self._config.global_settings)
-        group_cfg = (
-            {g.name: g for g in self._config.groups}.get(node_cfg.group)
-            if node_cfg.group else None
-        )
-        return _resolve_operations(node_cfg, group_cfg, self._config.global_settings)
+        by_command: dict[str, OperationConfig] = {}
+        scopes: list[tuple[Scope, str]] = [(Scope.GLOBAL, "")]
+        if node.group:
+            scopes.append((Scope.GROUP, node.group))
+        scopes.append((Scope.NODE, node.pubkey))
+        for scope, scope_id in scopes:
+            for op in await self._db.get_desired_operations(scope, scope_id):
+                by_command[op.command] = OperationConfig(
+                    command=op.command,
+                    every_hours=op.every_hours,
+                    fire_and_forget=op.fire_and_forget,
+                )
+        return list(by_command.values())
 
     async def _seed_operations(self, pubkey: str, operations: list[OperationConfig]) -> None:
         """Queue any config operations that are due (never run, or past every_hours)."""
