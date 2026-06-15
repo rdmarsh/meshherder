@@ -36,8 +36,7 @@ from mch.config import (
     config_to_desired_rows,
     desired_rows_to_config_dict,
     normalize_directive_value,
-    overlay_db_group_settings,
-    overlay_db_settings,
+    resolve_desired_configs,
     settable_keys,
     validate_directive_value,
 )
@@ -212,33 +211,17 @@ async def _stale_fact_candidates(
     return candidates
 
 
-async def _wanted_setting_keys(db: Database, config: Config, node: Any) -> set[str]:
-    """Setting keys this node currently wants observed: resolved desired + DB-set keys.
+async def _wanted_setting_keys(db: Database, node: Any) -> set[str]:
+    """Setting keys this node currently wants observed: its resolved desired keys.
 
-    Applies the DB overlay (DESIGN.md "Desired state in the DB") so a key set only via
-    `mch set` counts as wanted and is never treated as orphaned. db_keys are seeded
-    directly so DB-set keys still count even for a node absent from config.yaml.
+    Desired state is resolved entirely from the DB (DESIGN.md "Desired state in the DB" /
+    sunset), so a key set only via `mch set` - or one on a node that was never in
+    config.yaml - still counts as wanted and is never treated as orphaned. The node's
+    group comes from the DB row, so group-scope keys are always attributable now (the old
+    config-only path could only attribute them when the node appeared in config.yaml).
     """
-    node_cfg = next(
-        (nc for nc in config.nodes if node.pubkey.startswith(nc.pubkey_prefix)), None
-    )
-    db_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
-    global_rows = await db.get_desired_settings(Scope.GLOBAL, "")
-    # Seed node- and global-scope DB keys directly: a global key is wanted by every node,
-    # and seeding (rather than relying on all_setting_keys) keeps it wanted even for a node
-    # absent from config.yaml. Group-scope keys can only be attributed when the node's group
-    # is known, i.e. when it appears in config; that limitation matches node-scope today.
-    wanted = {row.key for row in db_rows} | {row.key for row in global_rows}
-    if node_cfg is not None:
-        groups = {group.name: group for group in config.groups}
-        group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
-        node_cfg, _ = overlay_db_settings(node_cfg, db_rows)
-        if group_cfg is not None:
-            group_rows = await db.get_desired_settings(Scope.GROUP, group_cfg.name)
-            group_cfg, _ = overlay_db_group_settings(group_cfg, group_rows)
-        global_cfg, _ = overlay_db_group_settings(config.global_settings, global_rows)
-        wanted |= all_setting_keys(node_cfg, group_cfg, global_cfg)
-    return wanted
+    node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
+    return all_setting_keys(node_cfg, group_cfg, global_cfg)
 
 
 async def _stale_setting_candidates(
@@ -267,7 +250,7 @@ async def _stale_setting_candidates(
 
     candidates: list[dict[str, Any]] = []
     for node in nodes:
-        wanted = await _wanted_setting_keys(db, config, node)
+        wanted = await _wanted_setting_keys(db, node)
         for setting in await db.get_settings(node.pubkey):
             if setting_key is not None and setting.key != setting_key:
                 continue

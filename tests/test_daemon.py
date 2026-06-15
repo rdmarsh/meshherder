@@ -2034,19 +2034,6 @@ async def test_clean_settings_lists_orphan_not_in_desired(db, wq):
     assert resp["data"]["deleted"] == 0  # dry run by default
 
 
-async def test_clean_settings_keeps_config_desired_key(db, wq):
-    node = await _seed_plain_node(db)
-    await _seed_observed_setting(db, node, "name", observed="Test Node")
-    config = Config(nodes=[NodeConfig(
-        pubkey_prefix="aabbccdd", label="test",
-        settings={"name": SettingConfig(desired="Test Node", policy=SettingPolicy.ENFORCE)},
-    )])
-
-    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
-
-    assert resp["data"]["candidates"] == []
-
-
 async def test_clean_settings_keeps_db_set_key(db, wq, config):
     """A key set via `mch set` (DB overlay) must never be treated as an orphan."""
     node = await _seed_plain_node(db)
@@ -2073,14 +2060,16 @@ async def test_clean_settings_keeps_db_global_set_key(db, wq, config):
     assert resp["data"]["candidates"] == []
 
 
-async def test_clean_settings_keeps_db_group_set_key(db, wq):
-    """A group-scope DB key keeps the observed row wanted for a node in that group."""
+async def test_clean_settings_keeps_db_group_set_key(db, wq, config):
+    """A group-scope DB key keeps the observed row wanted for a node in that group.
+
+    Group membership is read from the DB node row (sunset: desired state and group come
+    from the DB, not config.yaml), so the group-scope key attaches to the node.
+    """
     node = await _seed_plain_node(db)
+    node.group = "g"
+    await db.upsert_node(node)
     await _seed_observed_setting(db, node, "txdelay", observed="14")
-    config = Config(
-        nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="test", group="g")],
-        groups=[GroupConfig(name="g")],
-    )
     await db.set_desired_setting(DesiredSetting(
         scope_type=Scope.GROUP, scope_id="g", key="txdelay", desired="14",
     ))
