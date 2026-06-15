@@ -1055,13 +1055,11 @@ async def test_node_dispatch_resets_displayed_attempts_for_new_desired_value(db,
         policy=SettingPolicy.ENFORCE,
         update_attempts=4,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="New",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
 
@@ -1080,13 +1078,11 @@ async def test_node_dispatch_hides_prior_attempts_when_policy_changes_to_audit(d
         update_attempts=4,
         drift=True,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(desired="Managed", policy=SettingPolicy.AUDIT)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="Managed",
+        policy=SettingPolicy.AUDIT,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
 
@@ -1103,13 +1099,11 @@ async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, conf
         observed="Old",
         policy=SettingPolicy.AUDIT,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="name", desired="New",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1138,16 +1132,11 @@ async def test_plan_dispatch_uses_raw_meshcore_command_display(db, wq, config):
         observed="Old",
         policy=SettingPolicy.AUDIT,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(
-                desired="🦷 rdm",
-                policy=SettingPolicy.ENFORCE,
-            )},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="🦷 rdm",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1165,16 +1154,11 @@ async def test_plan_dispatch_skips_close_enough_radio_roundoff(db, wq, config):
         observed="915.0750122,125,9,5",
         policy=SettingPolicy.ENFORCE,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"radio": SettingConfig(
-                desired="915.075,125,9,5",
-                policy=SettingPolicy.ENFORCE,
-            )},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="radio", desired="915.075,125,9,5",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1194,13 +1178,11 @@ async def test_plan_dispatch_audit_default_does_not_write(db, wq, config):
         observed="Old",
         policy=SettingPolicy.AUDIT,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(desired="New")},
-        )
-    ]
+    # desired with no explicit policy -> inherits the default (audit)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="New",
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1212,13 +1194,11 @@ async def test_plan_dispatch_audit_default_does_not_write(db, wq, config):
 async def test_plan_dispatch_unknown_when_no_known_setting(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="name", desired="New",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
