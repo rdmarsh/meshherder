@@ -9,7 +9,50 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 **Workflow: new work goes on a branch + PR, no more direct commits to `main`** (journal/handoff
 commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed direct on `main`.
 
-**Status (2026-06-13): slices 6 AND 7 MERGED to `main`. Next: slice 8.**
+**Status (2026-06-16): slice 8 in progress on `slice8-config-import`. 8a/8b committed; the
+desired-state SUNSET core (8c/8d/8i) is now committed and green. PAUSED before 8e (the one-way
+config-error + inventory-to-DB cut) at the operator's request for review.**
+
+**Sunset decisions (operator, this session):** full sunset; config.yaml that still carries desired
+state must ERROR (refuse to start), not be a readable seed; operations get a DB home (8i).
+
+- **8c DONE** (`8e22a3e`): `config.resolve_desired_configs(db, node)` rebuilds a node's
+  `(NodeConfig, GroupConfig|None, global GroupConfig)` purely from DB rows by overlaying onto empty
+  bases (reuses `overlay_db_settings`/`overlay_db_group_settings` - "build from rows" == "overlay
+  with nothing underneath"). A DB-only node (never in config.yaml) now resolves fully, closing the
+  slice-6 group-attribution limitation. No call sites switched.
+- **8d DONE** (3 commits `dc807d3`,`bbf6994`,`68d45ea`): all desired-state *resolution* read paths
+  now use the DB resolver - daemon clean path (`_wanted_setting_keys`), fleet report
+  (`build_fleet_report`/`_settings_report`, source is uniformly "db"), and the core sync engine
+  (`_process_node` resolves from the DB node; its 3 callers drop config lookups; `_run_next_due`
+  processes any due DB node). run_cycle still iterates `config.nodes` for the *inventory* of which
+  nodes to sweep - that moves to the DB in 8e. Test bridge `_seed_desired` (in test_queue.py) seeds
+  the DB from a test's Config via the production `config_to_desired_rows` (mirrors `mch import`).
+- **8i DONE** (`0f44ead`): operations migrated to the DB. New `desired_operations` table
+  (scope_type, scope_id, command, every_hours, fire_and_forget) + `DesiredOperation` model + DB CRUD;
+  `queue._resolve_db_operations` (Node>Group>Global) replaces the config-sourced path;
+  `config_to_desired_operations` (import) + operations in `desired_rows_to_config_dict` (export);
+  daemon import/export + CLI count. Closes the gap where operations had no DB home (8a left them out).
+- **837 tests pass, ruff clean, mypy 7 (pre-existing).**
+
+**NEXT - 8e (the one-way cut), then 8f/8g/8h:** see the plan file
+`~/.claude/plans/twinkling-waddling-rainbow.md`. 8e couples two things that must land together:
+  - `load(path, strict=True)` for the daemon -> ERROR on leftover `nodes:`/`groups:`/`global`
+    desired state, message pointing at `mch import`. Keep the parser lenient (default strict=False)
+    so test_config.py parse tests and `mch import <legacy.yaml>` still work. Migration on-ramp:
+    operators run `mch import` on the pre-8e build (daemon still tolerates desired-state config),
+    `mch export` to verify, strip config, then upgrade to the strict build.
+  - inventory moves to the DB: `run_cycle` must iterate `db.get_all_nodes()` (not `config.nodes`),
+    or the strict daemon sweeps nothing. Also rework `_seed_from_config`/`_seed_node_labels`,
+    `_is_configured_node` + `prune`/`remove`, the `mch set --group` group-name validation
+    (`daemon.py:_handle_set_setting`, currently checks `config.groups`), and report
+    `configured`/`_unseen_config_nodes`/ghosts - all currently read config inventory.
+  - 8f favourites = downstream DB mirror; 8g retire-don't-delete (`NodeState.RETIRED`); 8h
+    commission output + docs (DESIGN/README/mch.1/CHANGELOG + clear this block).
+
+_Earlier slice-8 sub-steps (8a/8b), kept for context:_
+
+**Prior status (2026-06-13): slices 6 AND 7 MERGED to `main`.**
 - **Slice 6 (group/global scopes) MERGED** via PR #1 (merge commit `8b393e9`). Branch
   `slice6-group-global-scopes` deleted (local + remote). 6a `overlay_db_group_settings`,
   6b reconcile (`_process_node`) + clean (`_wanted_setting_keys`) wiring, 6c `mch set/unset
