@@ -2156,7 +2156,8 @@ def test_commission_new_happy_path():
         result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert result.exit_code == 0, result.output
     assert "a695e2be" in result.output  # pubkey_prefix shown
-    assert "Restart or reload mchd" in result.output
+    assert "mch import" in result.output
+    assert "Reload mchd" in result.output
     assert "mch status a695e2be" in result.output
     assert "Optional: mch sync a695e2be" in result.output
     req = mock_rpc.call_args_list[1][0][1]

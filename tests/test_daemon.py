@@ -2182,6 +2182,33 @@ async def test_import_dry_run_does_not_write(db, wq):
     assert await db.get_desired_settings(Scope.NODE, node.pubkey) == []
 
 
+async def test_import_updates_node_label_and_group(db, wq):
+    """Import carries inventory metadata (label/group), not just desired settings."""
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8, no label/group
+    config = Config(
+        groups=[GroupConfig(name="solar")],
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge", group="solar")],
+    )
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    updated = await db.get_node(node.pubkey)
+    assert updated.label == "ridge"
+    assert updated.group == "solar"
+
+
+async def test_import_dry_run_leaves_node_label_and_group(db, wq):
+    node = await _seed_plain_node(db)
+    config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge", group="solar")])
+
+    await _dispatch({"cmd": "import"}, wq, db, config)  # dry-run
+
+    unchanged = await db.get_node(node.pubkey)
+    assert unchanged.label == node.label
+    assert unchanged.group == node.group
+
+
 async def test_import_warns_unresolvable_node(db, wq):
     # node never seeded into the DB, so its prefix cannot resolve to a full pubkey
     config = Config(nodes=[NodeConfig(

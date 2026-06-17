@@ -45,7 +45,7 @@ from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
-from mch.models import DesiredSetting, NodeState, Scope, SettingPolicy
+from mch.models import DesiredSetting, Node, NodeState, Scope, SettingPolicy
 from mch.queue import (
     NodeResult,
     OperationBusyError,
@@ -423,6 +423,7 @@ async def _handle_import(
         except Exception as exc:
             return {"ok": False, "error": f"cannot read import file {path}: {exc}"}
     nodes = await db.get_all_nodes()
+    node_by_pubkey = {n.pubkey: n for n in nodes}
 
     def resolve_pubkey(prefix: str) -> str | None:
         return next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
@@ -430,11 +431,32 @@ async def _handle_import(
     rows, warnings = config_to_desired_rows(config, resolve_pubkey)
     operations, op_warnings = config_to_desired_operations(config, resolve_pubkey)
     warnings = warnings + op_warnings
+
+    # Label and group are inventory metadata on the node row, not desired_settings, so carry
+    # them too — otherwise a migrated node loses its label/group. Only resolvable, already-known
+    # nodes are touched (unknown nodes are warned about by config_to_desired_rows).
+    inventory_updates: list[Node] = []
+    for nc in config.nodes:
+        pk = resolve_pubkey(nc.pubkey_prefix)
+        node = node_by_pubkey.get(pk) if pk else None
+        if node is None:
+            continue
+        if (nc.label and node.label != nc.label) or (
+            nc.group is not None and node.group != nc.group
+        ):
+            if nc.label:
+                node.label = nc.label
+            if nc.group is not None:
+                node.group = nc.group
+            inventory_updates.append(node)
+
     if not dry_run:
         for row in rows:
             await db.set_desired_setting(row)
         for op in operations:
             await db.set_desired_operation(op)
+        for node in inventory_updates:
+            await db.upsert_node(node)
 
     counts = {Scope.GLOBAL.value: 0, Scope.GROUP.value: 0, Scope.NODE.value: 0}
     for row in rows:

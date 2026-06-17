@@ -5,6 +5,25 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **config.yaml desired-state sunset.** The SQLite DB is now the single source of truth for node
+  inventory and desired state; config.yaml carries only daemon settings (gateway, scheduler,
+  messenger, api, paths, facts, profiles). The daemon loads strict and refuses to start if config.yaml
+  still contains a `nodes:`, `groups:`, or `global:` desired-state block, with an error pointing at
+  `mch import` (empty leftover blocks are tolerated). Migration path: on the running daemon run
+  `mch import` (now also accepts an explicit `mch import <legacy.yaml>` path and carries node
+  label/group, not just settings), verify with `mch export`, strip the desired-state blocks from
+  config.yaml, then restart. The fleet report drops the config-vs-DB "ghost"/"unseen" distinction —
+  every DB node is a managed node.
+- **Inventory + favourites are DB-driven.** On startup and reload the daemon reconciles the gateway's
+  favourited repeaters with the DB managed set: a favourited repeater the DB doesn't know is seeded as
+  a managed node, and every managed node is (re)favourited as an eviction pin. `mch set --group`
+  validates the group against DB membership instead of config.groups.
+- **Retire, don't delete.** New `mch retire <node>` / `mch unretire <node>`: retiring a node excludes
+  it from sync and unfavourites its contact (eviction-pin removal, not contact deletion) while keeping
+  its history; unretiring re-favourites it and queues it to reconverge. `mch prune` now hard-deletes
+  retired nodes (the purge step after retire); `mch remove` guards a still-managed node behind
+  `--force`. `mch commission` prints an importable `nodes:` doc plus `mch import` guidance instead of a
+  config.yaml snippet.
 - Added `name_prefix`: a string (usually an emoji) prepended to a node's desired name, settable at
   global, group, or node scope and resolving Node > Group > Global - so a whole group can be tagged
   on the map (e.g. "📡") while each node keeps its own name. The prefix is prepended verbatim with

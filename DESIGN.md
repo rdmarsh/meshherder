@@ -28,13 +28,14 @@ state into SQLite. If that changes, add explicit import/export/backup commands r
 silently making the DB the only copy. Secrets and private keys need a separate security decision
 before they are included in any ordinary backup/export workflow.
 
-> **Update (2026-06-11): this is being superseded.** Desired state is migrating into the SQLite DB
-> so it can be edited by `mch` commands and (later) an HTTP API / web frontend. config.yaml becomes
-> an import/seed source and will eventually be retired; secrets.yaml stays a file (see the
-> "Desired state in the DB" section below for the full rationale and the migration plan). The
-> YAML-first description above remains accurate for every scope/key not yet migrated.
+> **Update (2026-06-17): this is now superseded — the sunset is complete.** Desired state and
+> inventory live in the SQLite DB, edited by `mch` commands (and, later, an HTTP API / web frontend).
+> **config.yaml no longer carries desired state**: the daemon loads strict and errors on any leftover
+> `nodes:`/`groups:`/`global:` block, pointing at `mch import`. config.yaml keeps only daemon settings
+> (gateway, scheduler, messenger, api, paths, facts, profiles); secrets.yaml stays a file. The
+> YAML-first description above is retained for historical context only.
 
-## Desired state in the DB (migration in progress, started 2026-06-11)
+## Desired state in the DB (sunset complete 2026-06-17, started 2026-06-11)
 
 We are moving desired state from config.yaml into the SQLite DB so it can be edited with `mch`
 commands and, later, an HTTP API and a web frontend. A web UI round-tripping a YAML file is
@@ -86,12 +87,17 @@ from DB rows instead of parsed YAML, so the node > group > global precedence and
 cascade are untouched. During the transition, when a key exists both in the DB and still in
 config.yaml, **the DB wins and the daemon warns** so the now-ignored YAML value can be cleaned up.
 
-**Retire, don't delete.** Nodes get a lifecycle (`active|retired`) plus `retired_at` and a
-free-text `retired_reason`, replacing kept copies of config.yaml as the historical record. A
-retired node is excluded from sync and unfavourited (same rule as the favourite mirror). Permanent
-delete stays a separate, explicit operator action. Auto-purge is **not** triggered by a node
-dropping off the contact list - eviction is the normal state on a dense mesh, so contact-list
-absence is a poor signal; any future auto-cleanup is gated on time since retirement instead.
+**Retire, don't delete.** *(Implemented 8g.)* A node has a `NodeState.RETIRED` lifecycle state,
+replacing kept copies of config.yaml as the historical record. `mch retire <node>` sets it,
+unfavourites the contact (eviction-pin removal, not contact deletion), and writes a log line;
+`mch unretire <node>` reverses it (re-favourite, reset state so it reconverges). A retired node is
+excluded from sync everywhere (`get_due_node`, the cycle sweep, reschedule, and the favourite-pin
+step). Permanent delete stays separate and explicit: `mch prune` hard-deletes retired nodes (history
+and all); `mch remove` deletes one node and guards a still-managed node behind `--force`. Auto-purge
+is **not** triggered by a node dropping off the contact list - eviction is the normal state on a
+dense mesh, so contact-list absence is a poor signal. (A dedicated `retired_at`/`retired_reason`
+column pair was considered but not built; the state + log line suffice for a single-operator box and
+can be added later if time-based auto-cleanup is wanted.)
 
 **Cleanup.** `observed_settings` should only hold keys that are currently wanted, i.e.
 `key in (resolved desired set + facts)`. Orphans (a key you unset, or dropped from a group) are
@@ -180,10 +186,30 @@ wanted.
      fetches every row. Daemon `_handle_export` returns the YAML; CLI `mch export` prints to stdout
      (`mch export > desired.yaml`). A round-trip test proves config -> rows -> YAML -> load -> rows is
      stable. Observed state and operations are not exported.
-   - 8c+ (sunset): build `NodeConfig`/`GroupConfig` directly from DB rows so the daemon can run with
-     no desired state in config.yaml; DB owns inventory, favourites become a downstream mirror,
-     retire-don't-delete lifecycle. secrets.yaml stays a file. Open call: does config.yaml remain a
-     readable seed after sunset, or error if it still carries desired state?
+   - [done 2026-06-17] 8c-8i (sunset): the DB is now authoritative for inventory + desired state;
+     config.yaml carries only daemon settings. **Resolved open call: config.yaml errors, it is not a
+     readable seed** - the daemon loads strict and refuses to start if any `nodes:`/`groups:`/`global:`
+     desired-state block is still present (empty blocks tolerated), pointing the operator at
+     `mch import`. Pieces:
+     - 8c: `resolve_desired_configs(db, node)` rebuilds `(NodeConfig, GroupConfig|None, global)` from
+       DB rows via the empty-base overlay, closing the slice-6 group-attribution limitation.
+     - 8d: every desired-state *read* path resolves from the DB resolver (clean path, fleet report,
+       sync engine).
+     - 8i: operations migrated to a `desired_operations` table; import/export carry them.
+     - 8e: `config.load(strict=True)` for the daemon (main + reload) hard-errors on leftover desired
+       state; the parser stays lenient by default for the import on-ramp. `mch import [CONFIG_FILE]`
+       takes an explicit YAML path (parsed leniently) so the on-ramp survives a strict daemon, and
+       import now carries node **label/group** inventory, not just desired settings.
+     - 8f: startup/reload `_reconcile_favourites` replaces config-driven seeding - seed a favourited
+       repeater the DB doesn't know, pin (favourite) every managed DB node. Favourites and the managed
+       set stay in step by adding in both directions; the config-vs-DB ghost/unseen concept is gone
+       (every DB node is managed). `mch set --group` validates against DB group membership.
+     - 8g: `NodeState.RETIRED` + `mch retire`/`mch unretire` (below). `prune` hard-deletes retired
+       nodes; `remove` guards a still-managed node behind `--force`.
+     - 8h: `mch commission` prints an importable `nodes:` doc + `mch import` guidance instead of a
+       config.yaml snippet; secrets.yaml snippet unchanged.
+   - Follow-up (not done): the commission **replace** and **scan/list** flows still read config
+     inventory (`config.nodes`/`config.groups`) and need a DB-driven rework; tracked in BACKLOG.
 
 ## Convergence Over A Constrained Mesh
 
