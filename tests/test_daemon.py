@@ -1310,26 +1310,23 @@ async def test_issues_dispatch_online_not_in_bad_state(db, wq, config):
     assert resp["data"]["bad_state"] == []
 
 
-async def test_issues_dispatch_returns_unseen_config_nodes(db, wq, config):
-    """issues unseen_nodes section lists config entries with no matching DB node."""
+async def test_issues_dispatch_has_no_unseen_config_nodes(db, wq, config):
+    """Sunset: config.yaml has no inventory, so issues never reports unseen config nodes."""
     from mch.config import NodeConfig
     config.nodes = [NodeConfig(pubkey_prefix="deadbeef", label="wrong")]
-    # DB is empty — no node with that prefix exists
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
     assert resp["data"]["ghosts"] == []
-    assert len(resp["data"]["unseen_nodes"]) == 1
-    assert resp["data"]["unseen_nodes"][0]["pubkey_prefix"] == "deadbeef"
-    assert resp["data"]["unseen_nodes"][0]["label"] == "wrong"
+    assert resp["data"]["unseen_nodes"] == []
 
 
-async def test_issues_dispatch_returns_db_only_nodes_as_ghosts(db, wq, config):
-    """issues ghosts section lists DB nodes no longer present in config."""
+async def test_issues_dispatch_treats_db_nodes_as_managed_not_ghosts(db, wq, config):
+    """Sunset: every DB node is managed inventory, so none are reported as ghosts."""
     node = Node(
         pubkey="11223344" * 8,
-        name="Retired",
-        label="old-site",
+        name="Managed",
+        label="a-site",
         state=NodeState.CONFIGURED,
     )
     await db.upsert_node(node)
@@ -1337,13 +1334,7 @@ async def test_issues_dispatch_returns_db_only_nodes_as_ghosts(db, wq, config):
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
-    assert resp["data"]["ghosts"] == [{
-        "pubkey": node.pubkey,
-        "label": "old-site",
-        "name": "Retired",
-        "state": "configured",
-        "last_seen": None,
-    }]
+    assert resp["data"]["ghosts"] == []
     assert resp["data"]["unseen_nodes"] == []
 
 
@@ -1758,7 +1749,10 @@ async def test_set_setting_requires_value_or_policy(db, wq, config):
 
 
 async def test_set_setting_group_scope_writes_group_row(db, wq):
-    config = Config(groups=[GroupConfig(name="solar")])
+    # Group membership lives in the DB now: a node assigned to "solar" makes the group real.
+    await db.upsert_node(Node(pubkey="aabbccdd" * 8, name="n", group="solar",
+                              state=NodeState.UNKNOWN))
+    config = Config()
 
     resp = await _dispatch(
         {"cmd": "set_setting", "scope": "group", "group": "solar",
@@ -1910,7 +1904,10 @@ async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
 
 
 async def test_unset_setting_group_scope_removes_row(db, wq):
-    config = Config(groups=[GroupConfig(name="solar")])
+    # A DB node in group "solar" makes the group real (membership lives in the DB now).
+    await db.upsert_node(Node(pubkey="aabbccdd" * 8, name="n", group="solar",
+                              state=NodeState.UNKNOWN))
+    config = Config()
     await _dispatch(
         {"cmd": "set_setting", "scope": "group", "group": "solar",
          "key": "txdelay", "value": "14"}, wq, db, config,

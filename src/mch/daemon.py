@@ -364,9 +364,19 @@ async def _handle_set_setting(
     if error or scope is None:
         return {"ok": False, "error": error or "could not resolve scope"}
     # Catch a typo'd group name at write time: a desired row for a group that no node
-    # is in would silently never apply. unset does not check this (see resolver docstring).
-    if scope is Scope.GROUP and scope_id not in {g.name for g in config.groups}:
-        return {"ok": False, "error": f"group {scope_id!r} is not defined in config.yaml"}
+    # is in would silently never apply. Group membership lives in the DB now (nodes.group),
+    # so a group is "real" once at least one node belongs to it. unset does not check this
+    # (see resolver docstring).
+    if scope is Scope.GROUP:
+        group_names = {n.group for n in await db.get_all_nodes() if n.group}
+        if scope_id not in group_names:
+            return {
+                "ok": False,
+                "error": (
+                    f"group {scope_id!r} has no member nodes - assign a node to it first "
+                    "(via `mch import` or commissioning), or check the spelling"
+                ),
+            }
 
     await db.set_desired_setting(
         DesiredSetting(scope_type=scope, scope_id=scope_id, key=key, desired=value, policy=policy)
