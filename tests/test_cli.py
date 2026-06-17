@@ -2965,6 +2965,33 @@ def test_import_yes_applies_and_reports_written():
     assert "imported 3" in result.output
 
 
+def test_import_with_explicit_path_sends_absolute_path(tmp_path):
+    legacy = tmp_path / "legacy.yaml"
+    legacy.write_text("nodes: []\n")
+    rpc = MagicMock(return_value=_import_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(
+            cli, ["--socket", "/fake.sock", "import", str(legacy), "--yes"]
+        )
+
+    assert result.exit_code == 0
+    sent = rpc.call_args.args[1]
+    assert sent["cmd"] == "import"
+    assert sent["dry_run"] is False
+    assert sent["path"] == str(legacy.resolve())
+
+
+def test_import_with_missing_path_errors_before_rpc():
+    rpc = MagicMock(return_value=_import_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(
+            cli, ["--socket", "/fake.sock", "import", "/no/such/file.yaml"]
+        )
+
+    assert result.exit_code != 0
+    rpc.assert_not_called()
+
+
 def test_import_surfaces_warnings():
     rpc = MagicMock(return_value=_import_resp(
         warnings=["node 'ghost' (deadbeef) is not known to the DB yet - skipped"],

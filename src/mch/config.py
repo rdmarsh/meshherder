@@ -818,6 +818,7 @@ def load(
     secrets_path: Path | None = None,
     *,
     load_secrets: bool = True,
+    strict: bool = False,
 ) -> Config:
     config_path = config_path.resolve()
     try:
@@ -829,6 +830,21 @@ def load(
         kind = type(raw).__name__ if raw is not None else "empty file"
         raise ValueError(f"config file must be a YAML mapping, got {kind}")
     _reject_unknown_keys("config", raw, _TOP_LEVEL_KEYS)
+
+    # Sunset: desired state now lives in the DB, not config.yaml. The daemon loads strict and
+    # refuses to start if any desired-state block is still present, so an edited-but-not-imported
+    # config can never silently diverge from the DB. Empty blocks (e.g. a leftover `nodes: []`)
+    # are tolerated so stripping is forgiving. The lenient default keeps the `mch import` on-ramp
+    # and the config-parser unit tests working.
+    if strict:
+        offenders = [key for key in ("nodes", "groups", "global") if raw.get(key)]
+        if offenders:
+            raise ValueError(
+                f"config.yaml still carries desired state ({', '.join(offenders)}); "
+                "desired state now lives in the DB. Migrate it with "
+                "`mch import <this-file>`, verify with `mch export`, then delete these "
+                "blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md slice 8."
+            )
 
     gw_raw = _mapping(raw.get("gateway", {}), "gateway")
     _reject_unknown_keys("gateway", gw_raw, _GATEWAY_KEYS)

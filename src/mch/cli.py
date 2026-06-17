@@ -2133,17 +2133,30 @@ def plan(ctx: click.Context, query: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command("import")
+@click.argument(
+    "config_file",
+    required=False,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 @click.option("--yes", "-y", is_flag=True, help="Write the imported rows to the DB.")
 @click.pass_context
-def import_config(ctx: click.Context, yes: bool) -> None:
-    """Seed the DB's desired state from config.yaml (the migration on-ramp).
+def import_config(ctx: click.Context, config_file: Path | None, yes: bool) -> None:
+    """Seed the DB's desired state from a config.yaml (the migration on-ramp).
 
     Flattens config.yaml settings and directives (name_prefix/default_policy/via_radio) at
     node/group/global scope into desired_settings rows. Dry-run by default; --yes writes.
-    Idempotent - re-running upserts the same rows. Operations are not imported. A node not
-    yet seen by the gateway is skipped with a warning until it appears in the DB.
+    Idempotent - re-running upserts the same rows. A node not yet seen by the gateway is
+    skipped with a warning until it appears in the DB.
+
+    Pass an explicit CONFIG_FILE (a legacy or `mch export`-ed file) to import from it instead
+    of the daemon's loaded config. This is the migration path once config.yaml no longer holds
+    desired state — the daemon process must be able to read the file.
     """
-    data = _check(_rpc(ctx.obj["socket"], {"cmd": "import", "dry_run": not yes}))
+    cmd: dict[str, Any] = {"cmd": "import", "dry_run": not yes}
+    if config_file is not None:
+        # Resolve here: the daemon runs from a different cwd, so it needs an absolute path.
+        cmd["path"] = str(config_file.resolve())
+    data = _check(_rpc(ctx.obj["socket"], cmd))
     counts = data["counts"]
     total = data["total"]
     operations = data.get("operations", 0)

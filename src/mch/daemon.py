@@ -398,14 +398,24 @@ async def _handle_unset_setting(
 async def _handle_import(
     req: dict[str, Any], db: Database, config: Config
 ) -> dict[str, Any]:
-    """Seed the DB's desired_settings from the loaded config.yaml (the migration on-ramp).
+    """Seed the DB's desired_settings from a config.yaml (the migration on-ramp).
 
     Flattens config desired state (settings + directives, all scopes) into rows and upserts
     them. Node scope_ids need the full pubkey, resolved from each prefix against nodes the DB
     already knows; a node not yet seen is skipped with a warning. Dry-run by default - it only
     writes when ``dry_run`` is false. Idempotent: re-importing upserts the same rows.
+
+    With ``path`` set, the source is that explicit (legacy/exported) YAML file, parsed
+    leniently. This keeps import working against a strict daemon whose own config.yaml no
+    longer carries desired state. Without ``path``, the daemon's loaded config is the source.
     """
     dry_run = bool(req.get("dry_run", True))
+    path = req.get("path")
+    if path:
+        try:
+            config = load_config(Path(str(path)), load_secrets=False)
+        except Exception as exc:
+            return {"ok": False, "error": f"cannot read import file {path}: {exc}"}
     nodes = await db.get_all_nodes()
 
     def resolve_pubkey(prefix: str) -> str | None:
@@ -1098,7 +1108,7 @@ class Daemon:
                 return
 
             try:
-                new_config = load_config(Path(self._config.config_path))
+                new_config = load_config(Path(self._config.config_path), strict=True)
             except Exception as exc:
                 log.exception(
                     "config reload from %s failed; keeping previous config: %s",
@@ -1183,7 +1193,7 @@ def main() -> None:
         raise SystemExit(CONFIG_ERROR_EXIT)
 
     try:
-        config = load_config(config_path)
+        config = load_config(config_path, strict=True)
     except Exception as exc:
         print(f"error loading config: {exc}", file=sys.stderr)
         raise SystemExit(CONFIG_ERROR_EXIT) from None
