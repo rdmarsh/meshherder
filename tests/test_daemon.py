@@ -558,18 +558,17 @@ async def test_suggest_dispatch_profile_none_when_no_neighbors(db, wq, config):
     assert resp["data"][0]["neighbour_count"] is None
 
 
-async def test_prune_dispatch_lists_nodes_outside_config(db, wq, config):
-    """prune dry-run lists DB nodes whose pubkeys are no longer in config."""
+async def test_prune_dispatch_lists_retired_nodes(db, wq, config):
+    """prune dry-run lists only retired nodes; active nodes are never candidates."""
     kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     retired = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(kept)
     await db.upsert_node(retired)
-    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="kept")]
 
     resp = await _dispatch({"cmd": "prune"}, wq, db, config)
 
@@ -579,19 +578,18 @@ async def test_prune_dispatch_lists_nodes_outside_config(db, wq, config):
     assert await db.get_node(retired.pubkey) is not None
 
 
-async def test_prune_dispatch_deletes_nodes_outside_config(db, wq, config):
-    """prune with dry_run false deletes retired local DB state only."""
+async def test_prune_dispatch_deletes_retired_nodes(db, wq, config):
+    """prune with dry_run false hard-deletes retired nodes only."""
     kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     retired = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(kept)
     await db.upsert_node(retired)
     await db.upsert_fact(NodeFact(node_pubkey=retired.pubkey, key="ver", value="v1.14.1"))
-    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="kept")]
 
     resp = await _dispatch({"cmd": "prune", "dry_run": False}, wq, db, config)
 
@@ -607,15 +605,14 @@ async def test_prune_dispatch_deletes_nodes_outside_config(db, wq, config):
 # ------------------------------------------------------------------
 
 async def test_remove_dispatch_dry_run_resolves_one_node(db, wq, config):
-    """remove dry-run resolves one DB node without deleting it."""
+    """remove dry-run resolves one retired DB node without deleting it."""
     node = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(node)
-    config.nodes = []
 
     resp = await _dispatch({"cmd": "remove", "query": "old-site"}, wq, db, config)
 
@@ -626,18 +623,17 @@ async def test_remove_dispatch_dry_run_resolves_one_node(db, wq, config):
 
 
 async def test_remove_dispatch_deletes_one_retired_node(db, wq, config):
-    """remove with dry_run false deletes one node's local DB state."""
+    """remove with dry_run false deletes a retired node's local DB state, no force needed."""
     kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     retired = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(kept)
     await db.upsert_node(retired)
     await db.upsert_fact(NodeFact(node_pubkey=retired.pubkey, key="ver", value="v1.14.1"))
-    config.nodes = [NodeConfig(pubkey_prefix=kept.pubkey[:8], label="kept")]
 
     resp = await _dispatch(
         {"cmd": "remove", "query": "old-site", "dry_run": False},
@@ -653,11 +649,10 @@ async def test_remove_dispatch_deletes_one_retired_node(db, wq, config):
     assert await db.get_facts(retired.pubkey) == {}
 
 
-async def test_remove_dispatch_refuses_configured_node_without_force(db, wq, config):
-    """remove refuses nodes still present in config unless force is supplied."""
+async def test_remove_dispatch_refuses_active_node_without_force(db, wq, config):
+    """remove refuses a still-managed (non-retired) node unless force is supplied."""
     node = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="kept")]
 
     resp = await _dispatch(
         {"cmd": "remove", "query": "kept", "dry_run": False},
@@ -667,15 +662,14 @@ async def test_remove_dispatch_refuses_configured_node_without_force(db, wq, con
     )
 
     assert resp["ok"] is False
-    assert "still in config.yaml" in resp["error"]
+    assert "still managed" in resp["error"]
     assert await db.get_node(node.pubkey) is not None
 
 
-async def test_remove_dispatch_force_deletes_configured_node(db, wq, config):
-    """remove --force allows deleting local state for a configured node."""
+async def test_remove_dispatch_force_deletes_active_node(db, wq, config):
+    """remove --force allows deleting local state for a still-managed node."""
     node = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="kept")]
 
     resp = await _dispatch(
         {"cmd": "remove", "query": "kept", "dry_run": False, "force": True},
@@ -685,8 +679,58 @@ async def test_remove_dispatch_force_deletes_configured_node(db, wq, config):
     )
 
     assert resp["ok"] is True
-    assert resp["data"]["configured"] is True
+    assert resp["data"]["retired"] is False
     assert await db.get_node(node.pubkey) is None
+
+
+# ------------------------------------------------------------------
+# retire / unretire commands
+# ------------------------------------------------------------------
+
+async def test_retire_dispatch_retires_active_node(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    retired = Node(pubkey=node.pubkey, name="N", label="site", state=NodeState.RETIRED)
+    wq.retire_node = AsyncMock(return_value=retired)
+
+    resp = await _dispatch({"cmd": "retire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["state"] == "retired"
+    wq.retire_node.assert_awaited_once_with(node.pubkey)
+
+
+async def test_retire_dispatch_already_retired_errors(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.RETIRED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "retire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "already retired" in resp["error"]
+
+
+async def test_unretire_dispatch_returns_node_to_management(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.RETIRED)
+    await db.upsert_node(node)
+    active = Node(pubkey=node.pubkey, name="N", label="site", state=NodeState.UNKNOWN)
+    wq.unretire_node = AsyncMock(return_value=active)
+
+    resp = await _dispatch({"cmd": "unretire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["state"] == "unknown"
+    wq.unretire_node.assert_awaited_once_with(node.pubkey)
+
+
+async def test_unretire_dispatch_not_retired_errors(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "unretire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "not retired" in resp["error"]
 
 
 # ------------------------------------------------------------------

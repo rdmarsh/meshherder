@@ -45,7 +45,7 @@ from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
-from mch.models import DesiredSetting, Scope, SettingPolicy
+from mch.models import DesiredSetting, NodeState, Scope, SettingPolicy
 from mch.queue import (
     NodeResult,
     OperationBusyError,
@@ -168,10 +168,6 @@ async def _resolve_node(query: str, db: Database) -> Any:
         labels = ", ".join(repr(n.label or n.pubkey[:8]) for n in matches)
         raise ValueError(f"ambiguous: {len(matches)} nodes match {query!r} ({labels})")
     return None
-
-
-def _is_configured_node(pubkey: str, config: Config) -> bool:
-    return any(pubkey.startswith(nc.pubkey_prefix) for nc in config.nodes)
 
 
 async def _stale_fact_candidates(
@@ -756,9 +752,12 @@ async def _dispatch(
         return {"ok": True, "data": await wq.unfiled_contacts()}
 
     if cmd == "prune":
+        # Sunset: the DB is the inventory, so "prune" no longer means "not in config.yaml".
+        # It hard-deletes retired nodes (history and all) — the deliberate purge step after
+        # `mch retire`. Active nodes are never prune candidates.
         dry_run = bool(req.get("dry_run", True))
         nodes = await db.get_all_nodes()
-        candidate_nodes = [n for n in nodes if not _is_configured_node(n.pubkey, config)]
+        candidate_nodes = [n for n in nodes if n.state == NodeState.RETIRED]
         candidates = [
             {
                 "pubkey": n.pubkey,
@@ -856,13 +855,17 @@ async def _dispatch(
         if not node:
             return {"ok": False, "error": f"no such node: {query}"}
 
-        configured = _is_configured_node(node.pubkey, config)
-        if configured and not bool(req.get("force", False)):
+        # Sunset: a still-managed (non-retired) node is protected — deleting it loses history
+        # and it is just re-seeded from gateway favourites on the next restart. Retire it first
+        # (keeps history, unfavourites it), or force through.
+        active = node.state != NodeState.RETIRED
+        if active and not bool(req.get("force", False)):
             return {
                 "ok": False,
                 "error": (
-                    f"{node.label or node.name or node.pubkey[:8]!r} is still in config.yaml"
-                    " - remove it from config first, or use --force"
+                    f"{node.label or node.name or node.pubkey[:8]!r} is still managed"
+                    " - `mch retire` it first (keeps history, unfavourites it), or use --force."
+                    " An un-retired node is re-seeded from gateway favourites on restart."
                 ),
             }
 
@@ -872,13 +875,41 @@ async def _dispatch(
             "name": node.name,
             "state": node.state.value,
             "last_seen": node.last_seen.isoformat() if node.last_seen else None,
-            "configured": configured,
+            "retired": node.state == NodeState.RETIRED,
             "deleted": 0,
         }
         if not bool(req.get("dry_run", True)):
             await db.delete_node(node.pubkey)
             data["deleted"] = 1
         return {"ok": True, "data": data}
+
+    if cmd in ("retire", "unretire"):
+        query = str(req.get("query") or "")
+        if not query:
+            return {"ok": False, "error": "missing node"}
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"no such node: {query}"}
+        ident = node.label or node.name or node.pubkey[:8]
+
+        if cmd == "retire":
+            if node.state is NodeState.RETIRED:
+                return {"ok": False, "error": f"{ident!r} is already retired"}
+            node = await wq.retire_node(node.pubkey)
+        else:
+            if node.state is not NodeState.RETIRED:
+                return {"ok": False, "error": f"{ident!r} is not retired"}
+            node = await wq.unretire_node(node.pubkey)
+
+        return {"ok": True, "data": {
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+            "state": node.state.value,
+        }}
 
     if cmd == "logs":
         pubkey = req.get("pubkey")

@@ -1347,8 +1347,8 @@ def _prune_resp(candidates=None, deleted=0):
 def test_prune_no_candidates():
     result = _run(["prune"], _prune_resp())
     assert result.exit_code == 0
-    assert "no DB nodes outside config.yaml" in result.output
-    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+    assert "no retired nodes to prune" in result.output
+    assert "mch retire" in result.output
 
 
 def test_prune_lists_candidates_without_deleting():
@@ -1356,14 +1356,13 @@ def test_prune_lists_candidates_without_deleting():
         "pubkey": "aabbccdd" * 8,
         "label": "old-site",
         "name": "Old Site",
-        "state": "configured",
+        "state": "retired",
         "last_seen": None,
     }]))
     assert result.exit_code == 0
-    assert "DB nodes outside config.yaml" in result.output
+    assert "retired nodes" in result.output
     assert "old-site" in result.output
     assert "run 'mch prune --yes'" in result.output
-    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
 
 
 def test_prune_yes_reports_deleted_count():
@@ -1371,12 +1370,11 @@ def test_prune_yes_reports_deleted_count():
         "pubkey": "aabbccdd" * 8,
         "label": "old-site",
         "name": "Old Site",
-        "state": "configured",
+        "state": "retired",
         "last_seen": None,
     }], deleted=1))
     assert result.exit_code == 0
-    assert "deleted 1 node(s)" in result.output
-    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+    assert "deleted 1 retired node(s)" in result.output
 
 
 # ------ clean facts ------
@@ -1432,14 +1430,14 @@ def test_clean_facts_yes_reports_deleted_count():
 
 # ------ remove ------
 
-def _remove_resp(deleted=0, configured=False):
+def _remove_resp(deleted=0, retired=True):
     return {"ok": True, "data": {
         "pubkey": "aabbccdd" * 8,
         "label": "old-site",
         "name": "Old Site",
-        "state": "configured",
+        "state": "retired" if retired else "configured",
         "last_seen": None,
-        "configured": configured,
+        "retired": retired,
         "deleted": deleted,
     }}
 
@@ -1463,17 +1461,43 @@ def test_remove_yes_deletes_without_prompt():
     assert result.exit_code == 0
     assert "local DB node state" in result.output
     assert "deleted 1 node(s)" in result.output
-    assert "config.yaml, secrets.yaml, and gateway favourites are left unchanged" in result.output
+    assert "secrets.yaml is left unchanged" in result.output
 
 
-def test_remove_configured_node_mentions_force_when_used():
+def test_remove_active_node_notes_force_when_used():
     result = _run_multi(
         ["remove", "site-a", "--force", "--yes"],
-        _remove_resp(configured=True),
-        _remove_resp(deleted=1, configured=True),
+        _remove_resp(retired=False),
+        _remove_resp(deleted=1, retired=False),
     )
     assert result.exit_code == 0
-    assert "still present in config.yaml" in result.output
+    assert "still managed (not retired)" in result.output
+
+
+def _retire_resp(state="retired"):
+    return {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site", "name": "Site", "state": state,
+    }}
+
+
+def test_retire_command_sends_query_and_reports_state():
+    rpc = MagicMock(return_value=_retire_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "retire", "site"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "retire", "query": "site"}
+    assert "retired site" in result.output
+
+
+def test_unretire_command_sends_query_and_reports_state():
+    rpc = MagicMock(return_value=_retire_resp(state="unknown"))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "unretire", "site"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "unretire", "query": "site"}
+    assert "unretired site" in result.output
 
 
 # ------ plan ------

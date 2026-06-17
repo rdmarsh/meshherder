@@ -211,17 +211,21 @@ class Database:
         await db.commit()
 
     async def get_due_node(self) -> Node | None:
-        """Return the node with the earliest next_sync_at that is now due."""
+        """Return the node with the earliest next_sync_at that is now due.
+
+        Retired nodes are never due — they are kept for history but excluded from sync.
+        """
         db = self._db_required()
         now = _dt(datetime.now(UTC))
         async with db.execute(
             """
             SELECT * FROM nodes
-            WHERE next_sync_at IS NULL OR next_sync_at <= ?
+            WHERE (next_sync_at IS NULL OR next_sync_at <= ?)
+              AND state != ?
             ORDER BY next_sync_at ASC NULLS FIRST
             LIMIT 1
             """,
-            (now,),
+            (now, NodeState.RETIRED.value),
         ) as cur:
             row = await cur.fetchone()
         return _row_to_node(row) if row else None
