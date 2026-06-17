@@ -506,6 +506,8 @@ async def test_cycle_node_not_in_contacts(db):
     cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc", label="Missing")])
     gw = _make_gateway(contacts=[])  # no contacts
     wq = WorkQueue(cfg, gw, db)
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="", label="Missing",
+                              state=NodeState.UNKNOWN))
 
     results = await wq.run_cycle()
     assert len(results) == 1
@@ -588,6 +590,7 @@ async def test_cycle_collects_facts(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].reachable is True
@@ -609,6 +612,7 @@ async def test_probe_failure_skips_sync_and_marks_unreachable(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -633,6 +637,7 @@ async def test_probe_retries_once_before_giving_up(db):
         CommandResult(success=True, text="v1.14.1"),     # probe attempt 2 — hit
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -649,6 +654,7 @@ async def test_probe_ver_reply_reused_as_fact_no_second_read(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -707,6 +713,7 @@ async def test_cycle_applies_db_node_scope_desired_setting(db):
         CommandResult(success=True, text="ok"),         # powersaving on (enforce write)
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -761,6 +768,7 @@ async def test_cycle_applies_db_global_scope_desired_setting(db):
         CommandResult(success=True, text="ok"),         # powersaving on (enforce write)
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -881,6 +889,7 @@ async def test_stored_path_read_retry_budget_is_capped_per_node(db):
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -910,6 +919,7 @@ async def test_stored_path_failure_flood_probe_does_not_run_full_sync(db):
         CommandResult(success=True, text="v1.14.1"),   # flood probe reaches node
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -935,6 +945,7 @@ async def test_flood_routed_contact_probe_defers_full_sync(db):
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="v1.14.1"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -964,6 +975,7 @@ async def test_flood_routed_contact_unreachable_skips_full_sync(db):
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=False, error="timeout"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
 
@@ -1312,6 +1324,7 @@ async def test_permission_error_login_failure_marks_offline(db):
     gw.login = AsyncMock(return_value=False)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="no permission"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
     node = await db.get_node("aabbccdd1122")
@@ -1653,6 +1666,7 @@ async def test_cycle_skips_non_repeater_contacts(db):
     cfg.facts = []
     gw = _make_gateway(contacts=[_contact("aabbccdd1122", type_=1)])  # CLI, not REP
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     results = await wq.run_cycle()
     assert results[0].reachable is False
@@ -1673,6 +1687,7 @@ async def test_cycle_sets_favourite_flag_on_unfavourited_contact(db):
     gw.set_contact_favourite = AsyncMock(return_value=True)
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
     gw.set_contact_favourite.assert_awaited_once()
@@ -2428,6 +2443,7 @@ async def test_cycle_state_configured_after_successful_enforcement(db):
         CommandResult(success=True, text="ok"),    # set powersaving on — success
     ])
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     await wq.run_cycle()
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.CONFIGURED
@@ -2480,6 +2496,7 @@ async def test_fact_read_timeout_is_retained_in_activity_log(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(side_effect=_probe_ok_else_timeout)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -2515,6 +2532,7 @@ async def test_cycle_state_partial_when_node_processing_raises(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(side_effect=RuntimeError("serial failure"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     with pytest.raises(RuntimeError, match="serial failure"):
         await wq.run_cycle()
@@ -2538,6 +2556,7 @@ async def test_cycle_state_partial_when_node_processing_is_cancelled(db):
     gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
     gw.send_command = AsyncMock(side_effect=blocked_send)
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     task = asyncio.create_task(wq.run_cycle())
     await started.wait()
 
@@ -3120,6 +3139,7 @@ async def test_collect_facts_clock_sends_bare_command(db):
         return_value=CommandResult(success=True, text="2026-05-24 00:00:00")
     )
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -3137,6 +3157,7 @@ async def test_collect_facts_neighbors_sends_bare_command(db):
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="> NodeA abc"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -3155,6 +3176,7 @@ async def test_collect_facts_neighbors_stores_count(db):
     raw = "> NodeA abc\n> NodeB def\n> NodeC ghi"
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text=raw))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     await wq.run_cycle()
 
@@ -3288,6 +3310,7 @@ async def test_open_node_warning_logged_when_no_acl(db, caplog):
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
 
     with caplog.at_level(logging.WARNING, logger="mch.queue"):
         await wq.run_cycle()
@@ -3306,6 +3329,7 @@ async def test_open_node_warning_written_to_db_logs(db):
     gw = _make_gateway(contacts=[contact])
     gw.send_command = AsyncMock(return_value=CommandResult(success=True, text="ok"))
     wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
     await wq.run_cycle()
 
     logs = await db.get_logs()  # all logs

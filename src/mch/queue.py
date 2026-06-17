@@ -1380,14 +1380,20 @@ class WorkQueue:
 
         results: list[NodeResult] = []
 
-        for node_cfg in self._config.nodes:
-            contact = self._find_contact(node_cfg.pubkey_prefix, contact_by_pubkey)
+        # Inventory lives in the DB now (sunset): sweep every managed DB node, not config
+        # entries. A DB node carries its full pubkey, so the gateway contact is a direct lookup.
+        nodes = await self._db.get_all_nodes()
+        for node in nodes:
+            label = node.label or node.name or node.pubkey[:12]
+            contact = contact_by_pubkey.get(node.pubkey) or self._find_contact(
+                node.pubkey, contact_by_pubkey
+            )
             if contact is None:
                 log.warning("node %r (%s) not in gateway contacts — skipping",
-                            node_cfg.label, node_cfg.pubkey_prefix)
+                            label, node.pubkey[:12])
                 results.append(NodeResult(
-                    pubkey=node_cfg.pubkey_prefix,
-                    name=node_cfg.label,
+                    pubkey=node.pubkey,
+                    name=label,
                     reachable=False,
                     error="not in gateway contacts",
                 ))
@@ -1395,10 +1401,10 @@ class WorkQueue:
 
             if contact.get("type") != CONTACT_TYPE_REPEATER:
                 log.warning("node %r (%s) is not a repeater (type=%s) — skipping",
-                            node_cfg.label, node_cfg.pubkey_prefix, contact.get("type"))
+                            label, node.pubkey[:12], contact.get("type"))
                 results.append(NodeResult(
-                    pubkey=node_cfg.pubkey_prefix,
-                    name=node_cfg.label,
+                    pubkey=node.pubkey,
+                    name=label,
                     reachable=False,
                     error="not a repeater",
                 ))
@@ -1407,7 +1413,7 @@ class WorkQueue:
             result = await self._process_node(contact)
             results.append(result)
 
-            if len(self._config.nodes) > 1:
+            if len(nodes) > 1:
                 delay = self._config.scheduler.inter_node_delay_seconds
                 log.debug("rate-limit delay: %ds", delay)
                 await asyncio.sleep(delay)
