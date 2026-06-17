@@ -101,6 +101,71 @@ def test_load_records_config_and_secrets_paths(tmp_path):
     assert cfg.secrets_path == str(secrets.resolve())
 
 
+def test_strict_load_rejects_nodes_block(tmp_path):
+    """The daemon loads strict: leftover desired state in config.yaml is a hard error."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbcc
+            settings:
+              txdelay: "14"
+        """)
+    with pytest.raises(ValueError, match="mch import"):
+        load(p, strict=True)
+
+
+def test_strict_load_rejects_groups_block(tmp_path):
+    p = _write_config(tmp_path, """\
+        groups:
+          - name: solar
+            settings:
+              advert.interval: "240"
+        """)
+    with pytest.raises(ValueError, match="mch import"):
+        load(p, strict=True)
+
+
+def test_strict_load_rejects_global_desired_block(tmp_path):
+    p = _write_config(tmp_path, """\
+        global:
+          settings:
+            powersaving: "on"
+        """)
+    with pytest.raises(ValueError, match="mch import"):
+        load(p, strict=True)
+
+
+def test_strict_load_allows_daemon_only_config(tmp_path):
+    """gateway/scheduler/etc. are fine under strict; only desired state is rejected."""
+    p = _write_config(tmp_path, """\
+        gateway:
+          device: /dev/meshcore0
+        scheduler:
+          inter_node_delay_seconds: 30
+        """)
+    cfg = load(p, strict=True)
+    assert cfg.gateway.device == "/dev/meshcore0"
+    assert cfg.nodes == []
+
+
+def test_strict_load_tolerates_empty_desired_blocks(tmp_path):
+    """An empty `nodes: []` left behind after migration should not block startup."""
+    p = _write_config(tmp_path, "nodes: []\ngroups: []\n")
+    cfg = load(p, strict=True)
+    assert cfg.nodes == []
+
+
+def test_lenient_load_still_accepts_desired_state(tmp_path):
+    """Default (non-strict) load keeps reading desired state — the import on-ramp."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              txdelay: "14"
+        """)
+    cfg = load(p)
+    assert cfg.nodes[0].pubkey_prefix == "aabbccdd"
+
+
 def test_api_config_is_disabled_and_loopback_by_default():
     cfg = ApiConfig()
 

@@ -323,18 +323,19 @@ async def test_status_dispatch_no_open_nodes_when_default_password(db, wq, confi
 
 
 async def test_daemon_reload_updates_existing_config_object(tmp_path):
+    # Sunset: config.yaml carries only daemon settings now (no nodes/desired state), and the
+    # daemon reload is strict. Reload updates the existing Config object in place.
     config_path = tmp_path / "config.yaml"
     secrets_path = tmp_path / "secrets.yaml"
     config_path.write_text(
         "secrets_file: secrets.yaml\n"
-        "nodes:\n"
-        "  - pubkey_prefix: aabbccdd\n"
-        "    label: old\n"
+        "messenger:\n"
+        "  allowed_prefixes: [aabbccdd]\n"
     )
     secrets_path.write_text("nodes:\n  aabbccdd: oldpass\n")
     secrets_path.chmod(0o600)
 
-    config = load(config_path)
+    config = load(config_path, strict=True)
     daemon = Daemon(config)
     daemon._wq = MagicMock()
     daemon._wq.refresh_config_state = AsyncMock()
@@ -343,21 +344,18 @@ async def test_daemon_reload_updates_existing_config_object(tmp_path):
     config_path.write_text(
         "secrets_file: secrets.yaml\n"
         "messenger:\n"
-        "  allowed_prefixes: [aabbccdd]\n"
-        "nodes:\n"
-        "  - pubkey_prefix: aabbccdd\n"
-        "    label: new\n"
+        "  allowed_prefixes: [aabbccdd, 11223344]\n"
     )
     secrets_path.write_text("nodes:\n  aabbccdd: newpass\n")
 
     await daemon._reload_config("test")
 
     assert daemon._config is config
-    assert config.nodes[0].label == "new"
+    assert config.messenger.allowed_prefixes == ["aabbccdd", "11223344"]
     assert config.secrets["aabbccdd"].password == "newpass"
     daemon._wq.refresh_config_state.assert_awaited_once()
     daemon._messenger.update_config.assert_called_once_with(
-        allowed_prefixes=["aabbccdd"],
+        allowed_prefixes=["aabbccdd", "11223344"],
         announce_channel=None,
     )
 
@@ -2155,6 +2153,38 @@ async def test_import_warns_unresolvable_node(db, wq):
     assert resp["ok"] is True
     assert resp["data"]["written"] == 0
     assert any("ghost" in w or "deadbeef" in w for w in resp["data"]["warnings"])
+
+
+async def test_import_from_explicit_path_overrides_live_config(db, wq, tmp_path):
+    """`mch import <file>` flattens that file, not the daemon's (now-stripped) live config."""
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8
+    legacy = tmp_path / "legacy.yaml"
+    legacy.write_text(
+        'nodes:\n'
+        '  - pubkey_prefix: aabbccdd\n'
+        '    settings:\n'
+        '      txdelay: "14"\n'
+    )
+
+    # Live config is empty — the write must come entirely from the path.
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(legacy)}, wq, db, Config()
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 1
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+
+
+async def test_import_from_missing_path_errors(db, wq):
+    resp = await _dispatch(
+        {"cmd": "import", "path": "/no/such/file.yaml"}, wq, db, Config()
+    )
+
+    assert resp["ok"] is False
+    assert "cannot read import file" in resp["error"]
 
 
 # ------ export ------
