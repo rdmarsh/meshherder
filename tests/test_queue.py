@@ -3234,6 +3234,71 @@ async def test_reconcile_favourites_ignores_non_repeater(db):
     gw.set_contact_favourite.assert_not_awaited()
 
 
+async def test_reconcile_favourites_does_not_repin_retired_node(db):
+    """A retired node whose contact lost the flag is left unfavourited, not re-pinned."""
+    cfg = _make_config()
+    contact = _contact("aabbccdd11223344556677889900aabb", flags=0)
+    await db.upsert_node(Node(
+        pubkey="aabbccdd11223344556677889900aabb", name="n", state=NodeState.RETIRED
+    ))
+    gw = _make_gateway_with_favourite(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    await wq._reconcile_favourites()
+
+    gw.set_contact_favourite.assert_not_awaited()
+
+
+async def test_retire_node_sets_state_and_unfavourites(db):
+    cfg = _make_config()
+    contact = _contact("aabbccdd11223344556677889900aabb", flags=1)
+    await db.upsert_node(Node(
+        pubkey="aabbccdd11223344556677889900aabb", name="n", state=NodeState.CONFIGURED
+    ))
+    gw = _make_gateway_with_favourite(contacts=[contact])
+    gw.unset_contact_favourite = AsyncMock(return_value=True)
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    node = await wq.retire_node("aabbccdd11223344556677889900aabb")
+
+    assert node.state == NodeState.RETIRED
+    assert (await db.get_node(node.pubkey)).state == NodeState.RETIRED
+    gw.unset_contact_favourite.assert_awaited_once_with(contact)
+
+
+async def test_unretire_node_resets_state_and_refavourites(db):
+    cfg = _make_config()
+    contact = _contact("aabbccdd11223344556677889900aabb", flags=0)
+    await db.upsert_node(Node(
+        pubkey="aabbccdd11223344556677889900aabb", name="n", state=NodeState.RETIRED
+    ))
+    gw = _make_gateway_with_favourite(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+    wq._contacts = [contact]
+
+    node = await wq.unretire_node("aabbccdd11223344556677889900aabb")
+
+    assert node.state == NodeState.UNKNOWN
+    assert node.next_sync_at is None
+    gw.set_contact_favourite.assert_awaited_once_with(contact)
+
+
+async def test_run_cycle_skips_retired_node(db):
+    cfg = _make_config()
+    contact = _contact("aabbccdd11223344556677889900aabb", flags=1)
+    await db.upsert_node(Node(
+        pubkey="aabbccdd11223344556677889900aabb", name="n", state=NodeState.RETIRED
+    ))
+    gw = _make_gateway(contacts=[contact])
+    wq = WorkQueue(cfg, gw, db)
+
+    results = await wq.run_cycle()
+
+    assert results == []  # retired node is never swept
+
+
 # ------------------------------------------------------------------
 # open-node warning
 # ------------------------------------------------------------------

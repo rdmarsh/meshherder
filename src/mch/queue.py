@@ -637,6 +637,39 @@ class WorkQueue:
                 raise ValueError(result.error or "no response")
             return result.text or "(ok)"
 
+    async def retire_node(self, pubkey: str) -> Node:
+        """Retire a node: exclude it from sync and unfavourite its contact, keep its history.
+
+        Retire-don't-delete — the node row, facts, and logs stay for the record; only its
+        lifecycle changes. Unfavouriting is eviction-pin removal, not contact deletion.
+        """
+        node = await self._db.get_node(pubkey)
+        if node is None:
+            raise ValueError(f"node {pubkey[:12]} not found")
+        node.state = NodeState.RETIRED
+        await self._db.upsert_node(node)
+        contact = self._contact_for_pubkey(pubkey)
+        if contact is not None and contact.get("flags", 0) & 1:
+            await self._gateway.unset_contact_favourite(contact)
+        await self._db.write_log(
+            pubkey, "INFO", "node retired — excluded from sync and unfavourited"
+        )
+        return node
+
+    async def unretire_node(self, pubkey: str) -> Node:
+        """Return a retired node to management: re-favourite it and schedule it for sync."""
+        node = await self._db.get_node(pubkey)
+        if node is None:
+            raise ValueError(f"node {pubkey[:12]} not found")
+        node.state = NodeState.UNKNOWN
+        node.next_sync_at = None  # due immediately so it reconverges
+        await self._db.upsert_node(node)
+        contact = self._contact_for_pubkey(pubkey)
+        if contact is not None and not contact.get("flags", 0) & 1:
+            await self._gateway.set_contact_favourite(contact)
+        await self._db.write_log(pubkey, "INFO", "node unretired — returned to management")
+        return node
+
     async def unfiled_contacts(self) -> list[dict[str, Any]]:
         """Return visible repeater contacts that are not yet in config."""
         return await get_unfiled_contacts(self._config, self._gateway)
@@ -1189,7 +1222,10 @@ class WorkQueue:
         remove path, not this reconcile — so this never unfavourites, and can't fight a
         bootstrap that just seeded the same contact.
         """
-        known = {n.pubkey for n in await self._db.get_all_nodes()}
+        db_nodes = await self._db.get_all_nodes()
+        known = {n.pubkey for n in db_nodes}  # all DB nodes — never re-seed one
+        # Retired nodes are intentionally unfavourited; never re-pin them.
+        managed = {n.pubkey for n in db_nodes if n.state != NodeState.RETIRED}
 
         for contact in self._contacts:
             if contact.get("type") != CONTACT_TYPE_REPEATER:
@@ -1204,9 +1240,10 @@ class WorkQueue:
                     state=NodeState.UNKNOWN,
                 ))
                 known.add(pubkey)
+                managed.add(pubkey)
                 log.info("seeded node '%s' from gateway favourites (%s)",
                          contact.get("adv_name") or pubkey[:12], pubkey[:12])
-            elif pubkey in known and not favourited:
+            elif pubkey in managed and not favourited:
                 await self._gateway.set_contact_favourite(contact)
                 log.info("favourited managed node %s (eviction pin)", pubkey[:12])
 
@@ -1234,6 +1271,8 @@ class WorkQueue:
         now = datetime.now(UTC)
         nodes = await self._db.get_all_nodes()
         for node in nodes:
+            if node.state == NodeState.RETIRED:
+                continue  # retired nodes are never scheduled for sync
             if node.next_sync_at is None or node.next_sync_at < now:
                 delay = random.uniform(0, interval_s)
                 await self._db.set_next_sync(node.pubkey, now + timedelta(seconds=delay))
@@ -1337,7 +1376,8 @@ class WorkQueue:
 
         # Inventory lives in the DB now (sunset): sweep every managed DB node, not config
         # entries. A DB node carries its full pubkey, so the gateway contact is a direct lookup.
-        nodes = await self._db.get_all_nodes()
+        # Retired nodes are kept for history but never swept.
+        nodes = [n for n in await self._db.get_all_nodes() if n.state != NodeState.RETIRED]
         for node in nodes:
             label = node.label or node.name or node.pubkey[:12]
             contact = contact_by_pubkey.get(node.pubkey) or self._find_contact(

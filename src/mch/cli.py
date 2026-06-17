@@ -1459,14 +1459,14 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed local DB state.")
 @click.pass_context
 def prune(ctx: click.Context, yes: bool) -> None:
-    """List or delete DB nodes that are no longer in config.yaml."""
+    """List or hard-delete retired nodes (the purge step after `mch retire`)."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
     candidates = data.get("candidates", [])
 
     if not candidates:
-        click.echo("no DB nodes outside config.yaml")
-        click.echo("secrets.yaml entries and gateway favourites are left unchanged")
+        click.echo("no retired nodes to prune")
+        click.echo("retire a node first with `mch retire <node>`; secrets.yaml is left unchanged")
         return
 
     label_w = max(
@@ -1478,7 +1478,7 @@ def prune(ctx: click.Context, yes: bool) -> None:
         max((_wlen(n.get("name") or "-") for n in candidates), default=0),
     )
     row = "  {:<12}  {}  {}  {:<12}  {:<12}"
-    click.echo("DB nodes outside config.yaml:")
+    click.echo("retired nodes (will be hard-deleted, history and all):")
     click.echo(row.format(
         "PUBKEY",
         _wpad("LABEL", label_w),
@@ -1504,11 +1504,11 @@ def prune(ctx: click.Context, yes: bool) -> None:
 
     if yes:
         click.echo("")
-        click.echo(f"deleted {data.get('deleted', 0)} node(s) from local DB state")
+        click.echo(f"deleted {data.get('deleted', 0)} retired node(s) from local DB state")
     else:
         click.echo("")
         click.echo("run 'mch prune --yes' to delete these local DB rows")
-    click.echo("secrets.yaml entries and gateway favourites are left unchanged")
+    click.echo("secrets.yaml entries are left unchanged")
 
 
 @cli.group()
@@ -1669,11 +1669,11 @@ def clean_settings(
 @click.option(
     "--force",
     is_flag=True,
-    help="Allow deleting local DB state for a node still present in config.yaml.",
+    help="Allow deleting local DB state for a node that is still managed (not retired).",
 )
 @click.pass_context
 def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
-    """Delete one node's local DB state."""
+    """Delete one node's local DB state (prefer `mch retire` to stop managing a node)."""
     resp = _rpc(
         ctx.obj["socket"],
         {"cmd": "remove", "query": node, "dry_run": True, "force": force},
@@ -1688,11 +1688,11 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
     click.echo(f"  mesh name: {name}")
     click.echo(f"  state:     {data.get('state') or '-'}")
     click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
-    if data.get("configured"):
-        click.echo("  config:    still present in config.yaml (--force used)")
+    if not data.get("retired"):
+        click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
     click.echo("")
     click.echo("This deletes local facts, settings, operations, logs, and the DB node row.")
-    click.echo("config.yaml, secrets.yaml, and gateway favourites are left unchanged.")
+    click.echo("secrets.yaml is left unchanged.")
 
     if not yes and not click.confirm("Delete this local DB state?"):
         click.echo("not deleted")
@@ -1704,6 +1704,32 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
     )
     deleted = _check(delete_resp).get("deleted", 0)
     click.echo(f"deleted {deleted} node(s) from local DB state")
+
+
+@cli.command("retire")
+@click.argument("node")
+@click.pass_context
+def retire_node(ctx: click.Context, node: str) -> None:
+    """Stop managing a node: exclude it from sync and unfavourite it, keeping its history.
+
+    Retire-don't-delete. Re-manage later with `mch unretire`, or purge the history with
+    `mch prune`.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "retire", "query": node}))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    click.echo(f"retired {ident} ({_pk(data.get('pubkey'))}) — state now {data.get('state')}")
+    click.echo("excluded from sync and unfavourited; history kept. `mch unretire` to undo.")
+
+
+@cli.command("unretire")
+@click.argument("node")
+@click.pass_context
+def unretire_node(ctx: click.Context, node: str) -> None:
+    """Return a retired node to management: re-favourite it and schedule it for sync."""
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "unretire", "query": node}))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    click.echo(f"unretired {ident} ({_pk(data.get('pubkey'))}) — state now {data.get('state')}")
+    click.echo("re-favourited and queued for sync.")
 
 
 # ---------------------------------------------------------------------------

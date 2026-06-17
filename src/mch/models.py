@@ -18,6 +18,8 @@ class NodeState(Enum):
     CONFIGURING = "configuring"  # commands in flight
     CONFIGURED  = "configured"   # all enforced settings match desired, all operations done
     PARTIAL     = "partial"      # some settings pending/failed or drifted
+    RETIRED     = "retired"      # deliberately removed from management; skipped + unfavourited,
+    #                              kept for history (retire-don't-delete). Re-managed via unretire.
 
 
 class SettingPolicy(Enum):
