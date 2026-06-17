@@ -513,8 +513,7 @@ class WorkQueue:
         log.info("work queue started (interval=%.1fd)", self._config.scheduler.sync_interval_days)
 
         self._contacts = await self._gateway.get_contacts(managed_only=False)
-        await self._seed_from_config()
-        await self._seed_node_labels()
+        await self._reconcile_favourites()
         await self._recover_interrupted_nodes()
         await self._reschedule_overdue()
 
@@ -615,12 +614,11 @@ class WorkQueue:
             log.info("manual sync cycle finished: %d nodes", len(results))
 
     async def refresh_config_state(self) -> None:
-        """Refresh gateway contacts and reseed DB metadata after config reload."""
+        """Refresh gateway contacts and reconcile favourites after config reload."""
         self.pause()
         try:
             self._contacts = await self._gateway.get_contacts(managed_only=False)
-            await self._seed_from_config()
-            await self._seed_node_labels()
+            await self._reconcile_favourites()
         finally:
             self.resume()
 
@@ -1174,86 +1172,43 @@ class WorkQueue:
         next_sync = datetime.now(UTC) + timedelta(seconds=interval_s + jitter)
         await self._db.set_next_sync(node.pubkey, next_sync)
 
-    async def _seed_from_config(self) -> None:
-        """Seed DB entries for config nodes visible to the gateway.
+    async def _reconcile_favourites(self) -> None:
+        """Reconcile the gateway's favourited repeaters with the DB managed set (sunset).
 
-        Cross-references config.nodes against all gateway contacts. Inserts any
-        config-listed node found in contacts that isn't already in the DB.
-        Auto-favourites matched nodes so they aren't evicted on a dense mesh.
-        Logs a warning for config nodes with no matching gateway contact.
+        The DB is the inventory now (config.yaml no longer lists nodes), so favourites and
+        the DB managed set are kept in step by *adding* in both directions:
+
+          1. SEED: a favourited repeater contact the gateway knows but the DB does not is
+             inserted as a managed node. This bootstraps inventory from the gateway's
+             favourites (the "Initialisation from gateway favourites" design) and treats a
+             manual favourite as "manage this node".
+          2. PIN: a managed DB node whose contact has lost the favourite flag is re-favourited
+             so a dense mesh can't evict it from the gateway's contact store.
+
+        Removing a node from the managed set (and unfavouriting its contact) is the retire/
+        remove path, not this reconcile — so this never unfavourites, and can't fight a
+        bootstrap that just seeded the same contact.
         """
-        db_nodes = await self._db.get_all_nodes()
-        known_pubkeys = {n.pubkey for n in db_nodes}
+        known = {n.pubkey for n in await self._db.get_all_nodes()}
 
-        for node_cfg in self._config.nodes:
-            contact = next(
-                (c for c in self._contacts
-                 if c["public_key"].startswith(node_cfg.pubkey_prefix)
-                 and c.get("type") == CONTACT_TYPE_REPEATER),
-                None,
-            )
-            if contact is None:
-                message = "config node not visible to gateway - cannot manage"
-                log.warning(
-                    "config node %r (prefix: %s) not visible to gateway - cannot manage",
-                    node_cfg.label or node_cfg.pubkey_prefix,
-                    node_cfg.pubkey_prefix,
-                )
-                await self._db.write_log(
-                    None,
-                    "WARNING",
-                    message,
-                    display_pubkey=node_cfg.pubkey_prefix,
-                    display_label=node_cfg.label or node_cfg.pubkey_prefix,
-                )
+        for contact in self._contacts:
+            if contact.get("type") != CONTACT_TYPE_REPEATER:
                 continue
-
             pubkey = contact["public_key"]
+            favourited = bool(contact.get("flags", 0) & 1)
 
-            if pubkey not in known_pubkeys:
-                node = Node(
+            if favourited and pubkey not in known:
+                await self._db.upsert_node(Node(
                     pubkey=pubkey,
                     name=contact.get("adv_name", ""),
-                    label=node_cfg.label or "",
-                    group=node_cfg.group,
                     state=NodeState.UNKNOWN,
-                )
-                await self._db.upsert_node(node)
-                log.info(
-                    "seeded node '%s' from config (%s)",
-                    node_cfg.label or pubkey[:12],
-                    pubkey[:12],
-                )
-
-            # auto-favourite: guard against eviction on a dense mesh
-            if not contact.get("flags", 0) & 1:
+                ))
+                known.add(pubkey)
+                log.info("seeded node '%s' from gateway favourites (%s)",
+                         contact.get("adv_name") or pubkey[:12], pubkey[:12])
+            elif pubkey in known and not favourited:
                 await self._gateway.set_contact_favourite(contact)
-                log.info("favourited '%s' (%s)", node_cfg.label or pubkey[:12], pubkey[:12])
-
-    async def _seed_node_labels(self) -> None:
-        """Write labels and groups from config into the DB for any nodes already in the DB.
-
-        Ensures labels and groups are current immediately on restart — not just after the
-        next sync cycle for each node. Fixes stale group fields after config edits.
-        """
-        all_nodes = await self._db.get_all_nodes()
-        pubkey_to_node = {n.pubkey: n for n in all_nodes}
-        for node_cfg in self._config.nodes:
-            node = next(
-                (n for pk, n in pubkey_to_node.items() if pk.startswith(node_cfg.pubkey_prefix)),
-                None,
-            )
-            if node is None:
-                continue
-            changed = False
-            if node.label != node_cfg.label:
-                node.label = node_cfg.label
-                changed = True
-            if node.group != node_cfg.group:
-                node.group = node_cfg.group
-                changed = True
-            if changed:
-                await self._db.upsert_node(node)
+                log.info("favourited managed node %s (eviction pin)", pubkey[:12])
 
     async def _recover_interrupted_nodes(self) -> None:
         """Mark nodes left mid-sync by an earlier daemon stop as needing attention."""

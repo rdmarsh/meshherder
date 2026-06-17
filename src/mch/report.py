@@ -39,7 +39,9 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
         # `mch node`/`mch plan` show DB-authored intent immediately after `mch set` and a
         # node never listed in config.yaml still resolves fully.
         node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
-        configured = _node_config(node, config) is not None
+        # Sunset: the DB is the inventory, so every node it holds is a managed node.
+        # The old config-vs-DB "ghost" distinction is gone.
+        configured = True
         fact_records = await db.get_fact_records(node.pubkey)
         facts = {fact.key: fact.value for fact in fact_records}
         facts_collected_at = {fact.key: _iso(fact.collected_at) for fact in fact_records}
@@ -72,7 +74,8 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             "settings": settings,
         })
 
-    unseen = _unseen_config_nodes(nodes, config)
+    # Sunset: no config inventory means no "declared but never seen" ghost nodes.
+    unseen: list[dict[str, Any]] = []
     plan = _plan_report(node_reports, unseen)
     fleet_issues = _issues_report(node_reports, unseen)
     summary = _summary(node_reports, unseen, fleet_issues)
@@ -393,30 +396,6 @@ def _summary(
         "drifted_settings": len(issues["drifted"]),
         "open_nodes": len(issues["open_nodes"]),
     }
-
-
-def _unseen_config_nodes(nodes: list[Node], config: Config) -> list[dict[str, Any]]:
-    return [
-        {
-            "pubkey_prefix": node_cfg.pubkey_prefix,
-            "label": node_cfg.label,
-            "health": "unknown",
-            "issues": [{
-                "code": "not_known",
-                "severity": "critical",
-                "detail": "node not known to gateway/DB",
-            }],
-        }
-        for node_cfg in config.nodes
-        if not any(node.pubkey.startswith(node_cfg.pubkey_prefix) for node in nodes)
-    ]
-
-
-def _node_config(node: Node, config: Config) -> NodeConfig | None:
-    return next(
-        (entry for entry in config.nodes if node.pubkey.startswith(entry.pubkey_prefix)),
-        None,
-    )
 
 
 def _password_known(node: Node, config: Config) -> bool:
