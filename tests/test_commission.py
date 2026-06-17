@@ -552,15 +552,15 @@ async def test_commission_new_retries_identity_verification(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_commission_new_returns_config_snippet(tmp_path):
-    """'new' mode returns a config.yaml snippet with pubkey_prefix, label, group, and via_radio."""
+async def test_commission_new_returns_importable_yaml(tmp_path):
+    """'new' mode returns an importable nodes: doc with pubkey_prefix, label, group, via_radio."""
     from mch.commission import handle_commission
 
     factory_pubkey = "a695e2be" + "0" * 56
     gw = make_gateway(discovered=[discover_payload(factory_pubkey)])
     wq = make_wq(gateway=gw)
     db = make_db()
-    cfg = make_config(groups=[GroupConfig(name="testgroup")])
+    cfg = make_config()
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
@@ -572,16 +572,19 @@ async def test_commission_new_returns_config_snippet(tmp_path):
     }, wq, db, cfg)
 
     assert resp["ok"]
-    snippet = resp["data"]["config_snippet"]
-    assert f"pubkey_prefix: {GENERATED_PUBKEY[:8]}" in snippet
-    assert "label: Test-Node" in snippet
-    assert "group: testgroup" in snippet
-    assert "via_radio: 915.800,250,10,5" in snippet
-    assert 'desired: "Test Node"' in snippet
-    assert "policy: enforce" in snippet
+    import_yaml = resp["data"]["import_yaml"]
+    assert "groups:\n  - name: testgroup" in import_yaml
+    assert "nodes:\n" in import_yaml
+    assert f"pubkey_prefix: {GENERATED_PUBKEY[:8]}" in import_yaml
+    assert "label: Test-Node" in import_yaml
+    assert "group: testgroup" in import_yaml
+    assert "via_radio: 915.800,250,10,5" in import_yaml
+    assert 'desired: "Test Node"' in import_yaml
+    assert "policy: enforce" in import_yaml
 
-    path = tmp_path / "config.yaml"
-    path.write_text("groups:\n  - name: testgroup\nnodes:\n" + snippet + "\n")
+    # The emitted YAML round-trips through the (lenient) loader that `mch import` uses.
+    path = tmp_path / "new-node.yaml"
+    path.write_text(import_yaml + "\n")
     loaded = load(path, load_secrets=False)
     assert loaded.nodes[0].label == "Test-Node"
     assert loaded.nodes[0].settings["name"].desired == "Test Node"
@@ -607,7 +610,8 @@ async def test_commission_new_rejects_invalid_label_before_commands():
 
 
 @pytest.mark.asyncio
-async def test_commission_new_rejects_unknown_group_before_commands():
+async def test_commission_new_accepts_any_group_for_fresh_node():
+    """Sunset: a fresh node may start a new group, so any group name is accepted."""
     from mch.commission import handle_commission
 
     factory_pubkey = "a695e2be" + "0" * 56
@@ -617,11 +621,12 @@ async def test_commission_new_rejects_unknown_group_before_commands():
     resp = await handle_commission({
         "cmd": "commission", "mode": "new",
         "label": "Test-Node",
-        "group": "undefined",
+        "group": "brand-new-group",
+        "prv_key": GENERATED_PRV_KEY,
     }, wq, make_db(), make_config())
 
-    assert resp == {"ok": False, "error": "group 'undefined' is not configured"}
-    gw.send_command.assert_not_awaited()
+    assert resp["ok"] is True
+    assert "group: brand-new-group" in resp["data"]["import_yaml"]
 
 
 @pytest.mark.asyncio

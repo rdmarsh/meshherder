@@ -4,51 +4,41 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (updated 2026-06-13) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-06-17) - update or clear this block when you pick up <<<
 
 **Workflow: new work goes on a branch + PR, no more direct commits to `main`** (journal/handoff
 commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed direct on `main`.
 
-**Status (2026-06-16): slice 8 in progress on `slice8-config-import`. 8a/8b committed; the
-desired-state SUNSET core (8c/8d/8i) is now committed and green. PAUSED before 8e (the one-way
-config-error + inventory-to-DB cut) at the operator's request for review.**
+**Status (2026-06-17): SLICE 8 COMPLETE on `slice8-config-import` - the config.yaml desired-state
+sunset is done. 855 tests pass, ruff clean, mypy 7 (pre-existing). Ready to open a PR.** The DB is
+now authoritative for inventory + desired state; config.yaml carries only daemon settings.
 
-**Sunset decisions (operator, this session):** full sunset; config.yaml that still carries desired
-state must ERROR (refuse to start), not be a readable seed; operations get a DB home (8i).
+Sub-slices, all committed on this branch (8a-8d/8i predate this session; 8e-8h landed this session):
+- **8a/8b/8c/8d/8i** (earlier): `mch import`/`export`, the DB resolver `resolve_desired_configs`, all
+  desired-state read paths on the DB, operations in `desired_operations`.
+- **8e (part 1, `a838889`)**: `run_cycle` sweeps `db.get_all_nodes()` (retired excluded), not
+  `config.nodes`. Test setup seeds DB inventory via the `_seed_desired` bridge.
+- **8e (part 2, `1e05bad`)**: `config.load(strict=True)` for the daemon (main + reload) hard-errors on
+  leftover `nodes:`/`groups:`/`global:` desired state (empty blocks tolerated); parser lenient by
+  default. `mch import [FILE]` takes an explicit path; `mch validate` stays lenient.
+- **8f (`7dc72f3`)**: `_reconcile_favourites` (seed favourited repeaters into the DB; pin managed
+  nodes) replaces `_seed_from_config`/`_seed_node_labels`. `mch set --group` validates DB membership;
+  report drops ghost/unseen (every DB node managed).
+- **8g (`301b620`)**: `NodeState.RETIRED` + `mch retire`/`unretire` (unfavourite via new
+  `Gateway.unset_contact_favourite`); retired excluded from sync everywhere. `prune` hard-deletes
+  retired; `remove` guards a managed node behind `--force`. Dropped `_is_configured_node`.
+- **8h (this commit)**: `mch commission` prints an importable `nodes:` doc + `mch import` guidance
+  (accepts any group for a fresh node); `mch import` now carries node label/group inventory too, not
+  just settings (otherwise migrated nodes lose their label/group). Docs updated (DESIGN/README/mch.1/
+  CHANGELOG/BACKLOG).
 
-- **8c DONE** (`8e22a3e`): `config.resolve_desired_configs(db, node)` rebuilds a node's
-  `(NodeConfig, GroupConfig|None, global GroupConfig)` purely from DB rows by overlaying onto empty
-  bases (reuses `overlay_db_settings`/`overlay_db_group_settings` - "build from rows" == "overlay
-  with nothing underneath"). A DB-only node (never in config.yaml) now resolves fully, closing the
-  slice-6 group-attribution limitation. No call sites switched.
-- **8d DONE** (3 commits `dc807d3`,`bbf6994`,`68d45ea`): all desired-state *resolution* read paths
-  now use the DB resolver - daemon clean path (`_wanted_setting_keys`), fleet report
-  (`build_fleet_report`/`_settings_report`, source is uniformly "db"), and the core sync engine
-  (`_process_node` resolves from the DB node; its 3 callers drop config lookups; `_run_next_due`
-  processes any due DB node). run_cycle still iterates `config.nodes` for the *inventory* of which
-  nodes to sweep - that moves to the DB in 8e. Test bridge `_seed_desired` (in test_queue.py) seeds
-  the DB from a test's Config via the production `config_to_desired_rows` (mirrors `mch import`).
-- **8i DONE** (`0f44ead`): operations migrated to the DB. New `desired_operations` table
-  (scope_type, scope_id, command, every_hours, fire_and_forget) + `DesiredOperation` model + DB CRUD;
-  `queue._resolve_db_operations` (Node>Group>Global) replaces the config-sourced path;
-  `config_to_desired_operations` (import) + operations in `desired_rows_to_config_dict` (export);
-  daemon import/export + CLI count. Closes the gap where operations had no DB home (8a left them out).
-- **837 tests pass, ruff clean, mypy 7 (pre-existing).**
+**Known follow-up (in BACKLOG, not blocking):** the commission **replace**/scan flows still read
+`config.nodes`/`config.groups` and need a DB-driven rework; and no command yet reassigns a node's
+group post-sunset (only import/commission set it).
 
-**NEXT - 8e (the one-way cut), then 8f/8g/8h:** see the plan file
-`~/.claude/plans/twinkling-waddling-rainbow.md`. 8e couples two things that must land together:
-  - `load(path, strict=True)` for the daemon -> ERROR on leftover `nodes:`/`groups:`/`global`
-    desired state, message pointing at `mch import`. Keep the parser lenient (default strict=False)
-    so test_config.py parse tests and `mch import <legacy.yaml>` still work. Migration on-ramp:
-    operators run `mch import` on the pre-8e build (daemon still tolerates desired-state config),
-    `mch export` to verify, strip config, then upgrade to the strict build.
-  - inventory moves to the DB: `run_cycle` must iterate `db.get_all_nodes()` (not `config.nodes`),
-    or the strict daemon sweeps nothing. Also rework `_seed_from_config`/`_seed_node_labels`,
-    `_is_configured_node` + `prune`/`remove`, the `mch set --group` group-name validation
-    (`daemon.py:_handle_set_setting`, currently checks `config.groups`), and report
-    `configured`/`_unseen_config_nodes`/ghosts - all currently read config inventory.
-  - 8f favourites = downstream DB mirror; 8g retire-don't-delete (`NodeState.RETIRED`); 8h
-    commission output + docs (DESIGN/README/mch.1/CHANGELOG + clear this block).
+**NEXT: open the PR** for `slice8-config-import` -> `main`. The operator's real migration on their box
+is: on the running (pre-strict) daemon run `mch import` + `mch export` to verify, strip the
+`nodes:`/`groups:`/`global:` blocks from config.yaml, then deploy this strict build.
 
 _Earlier slice-8 sub-steps (8a/8b), kept for context:_
 
