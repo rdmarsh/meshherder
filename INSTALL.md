@@ -165,6 +165,12 @@ Set the `device` path in `/etc/meshherder/config.yaml` to `/dev/meshcore0`.
 
 ## Upgrade
 
+> **Steady state is `main`.** These steps fast-forward whatever branch `/opt` is **already** on —
+> `git pull --ff-only` does **not** switch branches, so if you are on `main` it will never pull an
+> unmerged feature branch (and silently no-ops). To bench-test an unmerged branch, use
+> [Testing a feature branch on the bench](#testing-a-feature-branch-on-the-bench) instead, then
+> return to `main` when done.
+
 Use the same checkout and venv that were created during production install:
 
 ```bash
