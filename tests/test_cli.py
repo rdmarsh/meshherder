@@ -1263,7 +1263,7 @@ def test_status_single_match_shows_unobserved_settings_in_yellow():
     assert result.exit_code == 0
     assert "unknown = not yet observed" not in result.output
     assert re.search(
-        r"owner\.info\s+Managed by mch\s+-\s+-\s+0\s+\x1b\[33mnot observed\x1b\[0m",
+        r"owner\.info\s+Managed by mch\s+-\s+0\s+\x1b\[33mnot observed\x1b\[0m",
         result.output,
     )
 
@@ -1277,7 +1277,7 @@ def test_status_single_match_shows_tries_as_not_applicable_for_audit():
     }])
     result = _run_multi(["status", "aabb"], status, detail)
     assert re.search(
-        r"audit\s+owner\.info\s+Managed by mch\s+wrong\s+-\s+-\s+drifted", result.output
+        r"audit\s+owner\.info\s+Managed by mch\s+wrong\s+-\s+drifted", result.output
     )
 
 
@@ -1293,7 +1293,7 @@ def test_status_single_match_shows_approximate_settings_status():
     assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
-        r"radio\s+915\.075,125,9,5\s+915\.0750122,125,9,5\s+-\s+0\s+nominal",
+        r"radio\s+915\.075,125,9,5\s+915\.0750122,125,9,5\s+0\s+nominal",
         result.output,
     )
 
@@ -1317,7 +1317,7 @@ def test_status_single_match_shows_ok_settings_in_green():
 
     assert result.exit_code == 0
     assert re.search(
-        r"owner\.info\s+Managed by mch\s+Managed by mch\s+-\s+0\s+\x1b\[32mok\x1b\[0m",
+        r"owner\.info\s+Managed by mch\s+Managed by mch\s+0\s+\x1b\[32mok\x1b\[0m",
         result.output,
     )
 
@@ -2887,7 +2887,8 @@ def test_unset_global_scope_sends_global_request():
     assert "all managed nodes" in result.output
 
 
-def test_status_single_match_shows_setting_source_column():
+def test_status_single_match_settings_table_has_no_source_column():
+    # Sunset: the DB is the only desired-state source, so the SOURCE column is dropped.
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[
         {
@@ -2895,20 +2896,15 @@ def test_status_single_match_shows_setting_source_column():
             "policy": "enforce", "source": "db", "drift": False,
             "approximate": False, "update_attempts": 0,
         },
-        {
-            "key": "name", "desired": "Tower", "observed": "Tower",
-            "policy": "enforce", "source": "config", "drift": False,
-            "approximate": False, "update_attempts": 0,
-        },
     ])
     result = _run_multi(["status", "aabb"], status, detail)
 
     assert result.exit_code == 0
-    assert "SOURCE" in result.output
+    assert "SOURCE" not in result.output
     # DESIRED comes before OBSERVED, matching the fleet drift table.
     assert re.search(r"DESIRED\s+OBSERVED", result.output)
-    assert re.search(r"txdelay\s+14\s+14\s+db\s+0\s+ok", result.output)
-    assert re.search(r"name\s+Tower\s+Tower\s+config\s+0\s+ok", result.output)
+    # No source column between OBSERVED and TRIES now.
+    assert re.search(r"txdelay\s+14\s+14\s+0\s+ok", result.output)
 
 
 def test_status_single_match_settings_show_desired_before_observed():
@@ -2923,21 +2919,7 @@ def test_status_single_match_settings_show_desired_before_observed():
 
     assert result.exit_code == 0
     # desired (14) appears before observed (20) on the row
-    assert re.search(r"txdelay\s+14\s+20\s+db\s+1\s+drifted", result.output)
-
-
-def test_status_single_match_source_defaults_to_dash_when_absent():
-    status = _status_resp(nodes=[_summary()])
-    # A setting with no source (e.g. observed-only history) renders "-".
-    detail = _detail(settings=[{
-        "key": "owner.info", "desired": "x", "observed": "x",
-        "policy": "enforce", "drift": False, "approximate": False,
-        "update_attempts": 0,
-    }])
-    result = _run_multi(["status", "aabb"], status, detail)
-
-    assert result.exit_code == 0
-    assert re.search(r"owner\.info\s+x\s+x\s+-\s+0\s+ok", result.output)
+    assert re.search(r"txdelay\s+14\s+20\s+1\s+drifted", result.output)
 
 
 # ------ clean settings ------

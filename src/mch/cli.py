@@ -840,31 +840,27 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 else "-"
             )
 
-        def _src(setting: dict[str, Any]) -> str:
-            # "db" = set via `mch set`; "config" = from config.yaml; "-" = observed-only history.
-            return setting.get("source") or "-"
-
         click.echo("settings:")
         # column widths based on content display width, not char count
         col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
         col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
         col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
-        col_src = max(len("SOURCE"), max(len(_src(s)) for s in settings))
         col_tries = max(
             len("TRIES"), max(len(_tries(s)) for s in settings)
         )
         # DESIRED before OBSERVED, matching the fleet drift table (desired-vs-actual reading).
+        # No SOURCE column: the DB is the only desired-state source now (sunset).
         def _srow(
             policy: str, key: str, desired: str, observed: str,
-            source: str, tries: str, status: str,
+            tries: str, status: str,
         ) -> str:
             return (
                 f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}"
-                f"  {_wpad(observed, col_obs)}  {source:<{col_src}}  {tries:>{col_tries}}  {status}"
+                f"  {_wpad(observed, col_obs)}  {tries:>{col_tries}}  {status}"
             )
-        click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "SOURCE", "TRIES", "STATUS"))
-        click.echo(_srow("------", "---", "-------", "--------", "------", "-----", "------"))
+        click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "TRIES", "STATUS"))
+        click.echo(_srow("------", "---", "-------", "--------", "-----", "------"))
         for s in settings:
             if s.get("observed") is None:
                 status = click.style("not observed", fg="yellow")
@@ -879,7 +875,6 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 s["key"],
                 _sv(s.get("desired")),
                 _sv(s.get("observed")),
-                _src(s),
                 _tries(s),
                 status,
             ))
