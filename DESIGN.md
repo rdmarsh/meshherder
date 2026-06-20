@@ -117,7 +117,10 @@ wanted.
    would block on the mesh and conflict with traffic-minimisation), they print a `mch sync <node>`
    hint instead. The slice-2 overlay reads exactly these `(NODE, pubkey)` rows, so a `set` is
    honoured on the next cycle with no resolver change.
-4. [done 2026-06-11] `mch node` shows the source (`db`/`config`) per setting (new SOURCE column).
+4. [done 2026-06-11] `mch node` shows the source (`db`/`config`) per setting (a SOURCE column).
+   _(Superseded 2026-06-19: the SOURCE column was removed in the sunset - the DB is the only source
+   now, so it always read `db`. The report still carries a constant `source="db"` field for schema
+   stability.)_
    This also closed a gap: the **report** path (`build_fleet_report`, feeding `mch node`/`mch
    status`/`mch plan`/the HTTP API) did not previously apply `overlay_db_settings` - only the sync
    path did - so it would not have reflected a `mch set` until the next sync wrote an observed row.
@@ -208,8 +211,22 @@ wanted.
        nodes; `remove` guards a still-managed node behind `--force`.
      - 8h: `mch commission` prints an importable `nodes:` doc + `mch import` guidance instead of a
        config.yaml snippet; secrets.yaml snippet unchanged.
+   - [done 2026-06-19, post-review] **Complete backup/restore + a cleaner status table** (PR #3):
+     - The DB is now the only copy of intent, so `mch export`/`mch import` became a full fleet
+       backup, not just a desired-settings dump. Export emits every node's full pubkey, label, group,
+       desired settings, and operations (even a node with no desired settings), and each node's group
+       under `groups:` so the dump re-imports cleanly. Import recreates a node from its full pubkey
+       even when the gateway/DB has not seen it yet (`is_full_pubkey` resolves without a DB lookup;
+       short prefixes still need a known node and are skipped) - so a restore rebuilds the fleet
+       up-front and the favourite mirror re-pins each node as its contact reappears.
+     - Retired nodes round-trip: export tags them `retired: true` (the one inventory-state field in
+       the file; observed `NodeState` values are transient and deliberately not exported). Import
+       makes the operator choose `--retired keep` (restore as retired) or `--retired skip`; a write
+       touching retired nodes is refused until one is chosen.
+     - The per-setting SOURCE column was dropped from `mch status <node>` (always `db` now).
    - Follow-up (not done): the commission **replace** and **scan/list** flows still read config
-     inventory (`config.nodes`/`config.groups`) and need a DB-driven rework; tracked in BACKLOG.
+     inventory (`config.nodes`/`config.groups`) and need a DB-driven rework; tracked in BACKLOG,
+     along with making `facts` a scoped union, a scheduled-backup unit, and the `0.10.0` release cut.
 
 ## Convergence Over A Constrained Mesh
 
