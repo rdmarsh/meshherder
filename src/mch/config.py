@@ -21,7 +21,7 @@ from mch.command_registry import (
     writable_setting_keys,
 )
 from mch.meshkey import derive_public_key
-from mch.models import DesiredOperation, DesiredSetting, Scope, SettingPolicy
+from mch.models import DesiredOperation, DesiredSetting, NodeState, Scope, SettingPolicy
 
 if TYPE_CHECKING:
     from mch.db import Database
@@ -69,6 +69,7 @@ _NODE_KEYS = {
     "operations",
     "via_radio",
     "name_prefix",
+    "retired",
 }
 _GROUP_KEYS = {
     "name",
@@ -211,6 +212,9 @@ class NodeConfig:
     via_radio: RadioConfig | None = None
     # Prepended to the desired name (no auto-space); overrides group/global when set.
     name_prefix: str | None = None
+    # Inventory lifecycle, not desired config: carried only so `mch export`/`mch import` can
+    # round-trip a retired node (excluded from sync, unfavourited). True == the node is retired.
+    retired: bool = False
 
 
 @dataclass
@@ -792,6 +796,8 @@ def desired_rows_to_config_dict(
                 entry["label"] = meta.label
             if meta.group:
                 entry["group"] = meta.group
+            if meta.state is NodeState.RETIRED:
+                entry["retired"] = True
         entry.update(block_for((Scope.NODE, pubkey), is_node=True))
         node_entries.append(entry)
     if node_entries:
@@ -1160,6 +1166,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
         operations=operations,
         via_radio=via_radio,
         name_prefix=_coerce_name_prefix(raw.get("name_prefix")),
+        retired=bool(raw.get("retired", False)),
     )
 
 

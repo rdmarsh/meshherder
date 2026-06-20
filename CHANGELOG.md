@@ -15,12 +15,14 @@ and backlog history. Dates use the project repository's commit dates.
   config.yaml, then restart. The fleet report drops the config-vs-DB "ghost"/"unseen" distinction —
   every DB node is a managed node.
 - **`mch export`/`mch import` are now a complete fleet backup/restore.** Since the DB is the only
-  copy of intent, `mch export` includes every active node's identity (full pubkey), label, group,
-  desired settings, and operations — even nodes with no desired settings — and emits each node's
-  group so the dump re-imports cleanly. `mch import` recreates a node from its full pubkey even when
-  the gateway/DB has not seen it yet (a short prefix still needs a known node and is skipped), so
-  after a server or gateway replacement `mch import backup.yaml` rebuilds the fleet and the favourite
-  mirror re-pins each node as its contact reappears. Retired nodes are excluded from the backup.
+  copy of intent, `mch export` includes every node's identity (full pubkey), label, group, desired
+  settings, and operations — even nodes with no desired settings — and emits each node's group so the
+  dump re-imports cleanly. `mch import` recreates a node from its full pubkey even when the gateway/DB
+  has not seen it yet (a short prefix still needs a known node and is skipped), so after a server or
+  gateway replacement `mch import backup.yaml` rebuilds the fleet and the favourite mirror re-pins
+  each node as its contact reappears. Retired nodes are included in the backup tagged `retired: true`;
+  on import you choose `--retired keep` (restore them as retired) or `--retired skip` (omit them), and
+  a write that would touch retired nodes is refused until you pick one.
 - **Inventory + favourites are DB-driven.** On startup and reload the daemon reconciles the gateway's
   favourited repeaters with the DB managed set: a favourited repeater the DB doesn't know is seeded as
   a managed node, and every managed node is (re)favourited as an eviction pin. `mch set --group`
