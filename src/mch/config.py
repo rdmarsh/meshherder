@@ -32,6 +32,14 @@ _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
 # pubkey_prefix must be even-length hex (full bytes only); values are normalized to lowercase.
 _HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 _MIN_PREFIX_LEN = 8
+# A MeshCore public key is 32 bytes = 64 hex chars. A value this long IS the node identity
+# (not a prefix), so it needs no DB lookup to resolve - the basis for restore-from-export.
+PUBKEY_HEX_LEN = 64
+
+
+def is_full_pubkey(value: str) -> bool:
+    """True if value is a complete node public key (64 hex chars), not just a prefix."""
+    return len(value) == PUBKEY_HEX_LEN and bool(_HEX_RE.match(value))
 
 _TOP_LEVEL_KEYS = {
     "gateway",
@@ -693,6 +701,7 @@ def _operation_to_yaml(op: DesiredOperation) -> Any:
 def desired_rows_to_config_dict(
     rows: list[DesiredSetting],
     operations: list[DesiredOperation] | None = None,
+    node_inventory: list[Node] | None = None,
 ) -> dict[str, Any]:
     """Inverse of config_to_desired_rows: rebuild a config.yaml-shaped dict from rows.
 
@@ -701,6 +710,12 @@ def desired_rows_to_config_dict(
     becomes a group/global `setting_overrides` entry, or - since nodes have no overrides -
     a node `settings.<key>: {policy: ...}`. Directives render as the scope's top-level
     field. Node scope_ids (full pubkeys) become `pubkey_prefix`.
+
+    ``node_inventory`` makes the output a complete backup, not just a desired-state dump: each
+    listed node's ``label``/``group`` is emitted, every listed node appears even with no desired
+    settings, and any group a node belongs to is emitted under ``groups:`` so the result
+    re-imports cleanly (load() rejects a node referencing an undefined group). This is what lets
+    ``mch export`` -> ``mch import`` rebuild the fleet after a server/gateway loss.
     """
     by_scope: dict[tuple[Scope, str], list[DesiredSetting]] = {}
     for row in rows:
@@ -744,24 +759,43 @@ def desired_rows_to_config_dict(
             block["operations"] = [_operation_to_yaml(o) for o in scope_ops]
         return block
 
+    inventory = node_inventory or []
+    meta_by_pubkey = {n.pubkey: n for n in inventory}
+
     # union of scopes that carry settings and/or operations
     all_scopes = set(by_scope) | set(ops_by_scope)
 
     result: dict[str, Any] = {}
     if (Scope.GLOBAL, "") in all_scopes:
         result["global"] = block_for((Scope.GLOBAL, ""), is_node=False)
+
+    # Groups: those with their own settings/ops, plus any group an inventory node belongs to
+    # (so the node's `group:` reference resolves on re-import).
+    group_names = {sid for (st, sid) in all_scopes if st == Scope.GROUP}
+    group_names |= {n.group for n in inventory if n.group}
     groups = [
-        {"name": sid, **block_for((st, sid), is_node=False)}
-        for (st, sid) in all_scopes if st == Scope.GROUP
+        {"name": name, **block_for((Scope.GROUP, name), is_node=False)}
+        for name in group_names
     ]
     if groups:
         result["groups"] = sorted(groups, key=lambda g: g["name"])
-    nodes = [
-        {"pubkey_prefix": sid, **block_for((st, sid), is_node=True)}
-        for (st, sid) in all_scopes if st == Scope.NODE
-    ]
-    if nodes:
-        result["nodes"] = sorted(nodes, key=lambda n: n["pubkey_prefix"])
+
+    # Nodes: those with desired rows/ops, plus every inventory node (even with no desired state).
+    node_pubkeys = {sid for (st, sid) in all_scopes if st == Scope.NODE}
+    node_pubkeys |= set(meta_by_pubkey)
+    node_entries: list[dict[str, Any]] = []
+    for pubkey in node_pubkeys:
+        entry: dict[str, Any] = {"pubkey_prefix": pubkey}
+        meta = meta_by_pubkey.get(pubkey)
+        if meta is not None:
+            if meta.label:
+                entry["label"] = meta.label
+            if meta.group:
+                entry["group"] = meta.group
+        entry.update(block_for((Scope.NODE, pubkey), is_node=True))
+        node_entries.append(entry)
+    if node_entries:
+        result["nodes"] = sorted(node_entries, key=lambda n: n["pubkey_prefix"])
     return result
 
 

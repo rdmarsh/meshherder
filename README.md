@@ -339,18 +339,26 @@ mch set <prefix> name_prefix "🌞 "    # directives: name_prefix, default_polic
 mch unset <prefix> txdelay           # remove a DB-set value (observed state untouched)
 mch import                           # preview seeding the DB from the daemon's config (dry run)
 mch import legacy.yaml --yes         # seed from an explicit file (settings + label/group inventory)
-mch export > desired.yaml            # dump DB desired state as YAML (the inverse of import)
+mch export > backup.yaml             # complete fleet backup (inventory + desired state)
 mch clean settings <prefix>          # drop observed rows for keys no longer desired (dry run)
 ```
 
 **Migrating an existing `config.yaml`:** on the running daemon, `mch import` (then `--yes`) to seed
 the DB, `mch export` to verify, then delete the `nodes:`/`groups:`/`global:` blocks from
-`config.yaml` (keep the daemon settings) and restart. A node must already be in the DB — seen as a
-favourited gateway contact — for import to resolve its full pubkey; unseen nodes are skipped with a
-warning until they appear.
+`config.yaml` (keep the daemon settings) and restart. When importing a *legacy* config (nodes given
+by short `pubkey_prefix`), a node must already be in the DB — seen as a favourited gateway contact —
+for import to resolve its full pubkey; unseen nodes are skipped with a warning until they appear.
 
-The `SOURCE` column in `mch status <prefix>` shows whether each setting came from the database
-(`db`) or `config.yaml` (`config`).
+**Backup and restore.** Because the DB is now the only copy of desired state, keep periodic
+`mch export > backup.yaml` snapshots (a daily cron/systemd timer is ideal). The export is a complete
+backup — every active node's full public key, label, group, desired settings, and operations. To
+restore after a server or gateway replacement, point a fresh daemon at a clean `config.yaml` (daemon
+settings only) and run `mch import backup.yaml --yes`: because the backup carries full public keys,
+import recreates every node up-front even before the new gateway has favourited them, and the
+favourite mirror re-pins each node as its contact reappears on the mesh.
+
+`mch status <prefix>` settings table reads `POLICY / KEY / DESIRED / OBSERVED / TRIES / STATUS`
+(no source column — the DB is the only source now).
 
 ### Forcing a sync
 
@@ -635,9 +643,9 @@ mch suggest <label|prefix>       Full suggestions + paste-ready config block for
 mch logs                      Recent per-node activity across all nodes
 mch logs <prefix>             Activity for one node
 mch contacts                  Repeater nodes visible to the gateway not yet managed in the DB
-mch import [FILE]             Seed DB desired state + inventory from config.yaml or a FILE (dry run)
-mch import [FILE] --yes       Write it (idempotent; nodes not yet seen are skipped)
-mch export > desired.yaml     Dump DB desired state as YAML (the inverse of import)
+mch import [FILE]             Seed DB inventory + desired state from config.yaml or a FILE (dry run)
+mch import [FILE] --yes       Write it (idempotent; full-pubkey nodes created even if unseen)
+mch export > backup.yaml      Complete fleet backup as YAML (inventory + desired; inverse of import)
 mch retire <label|prefix>     Stop managing a node: skip sync + unfavourite, keep history
 mch unretire <label|prefix>   Return a retired node to management (re-favourite + reconverge)
 mch prune                     List retired nodes (hard-delete candidates)

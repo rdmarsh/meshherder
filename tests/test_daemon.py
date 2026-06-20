@@ -2255,6 +2255,112 @@ async def test_import_from_missing_path_errors(db, wq):
     assert "cannot read import file" in resp["error"]
 
 
+async def test_import_creates_node_from_full_pubkey_not_in_db(db, wq, tmp_path):
+    """Restore: a full pubkey is the node identity, so import creates the node even with an
+    empty gateway/DB (the disaster-recovery path)."""
+    pubkey = "aabbccdd" * 8  # full 64-hex pubkey
+    backup = tmp_path / "backup.yaml"
+    backup.write_text(
+        "groups:\n"
+        "  - name: solar\n"
+        "nodes:\n"
+        f"  - pubkey_prefix: {pubkey}\n"
+        "    label: ridge\n"
+        "    group: solar\n"
+        "    settings:\n"
+        '      txdelay: "14"\n'
+    )
+
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, db, Config()
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 1
+    node = await db.get_node(pubkey)
+    assert node is not None
+    assert node.label == "ridge"
+    assert node.group == "solar"
+    assert node.state is NodeState.UNKNOWN
+    rows = await db.get_desired_settings(Scope.NODE, pubkey)
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+
+
+async def test_import_short_prefix_unknown_node_is_not_created(db, wq, tmp_path):
+    """A short prefix's full pubkey is unknowable, so it is skipped, never invented."""
+    backup = tmp_path / "backup.yaml"
+    backup.write_text(
+        "nodes:\n"
+        "  - pubkey_prefix: deadbeef\n"
+        "    label: ghost\n"
+        "    settings:\n"
+        '      txdelay: "14"\n'
+    )
+
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, db, Config()
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 0
+    assert await db.get_all_nodes() == []
+    assert any("ghost" in w or "deadbeef" in w for w in resp["data"]["warnings"])
+
+
+async def test_export_includes_node_inventory_and_excludes_retired(db, wq):
+    active = Node(pubkey="aabbccdd" * 8, name="Mesh", label="ridge", group="solar",
+                  state=NodeState.CONFIGURED)
+    bare = Node(pubkey="11223344" * 8, name="Bare", label="bare", state=NodeState.UNKNOWN)
+    retired = Node(pubkey="99887766" * 8, name="Old", label="old", state=NodeState.RETIRED)
+    await db.upsert_node(active)
+    await db.upsert_node(bare)
+    await db.upsert_node(retired)
+    await db.set_desired_setting(DesiredSetting(Scope.NODE, active.pubkey, "txdelay", desired="14"))
+    await db.set_desired_setting(DesiredSetting(Scope.NODE, retired.pubkey, "txdelay", desired="9"))
+
+    resp = await _dispatch({"cmd": "export"}, wq, db, Config())
+    yaml_text = resp["data"]["yaml"]
+
+    # active node: label/group/settings present; bare node present with no settings
+    assert active.pubkey in yaml_text
+    assert "label: ridge" in yaml_text
+    assert "group: solar" in yaml_text
+    assert bare.pubkey in yaml_text
+    assert "label: bare" in yaml_text
+    # retired node and its desired row are excluded from the backup
+    assert retired.pubkey not in yaml_text
+    assert "label: old" not in yaml_text
+
+
+async def test_export_import_round_trip_rebuilds_fleet_on_fresh_db(db, wq, tmp_path):
+    """End-to-end restore: export a fleet, then import it into an empty DB (server replacement)."""
+    pubkey = "aabbccdd" * 8
+    await db.upsert_node(Node(pubkey=pubkey, name="Mesh", label="ridge", group="solar",
+                              state=NodeState.CONFIGURED))
+    await db.set_desired_setting(DesiredSetting(Scope.NODE, pubkey, "txdelay", desired="14"))
+
+    export = await _dispatch({"cmd": "export"}, wq, db, Config())
+    backup = tmp_path / "backup.yaml"
+    backup.write_text(export["data"]["yaml"])
+
+    fresh = Database(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        resp = await _dispatch(
+            {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, fresh, Config()
+        )
+        assert resp["ok"] is True
+        assert resp["data"]["nodes_created"] == 1
+        node = await fresh.get_node(pubkey)
+        assert node.label == "ridge"
+        assert node.group == "solar"
+        rows = await fresh.get_desired_settings(Scope.NODE, pubkey)
+        assert rows[0].desired == "14"
+    finally:
+        await fresh.close()
+
+
 # ------ export ------
 
 async def test_export_returns_yaml_of_db_desired_state(db, wq, config):
