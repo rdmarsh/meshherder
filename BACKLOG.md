@@ -38,6 +38,19 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   start on a config.yaml that still carries desired state), so bump `0.9.35` -> `0.10.0` in
   `pyproject.toml` and `src/mch/__init__.py`, and move the `## Unreleased` CHANGELOG block under a
   dated `## 0.10.0` heading, when slice 8 (PR #3) merges.
+- **Decision (deferred): `retired: true` vs a richer node lifecycle `status:` field.** Export/import
+  currently tags a decommissioned node with the boolean `retired: true`. Consider replacing it with a
+  single enum, e.g. `status: production | predeployed | retired | …`, to formalize the deployment
+  lifecycle the operator already encodes informally in *group* names (`predeployed`/`deployed`).
+  Tension to resolve before doing it: most `NodeState` values (unknown/online/offline/unreachable/
+  configuring/configured/partial) are *observed and transient* — re-derived every sync — so they must
+  NOT round-trip through a backup; only a *deliberate, durable* choice like retired should. A generic
+  `status:` mirroring `NodeState` would conflate durable intent with transient observation. So the
+  question is narrowly: is there a real durable lifecycle beyond "retired vs active" (e.g. a distinct
+  "predeployed"/"production" the operator wants to set and have survive restore, separate from group
+  and from observed state) that justifies a dedicated field plus its interactions with sync
+  eligibility, favouriting, and reporting? If not, `retired: true` is the right minimal encoding.
+  Likely overkill for now — keep the boolean until a concrete need appears.
 
 ### Operation Safety And Reachability
 
@@ -150,12 +163,14 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   `daemon.py`, `report.py`, and the CLI — the last desired-ish knob still living only in config.yaml
   after the sunset. It should resolve per scope like settings/directives (global default, refined per
   group/node) so e.g. repeaters collect `neighbors` while other roles don't, or a single node can add
-  an extra fact. Open design questions: (a) **additive vs override** — facts probably want *union*
-  (node = global ∪ group ∪ node) rather than the Node>Group>Global *override* used for settings,
-  since you usually want the base set everywhere plus extras; (b) where it lives — a reserved key in
-  `desired_settings` (like the directives) vs a small dedicated table; (c) `mch clean facts` and the
-  report's "configured facts" must follow the resolved per-node set instead of one global list. Fits
-  the DB-scoped model and finishes moving desired-ish state off config.yaml.
+  an extra fact. **Decided: resolution is a union, not an override** — a node collects
+  `global ∪ group ∪ node` facts, *not* the Node>Group>Global most-specific-wins used for settings.
+  Union is both the most useful (base set everywhere, plus per-group/node extras) and the simplest;
+  anything else needs per-key true/false enable flags and more complexity. Remaining open questions:
+  (a) where it lives — a reserved key in `desired_settings` (like the directives) vs a small
+  dedicated table; (b) `mch clean facts` and the report's "configured facts" must follow the resolved
+  per-node union instead of one global list. Fits the DB-scoped model and finishes moving desired-ish
+  state off config.yaml.
 - Extend `mch adopt` beyond the initial DB/contact seed: retain the discovery evidence used for
   adoption, expose adopted-radio/path caveats in status, and make follow-up path/radio repair
   steps explicit. (Partially done, Unreleased: adopt now installs a direct zero-hop route and runs
