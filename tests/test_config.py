@@ -1377,6 +1377,28 @@ def test_export_node_setting_uses_shorthand():
     }
 
 
+def test_export_node_inventory_adds_label_group_and_group_block():
+    # A node with a label/group but settings too: label+group emitted, and the group it belongs
+    # to is listed under groups: (so the result re-imports without "unknown group").
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14")]
+    node = Node(pubkey=_PK, name="Mesh", label="ridge", group="solar")
+    result = desired_rows_to_config_dict(rows, node_inventory=[node])
+
+    assert result["nodes"] == [{
+        "pubkey_prefix": _PK, "label": "ridge", "group": "solar",
+        "settings": {"txdelay": "14"},
+    }]
+    assert result["groups"] == [{"name": "solar"}]
+
+
+def test_export_includes_inventory_node_with_no_desired_settings():
+    # A node with only inventory (no desired rows) must still appear, so a backup is complete.
+    node = Node(pubkey=_PK, name="Mesh", label="bare", group=None)
+    result = desired_rows_to_config_dict([], node_inventory=[node])
+
+    assert result["nodes"] == [{"pubkey_prefix": _PK, "label": "bare"}]
+
+
 def test_export_setting_with_policy_uses_mapping():
     rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14",
                            policy=SettingPolicy.ENFORCE)]

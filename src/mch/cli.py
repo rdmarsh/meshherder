@@ -2181,12 +2181,15 @@ def import_config(ctx: click.Context, config_file: Path | None, yes: bool) -> No
     counts = data["counts"]
     total = data["total"]
     operations = data.get("operations", 0)
+    nodes_created = data.get("nodes_created", 0)
     if yes:
         click.echo(
             f"imported {data['written']} desired item(s) into the DB "
             f"(global {counts['global']}, groups {counts['group']}, nodes {counts['node']}, "
             f"operations {operations})"
         )
+        if nodes_created:
+            click.echo(f"created {nodes_created} new node(s) from full pubkeys (restore)")
     else:
         click.echo("import preview (dry run):")
         click.echo(f"  global:     {counts['global']}")
@@ -2194,6 +2197,8 @@ def import_config(ctx: click.Context, config_file: Path | None, yes: bool) -> No
         click.echo(f"  nodes:      {counts['node']}")
         click.echo(f"  operations: {operations}")
         click.echo(f"  total:      {total}")
+        if nodes_created:
+            click.echo(f"  new nodes:  {nodes_created} (created from full pubkeys on restore)")
     for warning in data.get("warnings", []):
         click.echo(click.style(f"  warning: {warning}", fg="yellow"))
     if not yes and total:

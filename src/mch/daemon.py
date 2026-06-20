@@ -36,6 +36,7 @@ from mch.config import (
     config_to_desired_operations,
     config_to_desired_rows,
     desired_rows_to_config_dict,
+    is_full_pubkey,
     normalize_directive_value,
     resolve_desired_configs,
     settable_keys,
@@ -426,36 +427,50 @@ async def _handle_import(
     node_by_pubkey = {n.pubkey: n for n in nodes}
 
     def resolve_pubkey(prefix: str) -> str | None:
-        return next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
+        match = next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
+        if match:
+            return match
+        # Restore-from-backup: a full pubkey (as `mch export` emits) is the node identity
+        # itself, so accept it even when the gateway/DB has not seen the node yet. The node row
+        # is created below; the favourite mirror re-pins it once its contact reappears. A short
+        # prefix still needs a known node (its full pubkey is unknowable) and is skipped+warned.
+        return prefix if is_full_pubkey(prefix) else None
 
     rows, warnings = config_to_desired_rows(config, resolve_pubkey)
     operations, op_warnings = config_to_desired_operations(config, resolve_pubkey)
     warnings = warnings + op_warnings
 
     # Label and group are inventory metadata on the node row, not desired_settings, so carry
-    # them too — otherwise a migrated node loses its label/group. Only resolvable, already-known
-    # nodes are touched (unknown nodes are warned about by config_to_desired_rows).
-    inventory_updates: list[Node] = []
+    # them too. A resolvable node not yet in the DB is *created* (the restore path); a known one
+    # has its label/group refreshed.
+    inventory_writes: list[Node] = []
+    nodes_created = 0
     for nc in config.nodes:
         pk = resolve_pubkey(nc.pubkey_prefix)
-        node = node_by_pubkey.get(pk) if pk else None
-        if node is None:
+        if pk is None:
             continue
-        if (nc.label and node.label != nc.label) or (
+        node = node_by_pubkey.get(pk)
+        if node is None:
+            inventory_writes.append(Node(
+                pubkey=pk, name="", label=nc.label or "", group=nc.group,
+                state=NodeState.UNKNOWN,
+            ))
+            nodes_created += 1
+        elif (nc.label and node.label != nc.label) or (
             nc.group is not None and node.group != nc.group
         ):
             if nc.label:
                 node.label = nc.label
             if nc.group is not None:
                 node.group = nc.group
-            inventory_updates.append(node)
+            inventory_writes.append(node)
 
     if not dry_run:
         for row in rows:
             await db.set_desired_setting(row)
         for op in operations:
             await db.set_desired_operation(op)
-        for node in inventory_updates:
+        for node in inventory_writes:
             await db.upsert_node(node)
 
     counts = {Scope.GLOBAL.value: 0, Scope.GROUP.value: 0, Scope.NODE.value: 0}
@@ -469,6 +484,7 @@ async def _handle_import(
                        "node": counts["node"]},
             "operations": len(operations),
             "total": total,
+            "nodes_created": nodes_created,
             "warnings": warnings,
             "written": 0 if dry_run else total,
             "dry_run": dry_run,
@@ -477,14 +493,31 @@ async def _handle_import(
 
 
 async def _handle_export(db: Database) -> dict[str, Any]:
-    """Dump all DB desired state (settings + operations) as config.yaml-shaped YAML."""
+    """Dump the managed fleet as config.yaml-shaped YAML — a complete backup/restore source.
+
+    Includes every active (non-retired) node's identity, label, group, desired settings, and
+    operations, so `mch import` can rebuild the fleet after a server/gateway loss. Retired nodes
+    and their desired rows are excluded (they are being decommissioned and have no config-format
+    representation for the retired state).
+    """
     rows = await db.get_all_desired_settings()
     operations = await db.get_all_desired_operations()
-    data = desired_rows_to_config_dict(rows, operations)
+    active = [n for n in await db.get_all_nodes() if n.state is not NodeState.RETIRED]
+    active_pubkeys = {n.pubkey for n in active}
+
+    rows = [
+        r for r in rows if r.scope_type is not Scope.NODE or r.scope_id in active_pubkeys
+    ]
+    operations = [
+        o for o in operations if o.scope_type is not Scope.NODE or o.scope_id in active_pubkeys
+    ]
+    data = desired_rows_to_config_dict(rows, operations, node_inventory=active)
     yaml_text = config_dict_to_yaml(data) if data else ""
     return {
         "ok": True,
-        "data": {"yaml": yaml_text, "total": len(rows) + len(operations)},
+        # total drives the CLI's "nothing to export" message, so count nodes too: a node with
+        # inventory but no desired settings is still worth exporting.
+        "data": {"yaml": yaml_text, "total": len(rows) + len(operations) + len(active)},
     }
 
 

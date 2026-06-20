@@ -99,16 +99,23 @@ on-ramp work against a daemon that no longer keeps desired state in its own
 .IR config.yaml .
 Without
 .B \-\-yes
-this is a dry-run preview. A node not yet known to the gateway is skipped with a
-warning. Re-running is idempotent.
+this is a dry-run preview. Re-running is idempotent. A node identified by a full
+64-hex public key (as
+.B export
+emits) is created even if the gateway has not seen it yet \(em the restore path; a
+node given only a short prefix needs to be known already and is otherwise skipped
+with a warning.
 .TP
 .B export
-Print the database's desired state as config.yaml-shaped YAML on standard output
-(the inverse of
-.BR import ).
+Print the managed fleet as config.yaml-shaped YAML on standard output \(em a complete
+backup and the inverse of
+.BR import .
+Includes every active node's full public key, label, group, desired settings, and
+operations (even a node with no desired settings); retired nodes are excluded.
 Redirect to save, for example
-.BR "mch export > desired.yaml" .
-Observed state and operations are not exported.
+.BR "mch export > backup.yaml" ,
+and rebuild after a server or gateway loss with
+.BR "mch import backup.yaml \-\-yes" .
 .TP
 .B suggest
 Show suggested settings for all nodes based on neighbour count.
