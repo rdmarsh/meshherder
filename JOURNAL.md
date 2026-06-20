@@ -4,41 +4,48 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (updated 2026-06-17) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-06-19) - update or clear this block when you pick up <<<
 
-**Workflow: new work goes on a branch + PR, no more direct commits to `main`** (journal/handoff
-commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed direct on `main`.
+**Workflow (updated 2026-06-18): risk-based branching.** Risky/large changes (daemon startup, queue,
+migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit straight to `main`.
+`/opt/meshherder` on luna steady-state tracks `main` (a branch only runs there transiently for
+bench-testing, via INSTALL's "Testing a feature branch" procedure). See the `use-branches-not-main`
+auto-memory.
 
-**Status (2026-06-17): SLICE 8 COMPLETE on `slice8-config-import` - the config.yaml desired-state
-sunset is done. 855 tests pass, ruff clean, mypy 7 (pre-existing). Ready to open a PR.** The DB is
-now authoritative for inventory + desired state; config.yaml carries only daemon settings.
+**Status (2026-06-19): SLICE 8 COMPLETE + deployed + post-review refinements done, on
+`slice8-config-import` (PR #3, open against `main`, 13 commits). 867 tests pass, ruff clean, mypy 7
+(pre-existing).** The DB is the single source of truth for inventory + desired state; config.yaml
+carries only daemon settings. The operator has migrated luna onto the sunset build (imported, stripped
+config, verified `mch export` round-trips clean) and it is running.
 
-Sub-slices, all committed on this branch (8a-8d/8i predate this session; 8e-8h landed this session):
-- **8a/8b/8c/8d/8i** (earlier): `mch import`/`export`, the DB resolver `resolve_desired_configs`, all
+Sub-slices (8a-8d/8i earlier; 8e-8h + refinements this work):
+- **8a/8b/8c/8d/8i**: `mch import`/`export`, the DB resolver `resolve_desired_configs`, all
   desired-state read paths on the DB, operations in `desired_operations`.
-- **8e (part 1, `a838889`)**: `run_cycle` sweeps `db.get_all_nodes()` (retired excluded), not
-  `config.nodes`. Test setup seeds DB inventory via the `_seed_desired` bridge.
-- **8e (part 2, `1e05bad`)**: `config.load(strict=True)` for the daemon (main + reload) hard-errors on
-  leftover `nodes:`/`groups:`/`global:` desired state (empty blocks tolerated); parser lenient by
-  default. `mch import [FILE]` takes an explicit path; `mch validate` stays lenient.
+- **8e**: `run_cycle` sweeps `db.get_all_nodes()` (`a838889`); `config.load(strict=True)` for the
+  daemon hard-errors on leftover `nodes:`/`groups:`/`global:` desired state, parser lenient by
+  default, `mch import [FILE]` takes an explicit path (`1e05bad`).
 - **8f (`7dc72f3`)**: `_reconcile_favourites` (seed favourited repeaters into the DB; pin managed
-  nodes) replaces `_seed_from_config`/`_seed_node_labels`. `mch set --group` validates DB membership;
-  report drops ghost/unseen (every DB node managed).
+  nodes) replaces config seeding. `mch set --group` validates DB membership; report drops
+  ghost/unseen (every DB node is managed).
 - **8g (`301b620`)**: `NodeState.RETIRED` + `mch retire`/`unretire` (unfavourite via new
-  `Gateway.unset_contact_favourite`); retired excluded from sync everywhere. `prune` hard-deletes
-  retired; `remove` guards a managed node behind `--force`. Dropped `_is_configured_node`.
-- **8h (this commit)**: `mch commission` prints an importable `nodes:` doc + `mch import` guidance
-  (accepts any group for a fresh node); `mch import` now carries node label/group inventory too, not
-  just settings (otherwise migrated nodes lose their label/group). Docs updated (DESIGN/README/mch.1/
-  CHANGELOG/BACKLOG).
+  `Gateway.unset_contact_favourite`); retired excluded from sync everywhere. `prune` purges retired;
+  `remove` guards a managed node behind `--force`.
+- **8h (`65a298e`)**: `mch commission` prints an importable `nodes:` doc + `mch import` guidance;
+  `mch import` carries node label/group inventory.
+- **Post-review (`d8cb4ad`, `08e6444`, `5e4ae99`)**: dropped the always-`db` SOURCE column from `mch
+  status`; made `mch export`/`mch import` a **complete fleet backup/restore** (full pubkeys, label/
+  group, bare nodes, self-contained groups; import recreates full-pubkey nodes without the gateway);
+  retired nodes round-trip via an `export` `retired: true` tag with `mch import --retired keep|skip`
+  (write refused until chosen). INSTALL signpost about `git pull --ff-only` not switching branches.
 
-**Known follow-up (in BACKLOG, not blocking):** the commission **replace**/scan flows still read
-`config.nodes`/`config.groups` and need a DB-driven rework; and no command yet reassigns a node's
-group post-sunset (only import/commission set it).
+**Known follow-ups (BACKLOG, none blocking):** commission **replace**/scan still read config
+inventory; no `mch group` to reassign a node's group; make `facts` a scoped **union** (global ∪ group
+∪ node - decided); installable scheduled-backup systemd timer; cut the **0.10.0** release (breaking:
+strict daemon); deferred decision on `retired: true` vs a richer `status:` lifecycle enum (lean: keep
+the boolean).
 
-**NEXT: open the PR** for `slice8-config-import` -> `main`. The operator's real migration on their box
-is: on the running (pre-strict) daemon run `mch import` + `mch export` to verify, strip the
-`nodes:`/`groups:`/`global:` blocks from config.yaml, then deploy this strict build.
+**NEXT: review + merge PR #3** into `main`, then delete the branch and clear/replace this block. The
+post-merge release cut (version bump + CHANGELOG) is the first backlog item.
 
 _Earlier slice-8 sub-steps (8a/8b), kept for context:_
 
