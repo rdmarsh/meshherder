@@ -104,14 +104,21 @@ this is a dry-run preview. Re-running is idempotent. A node identified by a full
 .B export
 emits) is created even if the gateway has not seen it yet \(em the restore path; a
 node given only a short prefix needs to be known already and is otherwise skipped
-with a warning.
+with a warning. If the file contains retired nodes (tagged
+.BR "retired: true" ),
+choose
+.B \-\-retired keep
+to restore them as retired or
+.B \-\-retired skip
+to omit them; a write is refused until one is chosen.
 .TP
 .B export
-Print the managed fleet as config.yaml-shaped YAML on standard output \(em a complete
+Print the whole fleet as config.yaml-shaped YAML on standard output \(em a complete
 backup and the inverse of
 .BR import .
-Includes every active node's full public key, label, group, desired settings, and
-operations (even a node with no desired settings); retired nodes are excluded.
+Includes every node's full public key, label, group, desired settings, and
+operations (even a node with no desired settings); retired nodes are tagged
+.BR "retired: true" .
 Redirect to save, for example
 .BR "mch export > backup.yaml" ,
 and rebuild after a server or gateway loss with

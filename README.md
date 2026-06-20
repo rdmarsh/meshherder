@@ -351,11 +351,14 @@ for import to resolve its full pubkey; unseen nodes are skipped with a warning u
 
 **Backup and restore.** Because the DB is now the only copy of desired state, keep periodic
 `mch export > backup.yaml` snapshots (a daily cron/systemd timer is ideal). The export is a complete
-backup — every active node's full public key, label, group, desired settings, and operations. To
-restore after a server or gateway replacement, point a fresh daemon at a clean `config.yaml` (daemon
-settings only) and run `mch import backup.yaml --yes`: because the backup carries full public keys,
-import recreates every node up-front even before the new gateway has favourited them, and the
-favourite mirror re-pins each node as its contact reappears on the mesh.
+backup — every node's full public key, label, group, desired settings, and operations, with retired
+nodes tagged `retired: true`. To restore after a server or gateway replacement, point a fresh daemon
+at a clean `config.yaml` (daemon settings only) and run `mch import backup.yaml --yes`: because the
+backup carries full public keys, import recreates every node up-front even before the new gateway has
+favourited them, and the favourite mirror re-pins each node as its contact reappears on the mesh.
+If the backup contains retired nodes, import makes you choose: `--retired keep` restores them as
+retired, `--retired skip` omits them (a write is refused until you pick one). A plain dry-run
+preview just warns that they are present.
 
 `mch status <prefix>` settings table reads `POLICY / KEY / DESIRED / OBSERVED / TRIES / STATUS`
 (no source column — the DB is the only source now).

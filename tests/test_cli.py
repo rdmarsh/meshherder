@@ -2937,14 +2937,45 @@ def test_clean_settings_requires_scope():
 
 # ------ import ------
 
-def _import_resp(counts=None, total=0, warnings=None, written=0, dry_run=True):
+def _import_resp(counts=None, total=0, warnings=None, written=0, dry_run=True,
+                 retired_in_backup=0, retired_mode=None):
     return {"ok": True, "data": {
         "counts": counts or {"global": 0, "group": 0, "node": 0},
         "total": total,
         "warnings": warnings or [],
         "written": written,
         "dry_run": dry_run,
+        "retired_in_backup": retired_in_backup,
+        "retired_mode": retired_mode,
     }}
+
+
+def test_import_retired_flag_passes_mode():
+    rpc = MagicMock(return_value=_import_resp(written=1, dry_run=False, retired_mode="keep"))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(
+            cli, ["--socket", "/fake.sock", "import", "--retired", "keep", "--yes"]
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1]["retired"] == "keep"
+
+
+def test_import_dry_run_warns_about_retired_nodes():
+    rpc = MagicMock(return_value=_import_resp(total=2, retired_in_backup=2))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import"])
+
+    assert result.exit_code == 0
+    assert "--retired keep" in result.output
+    assert "--retired skip" in result.output
+
+
+def test_import_rejects_invalid_retired_choice():
+    result = CliRunner().invoke(
+        cli, ["--socket", "/fake.sock", "import", "--retired", "bogus"]
+    )
+    assert result.exit_code != 0
 
 
 def test_import_dry_run_previews_counts():

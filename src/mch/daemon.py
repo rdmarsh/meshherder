@@ -436,34 +436,67 @@ async def _handle_import(
         # prefix still needs a known node (its full pubkey is unknowable) and is skipped+warned.
         return prefix if is_full_pubkey(prefix) else None
 
+    # Retired nodes are a deliberate choice on restore (the backup tags them `retired: true`):
+    # keeping them restores them as retired, skipping omits them entirely. A short-prefix retired
+    # entry that can't resolve is moot. Force the operator to choose before writing.
+    retired_cfg = [nc for nc in config.nodes if nc.retired]
+    retired_pubkeys = {
+        pk for nc in retired_cfg if (pk := resolve_pubkey(nc.pubkey_prefix)) is not None
+    }
+    mode = req.get("retired")  # "keep" | "skip" | None
+    if retired_pubkeys and mode is None and not dry_run:
+        return {
+            "ok": False,
+            "error": (
+                f"backup contains {len(retired_pubkeys)} retired node(s) — choose "
+                "--retired keep (restore them as retired) or --retired skip (omit them)"
+            ),
+            "data": {"retired_in_backup": len(retired_pubkeys)},
+        }
+    drop_retired = mode != "keep"  # skip mode, or the dry-run preview default
+
+    def is_dropped(scope_type: Scope, scope_id: str) -> bool:
+        return drop_retired and scope_type is Scope.NODE and scope_id in retired_pubkeys
+
     rows, warnings = config_to_desired_rows(config, resolve_pubkey)
     operations, op_warnings = config_to_desired_operations(config, resolve_pubkey)
     warnings = warnings + op_warnings
+    if drop_retired and retired_pubkeys:
+        rows = [r for r in rows if not is_dropped(r.scope_type, r.scope_id)]
+        operations = [o for o in operations if not is_dropped(o.scope_type, o.scope_id)]
 
     # Label and group are inventory metadata on the node row, not desired_settings, so carry
     # them too. A resolvable node not yet in the DB is *created* (the restore path); a known one
-    # has its label/group refreshed.
+    # has its label/group (and retired state, when kept) refreshed.
     inventory_writes: list[Node] = []
     nodes_created = 0
     for nc in config.nodes:
         pk = resolve_pubkey(nc.pubkey_prefix)
         if pk is None:
             continue
+        if nc.retired and drop_retired:
+            continue  # skip mode: leave retired nodes out of the restore entirely
+        target_state = NodeState.RETIRED if nc.retired else NodeState.UNKNOWN
         node = node_by_pubkey.get(pk)
         if node is None:
             inventory_writes.append(Node(
                 pubkey=pk, name="", label=nc.label or "", group=nc.group,
-                state=NodeState.UNKNOWN,
+                state=target_state,
             ))
             nodes_created += 1
-        elif (nc.label and node.label != nc.label) or (
-            nc.group is not None and node.group != nc.group
-        ):
-            if nc.label:
+        else:
+            changed = False
+            if nc.label and node.label != nc.label:
                 node.label = nc.label
-            if nc.group is not None:
+                changed = True
+            if nc.group is not None and node.group != nc.group:
                 node.group = nc.group
-            inventory_writes.append(node)
+                changed = True
+            if nc.retired and node.state is not NodeState.RETIRED:
+                node.state = NodeState.RETIRED
+                changed = True
+            if changed:
+                inventory_writes.append(node)
 
     if not dry_run:
         for row in rows:
@@ -485,6 +518,8 @@ async def _handle_import(
             "operations": len(operations),
             "total": total,
             "nodes_created": nodes_created,
+            "retired_in_backup": len(retired_pubkeys),
+            "retired_mode": mode,
             "warnings": warnings,
             "written": 0 if dry_run else total,
             "dry_run": dry_run,
@@ -493,31 +528,23 @@ async def _handle_import(
 
 
 async def _handle_export(db: Database) -> dict[str, Any]:
-    """Dump the managed fleet as config.yaml-shaped YAML — a complete backup/restore source.
+    """Dump the whole fleet as config.yaml-shaped YAML — a complete, faithful backup.
 
-    Includes every active (non-retired) node's identity, label, group, desired settings, and
-    operations, so `mch import` can rebuild the fleet after a server/gateway loss. Retired nodes
-    and their desired rows are excluded (they are being decommissioned and have no config-format
-    representation for the retired state).
+    Includes every node's identity, label, group, desired settings, and operations, so
+    `mch import` can rebuild the fleet after a server/gateway loss. Retired nodes are tagged
+    ``retired: true`` (the one inventory-state field carried in the file); `mch import` then
+    lets the operator choose whether to restore or skip them.
     """
     rows = await db.get_all_desired_settings()
     operations = await db.get_all_desired_operations()
-    active = [n for n in await db.get_all_nodes() if n.state is not NodeState.RETIRED]
-    active_pubkeys = {n.pubkey for n in active}
-
-    rows = [
-        r for r in rows if r.scope_type is not Scope.NODE or r.scope_id in active_pubkeys
-    ]
-    operations = [
-        o for o in operations if o.scope_type is not Scope.NODE or o.scope_id in active_pubkeys
-    ]
-    data = desired_rows_to_config_dict(rows, operations, node_inventory=active)
+    nodes = await db.get_all_nodes()
+    data = desired_rows_to_config_dict(rows, operations, node_inventory=nodes)
     yaml_text = config_dict_to_yaml(data) if data else ""
     return {
         "ok": True,
         # total drives the CLI's "nothing to export" message, so count nodes too: a node with
         # inventory but no desired settings is still worth exporting.
-        "data": {"yaml": yaml_text, "total": len(rows) + len(operations) + len(active)},
+        "data": {"yaml": yaml_text, "total": len(rows) + len(operations) + len(nodes)},
     }
 
 

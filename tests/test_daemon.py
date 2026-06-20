@@ -2308,7 +2308,7 @@ async def test_import_short_prefix_unknown_node_is_not_created(db, wq, tmp_path)
     assert any("ghost" in w or "deadbeef" in w for w in resp["data"]["warnings"])
 
 
-async def test_export_includes_node_inventory_and_excludes_retired(db, wq):
+async def test_export_includes_inventory_and_tags_retired(db, wq):
     active = Node(pubkey="aabbccdd" * 8, name="Mesh", label="ridge", group="solar",
                   state=NodeState.CONFIGURED)
     bare = Node(pubkey="11223344" * 8, name="Bare", label="bare", state=NodeState.UNKNOWN)
@@ -2328,9 +2328,76 @@ async def test_export_includes_node_inventory_and_excludes_retired(db, wq):
     assert "group: solar" in yaml_text
     assert bare.pubkey in yaml_text
     assert "label: bare" in yaml_text
-    # retired node and its desired row are excluded from the backup
-    assert retired.pubkey not in yaml_text
-    assert "label: old" not in yaml_text
+    # retired node IS included now, tagged retired: true, and its row is round-tripped
+    assert retired.pubkey in yaml_text
+    assert "label: old" in yaml_text
+    assert "retired: true" in yaml_text
+
+
+def _backup_with_retired(tmp_path, name="backup.yaml"):
+    active = "aabbccdd" * 8
+    retired = "99887766" * 8
+    p = tmp_path / name
+    p.write_text(
+        "nodes:\n"
+        f"  - pubkey_prefix: {active}\n"
+        "    label: ridge\n"
+        "    settings:\n"
+        '      txdelay: "14"\n'
+        f"  - pubkey_prefix: {retired}\n"
+        "    label: old\n"
+        "    retired: true\n"
+        "    settings:\n"
+        '      txdelay: "9"\n'
+    )
+    return p, active, retired
+
+
+async def test_import_write_with_retired_and_no_mode_errors(db, wq, tmp_path):
+    backup, _active, _retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, db, Config()
+    )
+    assert resp["ok"] is False
+    assert "retired" in resp["error"]
+    assert "--retired keep" in resp["error"] and "--retired skip" in resp["error"]
+    assert await db.get_all_nodes() == []  # nothing written
+
+
+async def test_import_retired_keep_restores_as_retired(db, wq, tmp_path):
+    backup, active, retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup), "retired": "keep"},
+        wq, db, Config(),
+    )
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 2
+    assert (await db.get_node(retired)).state is NodeState.RETIRED
+    assert (await db.get_node(active)).state is NodeState.UNKNOWN
+    # retired node's desired row is restored too
+    assert (await db.get_desired_settings(Scope.NODE, retired))[0].desired == "9"
+
+
+async def test_import_retired_skip_omits_them(db, wq, tmp_path):
+    backup, active, retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup), "retired": "skip"},
+        wq, db, Config(),
+    )
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 1  # only the active node
+    assert await db.get_node(retired) is None
+    assert await db.get_desired_settings(Scope.NODE, retired) == []
+    assert (await db.get_node(active)).label == "ridge"
+
+
+async def test_import_dry_run_reports_retired_without_requiring_mode(db, wq, tmp_path):
+    backup, _active, _retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch({"cmd": "import", "path": str(backup)}, wq, db, Config())
+    assert resp["ok"] is True
+    assert resp["data"]["retired_in_backup"] == 1
+    assert resp["data"]["retired_mode"] is None
+    assert await db.get_all_nodes() == []  # dry run writes nothing
 
 
 async def test_export_import_round_trip_rebuilds_fleet_on_fresh_db(db, wq, tmp_path):

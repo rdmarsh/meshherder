@@ -2160,8 +2160,17 @@ def plan(ctx: click.Context, query: str | None) -> None:
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option("--yes", "-y", is_flag=True, help="Write the imported rows to the DB.")
+@click.option(
+    "--retired",
+    type=click.Choice(["keep", "skip"]),
+    default=None,
+    help="For a backup that contains retired nodes: keep (restore them as retired) or skip "
+    "(omit them). Required to write when the backup has retired nodes.",
+)
 @click.pass_context
-def import_config(ctx: click.Context, config_file: Path | None, yes: bool) -> None:
+def import_config(
+    ctx: click.Context, config_file: Path | None, yes: bool, retired: str | None
+) -> None:
     """Seed the DB's desired state from a config.yaml (the migration on-ramp).
 
     Flattens config.yaml settings and directives (name_prefix/default_policy/via_radio) at
@@ -2171,17 +2180,23 @@ def import_config(ctx: click.Context, config_file: Path | None, yes: bool) -> No
 
     Pass an explicit CONFIG_FILE (a legacy or `mch export`-ed file) to import from it instead
     of the daemon's loaded config. This is the migration path once config.yaml no longer holds
-    desired state — the daemon process must be able to read the file.
+    desired state — the daemon process must be able to read the file. A full `mch export` backup
+    also restores nodes the gateway has not seen yet; use --retired to choose what happens to any
+    retired nodes it carries.
     """
     cmd: dict[str, Any] = {"cmd": "import", "dry_run": not yes}
     if config_file is not None:
         # Resolve here: the daemon runs from a different cwd, so it needs an absolute path.
         cmd["path"] = str(config_file.resolve())
+    if retired is not None:
+        cmd["retired"] = retired
     data = _check(_rpc(ctx.obj["socket"], cmd))
     counts = data["counts"]
     total = data["total"]
     operations = data.get("operations", 0)
     nodes_created = data.get("nodes_created", 0)
+    retired_in_backup = data.get("retired_in_backup", 0)
+    retired_mode = data.get("retired_mode")
     if yes:
         click.echo(
             f"imported {data['written']} desired item(s) into the DB "
@@ -2190,6 +2205,9 @@ def import_config(ctx: click.Context, config_file: Path | None, yes: bool) -> No
         )
         if nodes_created:
             click.echo(f"created {nodes_created} new node(s) from full pubkeys (restore)")
+        if retired_in_backup:
+            verb = "restored as retired" if retired_mode == "keep" else "skipped"
+            click.echo(f"{retired_in_backup} retired node(s) in backup: {verb}")
     else:
         click.echo("import preview (dry run):")
         click.echo(f"  global:     {counts['global']}")
@@ -2201,6 +2219,12 @@ def import_config(ctx: click.Context, config_file: Path | None, yes: bool) -> No
             click.echo(f"  new nodes:  {nodes_created} (created from full pubkeys on restore)")
     for warning in data.get("warnings", []):
         click.echo(click.style(f"  warning: {warning}", fg="yellow"))
+    if retired_in_backup and retired_mode is None:
+        click.echo(click.style(
+            f"  note: backup has {retired_in_backup} retired node(s) — add --retired keep "
+            "to restore them as retired, or --retired skip to omit them",
+            fg="yellow",
+        ))
     if not yes and total:
         click.echo("run again with --yes to write these to the DB")
 
