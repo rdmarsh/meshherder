@@ -27,6 +27,18 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   only by `mch import` and commissioning. Consider `mch group <node> <name>` (or `mch set <node>
   group <name>`) so an operator can move a node between groups without re-importing.
 
+### Sunset follow-ups and release
+
+- **Installable scheduled-backup unit.** The DB is now the only copy of desired state, so an
+  automated `mch export` backup matters. Ship a systemd timer + service (and an INSTALL note) that
+  writes a dated `mch export > .../backup-YYYY-MM-DD.yaml`, with simple rotation (keep N days). The
+  export is already a complete, restorable backup (full pubkeys + inventory + retired tags); this
+  just automates capturing it. A bare cron line works today as a stopgap.
+- **Cut a release with a version bump.** The sunset is a breaking change (the daemon refuses to
+  start on a config.yaml that still carries desired state), so bump `0.9.35` -> `0.10.0` in
+  `pyproject.toml` and `src/mch/__init__.py`, and move the `## Unreleased` CHANGELOG block under a
+  dated `## 0.10.0` heading, when slice 8 (PR #3) merges.
+
 ### Operation Safety And Reachability
 
 - **Enforcing `radio` strands the node: `set radio` needs a reboot, and observed is recorded
@@ -133,6 +145,17 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Configuration And Radio Semantics
 
+- **Make `facts` a scoped (global/group/node) value, not a single top-level list.** Today the set of
+  facts to collect is one flat `config.facts` list (default `["ver", "board", "role"]`), read in
+  `daemon.py`, `report.py`, and the CLI — the last desired-ish knob still living only in config.yaml
+  after the sunset. It should resolve per scope like settings/directives (global default, refined per
+  group/node) so e.g. repeaters collect `neighbors` while other roles don't, or a single node can add
+  an extra fact. Open design questions: (a) **additive vs override** — facts probably want *union*
+  (node = global ∪ group ∪ node) rather than the Node>Group>Global *override* used for settings,
+  since you usually want the base set everywhere plus extras; (b) where it lives — a reserved key in
+  `desired_settings` (like the directives) vs a small dedicated table; (c) `mch clean facts` and the
+  report's "configured facts" must follow the resolved per-node set instead of one global list. Fits
+  the DB-scoped model and finishes moving desired-ish state off config.yaml.
 - Extend `mch adopt` beyond the initial DB/contact seed: retain the discovery evidence used for
   adoption, expose adopted-radio/path caveats in status, and make follow-up path/radio repair
   steps explicit. (Partially done, Unreleased: adopt now installs a direct zero-hop route and runs
