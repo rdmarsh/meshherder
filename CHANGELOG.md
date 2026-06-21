@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.10.0 - 2026-06-21
+
 - **config.yaml desired-state sunset.** The SQLite DB is now the single source of truth for node
   inventory and desired state; config.yaml carries only daemon settings (gateway, scheduler,
   messenger, api, paths, facts, profiles). The daemon loads strict and refuses to start if config.yaml
