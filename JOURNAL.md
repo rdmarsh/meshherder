@@ -4,7 +4,7 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (updated 2026-06-19) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-06-21) - update or clear this block when you pick up <<<
 
 **Workflow (updated 2026-06-18): risk-based branching.** Risky/large changes (daemon startup, queue,
 migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit straight to `main`.
@@ -12,9 +12,20 @@ migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit st
 bench-testing, via INSTALL's "Testing a feature branch" procedure). See the `use-branches-not-main`
 auto-memory.
 
-**Status (2026-06-19): SLICE 8 COMPLETE + deployed + post-review refinements done, on
-`slice8-config-import` (PR #3, open against `main`, 13 commits). 867 tests pass, ruff clean, mypy 7
-(pre-existing).** The DB is the single source of truth for inventory + desired state; config.yaml
+**Status (2026-06-21): SLICE 8 MERGED to `main` (PR #3, `--no-ff` merge, branch deleted local +
+remote). 867 tests pass.** The DB is the single source of truth for inventory + desired state;
+config.yaml carries only daemon settings. luna is running the sunset build.
+
+**NEXT: cut the 0.10.0 release** (version bump + CHANGELOG; breaking because the daemon now strict-
+loads config). After that, the `facts` migration is the next feature: make `facts` a scoped **union**
+(global ∪ group ∪ node — decided), the last desired-ish knob still living only in config.yaml. Open
+sub-questions before coding it: (a) reserved key in `desired_settings` vs. a small dedicated table;
+(b) `mch clean facts` + report "configured facts" must follow the resolved per-node union. See
+BACKLOG "Make `facts` a scoped value".
+
+_Slice-8 detail (kept for context):_
+
+The DB is the single source of truth for inventory + desired state; config.yaml
 carries only daemon settings. The operator has migrated luna onto the sunset build (imported, stripped
 config, verified `mch export` round-trips clean) and it is running.
 
@@ -44,8 +55,7 @@ inventory; no `mch group` to reassign a node's group; make `facts` a scoped **un
 strict daemon); deferred decision on `retired: true` vs a richer `status:` lifecycle enum (lean: keep
 the boolean).
 
-**NEXT: review + merge PR #3** into `main`, then delete the branch and clear/replace this block. The
-post-merge release cut (version bump + CHANGELOG) is the first backlog item.
+_(PR #3 merged 2026-06-21; the release cut + facts migration NEXT are recorded at the top of this block.)_
 
 _Earlier slice-8 sub-steps (8a/8b), kept for context:_
 
