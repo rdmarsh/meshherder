@@ -12,16 +12,17 @@ migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit st
 bench-testing, via INSTALL's "Testing a feature branch" procedure). See the `use-branches-not-main`
 auto-memory.
 
-**Status (2026-06-21): SLICE 8 MERGED to `main` (PR #3, `--no-ff` merge, branch deleted local +
-remote). 867 tests pass.** The DB is the single source of truth for inventory + desired state;
-config.yaml carries only daemon settings. luna is running the sunset build.
+**Status (2026-06-21): SLICE 8 MERGED to `main` (PR #3, `--no-ff` merge, branch deleted) and
+0.10.0 RELEASED (`bb592b6`; version-bump + CHANGELOG; breaking — daemon strict-loads config).
+867 tests pass, ruff clean. Clean base on `main`.** The DB is the single source of truth for
+inventory + desired state; config.yaml carries only daemon settings. luna is running the sunset build.
+(Releases are not git-tagged in this repo.)
 
-**NEXT: cut the 0.10.0 release** (version bump + CHANGELOG; breaking because the daemon now strict-
-loads config). After that, the `facts` migration is the next feature: make `facts` a scoped **union**
-(global ∪ group ∪ node — decided), the last desired-ish knob still living only in config.yaml. Open
-sub-questions before coding it: (a) reserved key in `desired_settings` vs. a small dedicated table;
-(b) `mch clean facts` + report "configured facts" must follow the resolved per-node union. See
-BACKLOG "Make `facts` a scoped value".
+**NEXT: the `facts` migration** — make `facts` a scoped **union** (global ∪ group ∪ node — decided),
+the last desired-ish knob still living only in config.yaml. Open sub-questions to settle before
+coding: (a) reserved key in `desired_settings` vs. a small dedicated table; (b) `mch clean facts` +
+report "configured facts" must follow the resolved per-node union. Goes on a branch (risky: touches
+daemon/report/CLI read paths). See BACKLOG "Make `facts` a scoped value".
 
 _Slice-8 detail (kept for context):_
 
