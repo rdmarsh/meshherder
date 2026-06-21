@@ -429,10 +429,10 @@ async def _commission_new(
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
+    # Sunset: groups are defined by DB membership now, and a freshly commissioned node may be
+    # the first in its group — so any group name is accepted here. The node (and its group) land
+    # in the DB when the operator runs the printed `mch import`.
     group = req.get("group")
-    configured_groups = {configured.name for configured in config.groups}
-    if group and group not in configured_groups:
-        return {"ok": False, "error": f"group {group!r} is not configured"}
 
     # Always set an admin password; fall back to 'password' if not provided.
     admin_password = req.get("admin_password") or "password"
@@ -491,7 +491,19 @@ async def _commission_new(
     if verify_error:
         return {"ok": False, "error": verify_error}
 
-    config_snippet = _build_config_snippet(pubkey_prefix, label, name, group, target_freq_str)
+    # Desired state goes into the DB now (sunset): emit an importable nodes: doc the operator
+    # saves and applies with `mch import <file>`, plus the secrets.yaml snippet (secrets stay
+    # a file). The node first needs a DB identity — it gets one when mchd reconciles gateway
+    # favourites after the reboot, so the operator reloads mchd before importing.
+    # Self-contained doc: define the group too, since the loader `mch import` uses rejects a
+    # node that references an undefined group.
+    import_parts = []
+    if group:
+        import_parts.append(f"groups:\n  - name: {group}")
+    import_parts.append("nodes:\n" + _build_config_snippet(
+        pubkey_prefix, label, name, group, target_freq_str
+    ))
+    import_yaml = "\n".join(import_parts)
     secrets_snippet = _build_secrets_snippet(
         pubkey_prefix, admin_password, guest_password, prv_key
     )
@@ -506,7 +518,7 @@ async def _commission_new(
             "name": name,
             "group": group,
             "target_freq": target_freq_str,
-            "config_snippet": config_snippet,
+            "import_yaml": import_yaml,
             "secrets_snippet": secrets_snippet,
         },
     }

@@ -32,9 +32,13 @@ from mch.command_safety import blocked_exec_command
 from mch.config import (
     DIRECTIVE_KEYS,
     Config,
+    config_dict_to_yaml,
+    config_to_desired_operations,
+    config_to_desired_rows,
+    desired_rows_to_config_dict,
+    is_full_pubkey,
     normalize_directive_value,
-    overlay_db_group_settings,
-    overlay_db_settings,
+    resolve_desired_configs,
     settable_keys,
     validate_directive_value,
 )
@@ -42,7 +46,7 @@ from mch.config import load as load_config
 from mch.db import Database
 from mch.gateway import Gateway, GatewayError
 from mch.messenger import Messenger
-from mch.models import DesiredSetting, Scope, SettingPolicy
+from mch.models import DesiredSetting, Node, NodeState, Scope, SettingPolicy
 from mch.queue import (
     NodeResult,
     OperationBusyError,
@@ -167,10 +171,6 @@ async def _resolve_node(query: str, db: Database) -> Any:
     return None
 
 
-def _is_configured_node(pubkey: str, config: Config) -> bool:
-    return any(pubkey.startswith(nc.pubkey_prefix) for nc in config.nodes)
-
-
 async def _stale_fact_candidates(
     db: Database,
     config: Config,
@@ -209,33 +209,17 @@ async def _stale_fact_candidates(
     return candidates
 
 
-async def _wanted_setting_keys(db: Database, config: Config, node: Any) -> set[str]:
-    """Setting keys this node currently wants observed: resolved desired + DB-set keys.
+async def _wanted_setting_keys(db: Database, node: Any) -> set[str]:
+    """Setting keys this node currently wants observed: its resolved desired keys.
 
-    Applies the DB overlay (DESIGN.md "Desired state in the DB") so a key set only via
-    `mch set` counts as wanted and is never treated as orphaned. db_keys are seeded
-    directly so DB-set keys still count even for a node absent from config.yaml.
+    Desired state is resolved entirely from the DB (DESIGN.md "Desired state in the DB" /
+    sunset), so a key set only via `mch set` - or one on a node that was never in
+    config.yaml - still counts as wanted and is never treated as orphaned. The node's
+    group comes from the DB row, so group-scope keys are always attributable now (the old
+    config-only path could only attribute them when the node appeared in config.yaml).
     """
-    node_cfg = next(
-        (nc for nc in config.nodes if node.pubkey.startswith(nc.pubkey_prefix)), None
-    )
-    db_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
-    global_rows = await db.get_desired_settings(Scope.GLOBAL, "")
-    # Seed node- and global-scope DB keys directly: a global key is wanted by every node,
-    # and seeding (rather than relying on all_setting_keys) keeps it wanted even for a node
-    # absent from config.yaml. Group-scope keys can only be attributed when the node's group
-    # is known, i.e. when it appears in config; that limitation matches node-scope today.
-    wanted = {row.key for row in db_rows} | {row.key for row in global_rows}
-    if node_cfg is not None:
-        groups = {group.name: group for group in config.groups}
-        group_cfg = groups.get(node_cfg.group) if node_cfg.group else None
-        node_cfg, _ = overlay_db_settings(node_cfg, db_rows)
-        if group_cfg is not None:
-            group_rows = await db.get_desired_settings(Scope.GROUP, group_cfg.name)
-            group_cfg, _ = overlay_db_group_settings(group_cfg, group_rows)
-        global_cfg, _ = overlay_db_group_settings(config.global_settings, global_rows)
-        wanted |= all_setting_keys(node_cfg, group_cfg, global_cfg)
-    return wanted
+    node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
+    return all_setting_keys(node_cfg, group_cfg, global_cfg)
 
 
 async def _stale_setting_candidates(
@@ -264,7 +248,7 @@ async def _stale_setting_candidates(
 
     candidates: list[dict[str, Any]] = []
     for node in nodes:
-        wanted = await _wanted_setting_keys(db, config, node)
+        wanted = await _wanted_setting_keys(db, node)
         for setting in await db.get_settings(node.pubkey):
             if setting_key is not None and setting.key != setting_key:
                 continue
@@ -377,9 +361,19 @@ async def _handle_set_setting(
     if error or scope is None:
         return {"ok": False, "error": error or "could not resolve scope"}
     # Catch a typo'd group name at write time: a desired row for a group that no node
-    # is in would silently never apply. unset does not check this (see resolver docstring).
-    if scope is Scope.GROUP and scope_id not in {g.name for g in config.groups}:
-        return {"ok": False, "error": f"group {scope_id!r} is not defined in config.yaml"}
+    # is in would silently never apply. Group membership lives in the DB now (nodes.group),
+    # so a group is "real" once at least one node belongs to it. unset does not check this
+    # (see resolver docstring).
+    if scope is Scope.GROUP:
+        group_names = {n.group for n in await db.get_all_nodes() if n.group}
+        if scope_id not in group_names:
+            return {
+                "ok": False,
+                "error": (
+                    f"group {scope_id!r} has no member nodes - assign a node to it first "
+                    "(via `mch import` or commissioning), or check the spelling"
+                ),
+            }
 
     await db.set_desired_setting(
         DesiredSetting(scope_type=scope, scope_id=scope_id, key=key, desired=value, policy=policy)
@@ -406,6 +400,152 @@ async def _handle_unset_setting(
     await db.delete_desired_setting(scope, scope_id, key)
     data["key"] = key
     return {"ok": True, "data": data}
+
+
+async def _handle_import(
+    req: dict[str, Any], db: Database, config: Config
+) -> dict[str, Any]:
+    """Seed the DB's desired_settings from a config.yaml (the migration on-ramp).
+
+    Flattens config desired state (settings + directives, all scopes) into rows and upserts
+    them. Node scope_ids need the full pubkey, resolved from each prefix against nodes the DB
+    already knows; a node not yet seen is skipped with a warning. Dry-run by default - it only
+    writes when ``dry_run`` is false. Idempotent: re-importing upserts the same rows.
+
+    With ``path`` set, the source is that explicit (legacy/exported) YAML file, parsed
+    leniently. This keeps import working against a strict daemon whose own config.yaml no
+    longer carries desired state. Without ``path``, the daemon's loaded config is the source.
+    """
+    dry_run = bool(req.get("dry_run", True))
+    path = req.get("path")
+    if path:
+        try:
+            config = load_config(Path(str(path)), load_secrets=False)
+        except Exception as exc:
+            return {"ok": False, "error": f"cannot read import file {path}: {exc}"}
+    nodes = await db.get_all_nodes()
+    node_by_pubkey = {n.pubkey: n for n in nodes}
+
+    def resolve_pubkey(prefix: str) -> str | None:
+        match = next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
+        if match:
+            return match
+        # Restore-from-backup: a full pubkey (as `mch export` emits) is the node identity
+        # itself, so accept it even when the gateway/DB has not seen the node yet. The node row
+        # is created below; the favourite mirror re-pins it once its contact reappears. A short
+        # prefix still needs a known node (its full pubkey is unknowable) and is skipped+warned.
+        return prefix if is_full_pubkey(prefix) else None
+
+    # Retired nodes are a deliberate choice on restore (the backup tags them `retired: true`):
+    # keeping them restores them as retired, skipping omits them entirely. A short-prefix retired
+    # entry that can't resolve is moot. Force the operator to choose before writing.
+    retired_cfg = [nc for nc in config.nodes if nc.retired]
+    retired_pubkeys = {
+        pk for nc in retired_cfg if (pk := resolve_pubkey(nc.pubkey_prefix)) is not None
+    }
+    mode = req.get("retired")  # "keep" | "skip" | None
+    if retired_pubkeys and mode is None and not dry_run:
+        return {
+            "ok": False,
+            "error": (
+                f"backup contains {len(retired_pubkeys)} retired node(s) — choose "
+                "--retired keep (restore them as retired) or --retired skip (omit them)"
+            ),
+            "data": {"retired_in_backup": len(retired_pubkeys)},
+        }
+    drop_retired = mode != "keep"  # skip mode, or the dry-run preview default
+
+    def is_dropped(scope_type: Scope, scope_id: str) -> bool:
+        return drop_retired and scope_type is Scope.NODE and scope_id in retired_pubkeys
+
+    rows, warnings = config_to_desired_rows(config, resolve_pubkey)
+    operations, op_warnings = config_to_desired_operations(config, resolve_pubkey)
+    warnings = warnings + op_warnings
+    if drop_retired and retired_pubkeys:
+        rows = [r for r in rows if not is_dropped(r.scope_type, r.scope_id)]
+        operations = [o for o in operations if not is_dropped(o.scope_type, o.scope_id)]
+
+    # Label and group are inventory metadata on the node row, not desired_settings, so carry
+    # them too. A resolvable node not yet in the DB is *created* (the restore path); a known one
+    # has its label/group (and retired state, when kept) refreshed.
+    inventory_writes: list[Node] = []
+    nodes_created = 0
+    for nc in config.nodes:
+        pk = resolve_pubkey(nc.pubkey_prefix)
+        if pk is None:
+            continue
+        if nc.retired and drop_retired:
+            continue  # skip mode: leave retired nodes out of the restore entirely
+        target_state = NodeState.RETIRED if nc.retired else NodeState.UNKNOWN
+        node = node_by_pubkey.get(pk)
+        if node is None:
+            inventory_writes.append(Node(
+                pubkey=pk, name="", label=nc.label or "", group=nc.group,
+                state=target_state,
+            ))
+            nodes_created += 1
+        else:
+            changed = False
+            if nc.label and node.label != nc.label:
+                node.label = nc.label
+                changed = True
+            if nc.group is not None and node.group != nc.group:
+                node.group = nc.group
+                changed = True
+            if nc.retired and node.state is not NodeState.RETIRED:
+                node.state = NodeState.RETIRED
+                changed = True
+            if changed:
+                inventory_writes.append(node)
+
+    if not dry_run:
+        for row in rows:
+            await db.set_desired_setting(row)
+        for op in operations:
+            await db.set_desired_operation(op)
+        for node in inventory_writes:
+            await db.upsert_node(node)
+
+    counts = {Scope.GLOBAL.value: 0, Scope.GROUP.value: 0, Scope.NODE.value: 0}
+    for row in rows:
+        counts[row.scope_type.value] += 1
+    total = len(rows) + len(operations)
+    return {
+        "ok": True,
+        "data": {
+            "counts": {"global": counts["global"], "group": counts["group"],
+                       "node": counts["node"]},
+            "operations": len(operations),
+            "total": total,
+            "nodes_created": nodes_created,
+            "retired_in_backup": len(retired_pubkeys),
+            "retired_mode": mode,
+            "warnings": warnings,
+            "written": 0 if dry_run else total,
+            "dry_run": dry_run,
+        },
+    }
+
+
+async def _handle_export(db: Database) -> dict[str, Any]:
+    """Dump the whole fleet as config.yaml-shaped YAML — a complete, faithful backup.
+
+    Includes every node's identity, label, group, desired settings, and operations, so
+    `mch import` can rebuild the fleet after a server/gateway loss. Retired nodes are tagged
+    ``retired: true`` (the one inventory-state field carried in the file); `mch import` then
+    lets the operator choose whether to restore or skip them.
+    """
+    rows = await db.get_all_desired_settings()
+    operations = await db.get_all_desired_operations()
+    nodes = await db.get_all_nodes()
+    data = desired_rows_to_config_dict(rows, operations, node_inventory=nodes)
+    yaml_text = config_dict_to_yaml(data) if data else ""
+    return {
+        "ok": True,
+        # total drives the CLI's "nothing to export" message, so count nodes too: a node with
+        # inventory but no desired settings is still worth exporting.
+        "data": {"yaml": yaml_text, "total": len(rows) + len(operations) + len(nodes)},
+    }
 
 
 async def _dispatch(
@@ -694,9 +834,12 @@ async def _dispatch(
         return {"ok": True, "data": await wq.unfiled_contacts()}
 
     if cmd == "prune":
+        # Sunset: the DB is the inventory, so "prune" no longer means "not in config.yaml".
+        # It hard-deletes retired nodes (history and all) — the deliberate purge step after
+        # `mch retire`. Active nodes are never prune candidates.
         dry_run = bool(req.get("dry_run", True))
         nodes = await db.get_all_nodes()
-        candidate_nodes = [n for n in nodes if not _is_configured_node(n.pubkey, config)]
+        candidate_nodes = [n for n in nodes if n.state == NodeState.RETIRED]
         candidates = [
             {
                 "pubkey": n.pubkey,
@@ -780,6 +923,12 @@ async def _dispatch(
     if cmd == "unset_setting":
         return await _handle_unset_setting(req, db, config)
 
+    if cmd == "import":
+        return await _handle_import(req, db, config)
+
+    if cmd == "export":
+        return await _handle_export(db)
+
     if cmd == "remove":
         query = str(req.get("query") or "")
         if not query:
@@ -788,13 +937,17 @@ async def _dispatch(
         if not node:
             return {"ok": False, "error": f"no such node: {query}"}
 
-        configured = _is_configured_node(node.pubkey, config)
-        if configured and not bool(req.get("force", False)):
+        # Sunset: a still-managed (non-retired) node is protected — deleting it loses history
+        # and it is just re-seeded from gateway favourites on the next restart. Retire it first
+        # (keeps history, unfavourites it), or force through.
+        active = node.state != NodeState.RETIRED
+        if active and not bool(req.get("force", False)):
             return {
                 "ok": False,
                 "error": (
-                    f"{node.label or node.name or node.pubkey[:8]!r} is still in config.yaml"
-                    " - remove it from config first, or use --force"
+                    f"{node.label or node.name or node.pubkey[:8]!r} is still managed"
+                    " - `mch retire` it first (keeps history, unfavourites it), or use --force."
+                    " An un-retired node is re-seeded from gateway favourites on restart."
                 ),
             }
 
@@ -804,13 +957,41 @@ async def _dispatch(
             "name": node.name,
             "state": node.state.value,
             "last_seen": node.last_seen.isoformat() if node.last_seen else None,
-            "configured": configured,
+            "retired": node.state == NodeState.RETIRED,
             "deleted": 0,
         }
         if not bool(req.get("dry_run", True)):
             await db.delete_node(node.pubkey)
             data["deleted"] = 1
         return {"ok": True, "data": data}
+
+    if cmd in ("retire", "unretire"):
+        query = str(req.get("query") or "")
+        if not query:
+            return {"ok": False, "error": "missing node"}
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"no such node: {query}"}
+        ident = node.label or node.name or node.pubkey[:8]
+
+        if cmd == "retire":
+            if node.state is NodeState.RETIRED:
+                return {"ok": False, "error": f"{ident!r} is already retired"}
+            node = await wq.retire_node(node.pubkey)
+        else:
+            if node.state is not NodeState.RETIRED:
+                return {"ok": False, "error": f"{ident!r} is not retired"}
+            node = await wq.unretire_node(node.pubkey)
+
+        return {"ok": True, "data": {
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+            "state": node.state.value,
+        }}
 
     if cmd == "logs":
         pubkey = req.get("pubkey")
@@ -1050,7 +1231,7 @@ class Daemon:
                 return
 
             try:
-                new_config = load_config(Path(self._config.config_path))
+                new_config = load_config(Path(self._config.config_path), strict=True)
             except Exception as exc:
                 log.exception(
                     "config reload from %s failed; keeping previous config: %s",
@@ -1135,7 +1316,7 @@ def main() -> None:
         raise SystemExit(CONFIG_ERROR_EXIT)
 
     try:
-        config = load_config(config_path)
+        config = load_config(config_path, strict=True)
     except Exception as exc:
         print(f"error loading config: {exc}", file=sys.stderr)
         raise SystemExit(CONFIG_ERROR_EXIT) from None

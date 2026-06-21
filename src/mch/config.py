@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from difflib import get_close_matches
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -21,13 +21,25 @@ from mch.command_registry import (
     writable_setting_keys,
 )
 from mch.meshkey import derive_public_key
-from mch.models import DesiredSetting, SettingPolicy
+from mch.models import DesiredOperation, DesiredSetting, NodeState, Scope, SettingPolicy
+
+if TYPE_CHECKING:
+    from mch.db import Database
+    from mch.models import Node
 
 # Labels are node identifiers used in CLI commands — no spaces, emoji, or shell-hostile chars.
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9_\-.]+$")
 # pubkey_prefix must be even-length hex (full bytes only); values are normalized to lowercase.
 _HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 _MIN_PREFIX_LEN = 8
+# A MeshCore public key is 32 bytes = 64 hex chars. A value this long IS the node identity
+# (not a prefix), so it needs no DB lookup to resolve - the basis for restore-from-export.
+PUBKEY_HEX_LEN = 64
+
+
+def is_full_pubkey(value: str) -> bool:
+    """True if value is a complete node public key (64 hex chars), not just a prefix."""
+    return len(value) == PUBKEY_HEX_LEN and bool(_HEX_RE.match(value))
 
 _TOP_LEVEL_KEYS = {
     "gateway",
@@ -57,6 +69,7 @@ _NODE_KEYS = {
     "operations",
     "via_radio",
     "name_prefix",
+    "retired",
 }
 _GROUP_KEYS = {
     "name",
@@ -199,6 +212,9 @@ class NodeConfig:
     via_radio: RadioConfig | None = None
     # Prepended to the desired name (no auto-space); overrides group/global when set.
     name_prefix: str | None = None
+    # Inventory lifecycle, not desired config: carried only so `mch export`/`mch import` can
+    # round-trip a retired node (excluded from sync, unfavourited). True == the node is retired.
+    retired: bool = False
 
 
 @dataclass
@@ -508,6 +524,292 @@ def overlay_db_group_settings(
     return replace(group_cfg, settings=merged, **overrides), warnings + dir_warnings
 
 
+async def resolve_desired_configs(
+    db: Database, node: Node
+) -> tuple[NodeConfig, GroupConfig | None, GroupConfig, list[str]]:
+    """Build a node's resolved (node, group, global) desired-state configs from the DB.
+
+    The DB is the authoritative source of desired state (DESIGN.md "Desired state in the
+    DB" / sunset). Each config object is reconstructed by overlaying the node/group/global
+    ``desired_settings`` rows onto an *empty* base whose identity comes from the DB node
+    row (full pubkey, label, group). Overlaying onto an empty base reuses the exact
+    overlay_db_settings/overlay_db_group_settings machinery already used during the
+    transition - "build config from DB rows" is just "overlay rows with nothing
+    underneath", so there is no parallel rows->config builder to keep in sync.
+
+    Because the base needs no config.yaml entry, a node that exists only in the DB - never
+    listed in config.yaml - resolves fully, closing the slice-6 group-attribution
+    limitation (the clean/report paths previously needed a config-derived NodeConfig to
+    know a node's group).
+
+    Returns the node config, its group config (None when the node has no group), the
+    global config, and the concatenated overlay warnings (DB/YAML conflicts and any
+    skipped malformed directive rows).
+    """
+    warnings: list[str] = []
+
+    node_rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    base_node = NodeConfig(
+        pubkey_prefix=node.pubkey, label=node.label or "", group=node.group
+    )
+    node_cfg, node_warnings = overlay_db_settings(base_node, node_rows)
+    warnings += node_warnings
+
+    group_cfg: GroupConfig | None = None
+    if node.group:
+        group_rows = await db.get_desired_settings(Scope.GROUP, node.group)
+        group_cfg, group_warnings = overlay_db_group_settings(
+            GroupConfig(name=node.group), group_rows
+        )
+        warnings += group_warnings
+
+    global_rows = await db.get_desired_settings(Scope.GLOBAL, "")
+    # Global scope_id is the empty-string singleton; the GroupConfig name is unused by the
+    # resolver for global, so "" is fine.
+    global_cfg, global_warnings = overlay_db_group_settings(
+        GroupConfig(name=""), global_rows
+    )
+    warnings += global_warnings
+
+    return node_cfg, group_cfg, global_cfg, warnings
+
+
+def _radio_to_str(radio: RadioConfig) -> str:
+    """Serialise a RadioConfig to the 'freq,bw,sf,cr' string `_parse_radio` accepts.
+
+    Integral floats render without a trailing '.0' (bw 250.0 -> '250') so the result
+    matches how operators write it in config.yaml and round-trips through `_parse_radio`.
+    """
+    def num(x: float) -> str:
+        return str(int(x)) if float(x).is_integer() else str(x)
+    return f"{num(radio.freq)},{num(radio.bw)},{radio.sf},{radio.cr}"
+
+
+def _scope_rows(
+    scope: Scope,
+    scope_id: str,
+    cfg: NodeConfig | GroupConfig,
+) -> list[DesiredSetting]:
+    """All desired_settings rows for one scope object (settings + directives).
+
+    A default poll_hours (24) stores as None (inherit) to match `mch set` and keep rows
+    tidy; a non-default value is preserved. Policy-only group/global ``setting_overrides``
+    become desired=None rows. The three directives serialise to their reserved keys.
+    """
+    rows: list[DesiredSetting] = []
+    settings = dict(cfg.settings)
+    settings.update(getattr(cfg, "setting_overrides", {}))  # group/global only
+    for key, sc in settings.items():
+        rows.append(DesiredSetting(
+            scope, scope_id, key,
+            desired=sc.desired,
+            policy=sc.policy,
+            poll_hours=None if sc.poll_hours == 24 else sc.poll_hours,
+        ))
+    if cfg.name_prefix is not None:
+        rows.append(DesiredSetting(scope, scope_id, "name_prefix", desired=cfg.name_prefix))
+    if cfg.default_policy is not None:
+        rows.append(
+            DesiredSetting(scope, scope_id, "default_policy", desired=cfg.default_policy.value)
+        )
+    if cfg.via_radio is not None:
+        rows.append(
+            DesiredSetting(scope, scope_id, "via_radio", desired=_radio_to_str(cfg.via_radio))
+        )
+    return rows
+
+
+def config_to_desired_rows(
+    cfg: Config,
+    resolve_pubkey: Callable[[str], str | None],
+) -> tuple[list[DesiredSetting], list[str]]:
+    """Flatten a loaded Config's desired state into desired_settings rows (for `mch import`).
+
+    Emits one row per setting and per set directive at each scope: global (scope_id ``""``),
+    each group (scope_id = group name), and each node (scope_id = full pubkey, resolved from
+    its ``pubkey_prefix`` via ``resolve_pubkey``). A node whose prefix cannot be resolved -
+    not yet seen by the gateway/DB - is skipped with a warning. Operations are *not* imported;
+    they are not part of desired_settings.
+    """
+    rows: list[DesiredSetting] = []
+    warnings: list[str] = []
+
+    rows += _scope_rows(Scope.GLOBAL, "", cfg.global_settings)
+    for group in cfg.groups:
+        rows += _scope_rows(Scope.GROUP, group.name, group)
+    for node in cfg.nodes:
+        pubkey = resolve_pubkey(node.pubkey_prefix)
+        if pubkey is None:
+            ident = node.label or node.pubkey_prefix
+            warnings.append(
+                f"node {ident!r} ({node.pubkey_prefix}) is not known to the DB yet - "
+                "skipped; it will import once the gateway has seen it"
+            )
+            continue
+        rows += _scope_rows(Scope.NODE, pubkey, node)
+
+    return rows, warnings
+
+
+def config_to_desired_operations(
+    cfg: Config,
+    resolve_pubkey: Callable[[str], str | None],
+) -> tuple[list[DesiredOperation], list[str]]:
+    """Flatten a loaded Config's operations into desired_operations rows (for `mch import`).
+
+    The operations analogue of config_to_desired_rows: one row per operation at each scope -
+    global (scope_id ``""``), each group (scope_id = group name), and each node (scope_id =
+    full pubkey, resolved from its prefix). A node whose prefix cannot be resolved is skipped
+    with a warning, matching the settings import.
+    """
+    ops: list[DesiredOperation] = []
+    warnings: list[str] = []
+
+    def rows_for(scope: Scope, scope_id: str, source: NodeConfig | GroupConfig) -> None:
+        for op in source.operations:
+            ops.append(DesiredOperation(
+                scope, scope_id, op.command,
+                every_hours=op.every_hours, fire_and_forget=op.fire_and_forget,
+            ))
+
+    rows_for(Scope.GLOBAL, "", cfg.global_settings)
+    for group in cfg.groups:
+        rows_for(Scope.GROUP, group.name, group)
+    for node in cfg.nodes:
+        pubkey = resolve_pubkey(node.pubkey_prefix)
+        if pubkey is None:
+            if node.operations:
+                ident = node.label or node.pubkey_prefix
+                warnings.append(
+                    f"node {ident!r} ({node.pubkey_prefix}) is not known to the DB yet - "
+                    "operations skipped; they import once the gateway has seen it"
+                )
+            continue
+        rows_for(Scope.NODE, pubkey, node)
+
+    return ops, warnings
+
+
+def _operation_to_yaml(op: DesiredOperation) -> Any:
+    """Serialise an operation back to its config.yaml form (shorthand when all-default)."""
+    if op.every_hours == 24 and not op.fire_and_forget:
+        return op.command
+    out: dict[str, Any] = {"command": op.command}
+    if op.every_hours != 24:
+        out["every_hours"] = op.every_hours
+    if op.fire_and_forget:
+        out["fire_and_forget"] = True
+    return out
+
+
+def desired_rows_to_config_dict(
+    rows: list[DesiredSetting],
+    operations: list[DesiredOperation] | None = None,
+    node_inventory: list[Node] | None = None,
+) -> dict[str, Any]:
+    """Inverse of config_to_desired_rows: rebuild a config.yaml-shaped dict from rows.
+
+    A setting with only a desired value renders as the `key: value` shorthand; one that
+    also carries policy/poll_hours uses the mapping form. A policy-only row (desired=None)
+    becomes a group/global `setting_overrides` entry, or - since nodes have no overrides -
+    a node `settings.<key>: {policy: ...}`. Directives render as the scope's top-level
+    field. Node scope_ids (full pubkeys) become `pubkey_prefix`.
+
+    ``node_inventory`` makes the output a complete backup, not just a desired-state dump: each
+    listed node's ``label``/``group`` is emitted, every listed node appears even with no desired
+    settings, and any group a node belongs to is emitted under ``groups:`` so the result
+    re-imports cleanly (load() rejects a node referencing an undefined group). This is what lets
+    ``mch export`` -> ``mch import`` rebuild the fleet after a server/gateway loss.
+    """
+    by_scope: dict[tuple[Scope, str], list[DesiredSetting]] = {}
+    for row in rows:
+        by_scope.setdefault((row.scope_type, row.scope_id), []).append(row)
+
+    ops_by_scope: dict[tuple[Scope, str], list[DesiredOperation]] = {}
+    for op in operations or []:
+        ops_by_scope.setdefault((op.scope_type, op.scope_id), []).append(op)
+
+    def block_for(scope: tuple[Scope, str], *, is_node: bool) -> dict[str, Any]:
+        block: dict[str, Any] = {}
+        settings: dict[str, Any] = {}
+        overrides: dict[str, Any] = {}
+        for row in sorted(by_scope.get(scope, []), key=lambda r: r.key):
+            if row.key in DIRECTIVE_KEYS:
+                block[row.key] = row.desired
+                continue
+            policy = row.policy.value if row.policy is not None else None
+            if row.desired is None:
+                if policy is None:
+                    continue  # nothing to represent
+                if is_node:
+                    settings[row.key] = {"policy": policy}
+                else:
+                    overrides[row.key] = policy
+            elif policy is None and row.poll_hours is None:
+                settings[row.key] = row.desired
+            else:
+                mapping: dict[str, Any] = {"desired": row.desired}
+                if policy is not None:
+                    mapping["policy"] = policy
+                if row.poll_hours is not None:
+                    mapping["poll_hours"] = row.poll_hours
+                settings[row.key] = mapping
+        if settings:
+            block["settings"] = settings
+        if overrides:
+            block["setting_overrides"] = overrides
+        scope_ops = sorted(ops_by_scope.get(scope, []), key=lambda o: o.command)
+        if scope_ops:
+            block["operations"] = [_operation_to_yaml(o) for o in scope_ops]
+        return block
+
+    inventory = node_inventory or []
+    meta_by_pubkey = {n.pubkey: n for n in inventory}
+
+    # union of scopes that carry settings and/or operations
+    all_scopes = set(by_scope) | set(ops_by_scope)
+
+    result: dict[str, Any] = {}
+    if (Scope.GLOBAL, "") in all_scopes:
+        result["global"] = block_for((Scope.GLOBAL, ""), is_node=False)
+
+    # Groups: those with their own settings/ops, plus any group an inventory node belongs to
+    # (so the node's `group:` reference resolves on re-import).
+    group_names = {sid for (st, sid) in all_scopes if st == Scope.GROUP}
+    group_names |= {n.group for n in inventory if n.group}
+    groups = [
+        {"name": name, **block_for((Scope.GROUP, name), is_node=False)}
+        for name in group_names
+    ]
+    if groups:
+        result["groups"] = sorted(groups, key=lambda g: g["name"])
+
+    # Nodes: those with desired rows/ops, plus every inventory node (even with no desired state).
+    node_pubkeys = {sid for (st, sid) in all_scopes if st == Scope.NODE}
+    node_pubkeys |= set(meta_by_pubkey)
+    node_entries: list[dict[str, Any]] = []
+    for pubkey in node_pubkeys:
+        entry: dict[str, Any] = {"pubkey_prefix": pubkey}
+        meta = meta_by_pubkey.get(pubkey)
+        if meta is not None:
+            if meta.label:
+                entry["label"] = meta.label
+            if meta.group:
+                entry["group"] = meta.group
+            if meta.state is NodeState.RETIRED:
+                entry["retired"] = True
+        entry.update(block_for((Scope.NODE, pubkey), is_node=True))
+        node_entries.append(entry)
+    if node_entries:
+        result["nodes"] = sorted(node_entries, key=lambda n: n["pubkey_prefix"])
+    return result
+
+
+def config_dict_to_yaml(data: dict[str, Any]) -> str:
+    """Serialise an exported config dict to YAML (stable key order, block style)."""
+    return yaml.safe_dump(data, sort_keys=True, default_flow_style=False, allow_unicode=True)
+
+
 @dataclass
 class ApiConfig:
     """Read-only HTTP API configuration for local dashboard and integration clients."""
@@ -556,6 +858,7 @@ def load(
     secrets_path: Path | None = None,
     *,
     load_secrets: bool = True,
+    strict: bool = False,
 ) -> Config:
     config_path = config_path.resolve()
     try:
@@ -567,6 +870,21 @@ def load(
         kind = type(raw).__name__ if raw is not None else "empty file"
         raise ValueError(f"config file must be a YAML mapping, got {kind}")
     _reject_unknown_keys("config", raw, _TOP_LEVEL_KEYS)
+
+    # Sunset: desired state now lives in the DB, not config.yaml. The daemon loads strict and
+    # refuses to start if any desired-state block is still present, so an edited-but-not-imported
+    # config can never silently diverge from the DB. Empty blocks (e.g. a leftover `nodes: []`)
+    # are tolerated so stripping is forgiving. The lenient default keeps the `mch import` on-ramp
+    # and the config-parser unit tests working.
+    if strict:
+        offenders = [key for key in ("nodes", "groups", "global") if raw.get(key)]
+        if offenders:
+            raise ValueError(
+                f"config.yaml still carries desired state ({', '.join(offenders)}); "
+                "desired state now lives in the DB. Migrate it with "
+                "`mch import <this-file>`, verify with `mch export`, then delete these "
+                "blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md slice 8."
+            )
 
     gw_raw = _mapping(raw.get("gateway", {}), "gateway")
     _reject_unknown_keys("gateway", gw_raw, _GATEWAY_KEYS)
@@ -848,6 +1166,7 @@ def _parse_node(raw: Any, context: str = "node") -> NodeConfig:
         operations=operations,
         via_radio=via_radio,
         name_prefix=_coerce_name_prefix(raw.get("name_prefix")),
+        retired=bool(raw.get("retired", False)),
     )
 
 

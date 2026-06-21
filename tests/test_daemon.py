@@ -9,10 +9,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mch.config import Config, GroupConfig, NodeConfig, NodeSecrets, SettingConfig, load
+from mch.config import (
+    Config,
+    GroupConfig,
+    NodeConfig,
+    NodeSecrets,
+    OperationConfig,
+    SettingConfig,
+    load,
+)
 from mch.daemon import CONFIG_ERROR_EXIT, Daemon, _dispatch, _handle_advert, main
 from mch.db import Database
 from mch.models import (
+    DesiredOperation,
     DesiredSetting,
     Node,
     NodeFact,
@@ -314,18 +323,19 @@ async def test_status_dispatch_no_open_nodes_when_default_password(db, wq, confi
 
 
 async def test_daemon_reload_updates_existing_config_object(tmp_path):
+    # Sunset: config.yaml carries only daemon settings now (no nodes/desired state), and the
+    # daemon reload is strict. Reload updates the existing Config object in place.
     config_path = tmp_path / "config.yaml"
     secrets_path = tmp_path / "secrets.yaml"
     config_path.write_text(
         "secrets_file: secrets.yaml\n"
-        "nodes:\n"
-        "  - pubkey_prefix: aabbccdd\n"
-        "    label: old\n"
+        "messenger:\n"
+        "  allowed_prefixes: [aabbccdd]\n"
     )
     secrets_path.write_text("nodes:\n  aabbccdd: oldpass\n")
     secrets_path.chmod(0o600)
 
-    config = load(config_path)
+    config = load(config_path, strict=True)
     daemon = Daemon(config)
     daemon._wq = MagicMock()
     daemon._wq.refresh_config_state = AsyncMock()
@@ -334,21 +344,18 @@ async def test_daemon_reload_updates_existing_config_object(tmp_path):
     config_path.write_text(
         "secrets_file: secrets.yaml\n"
         "messenger:\n"
-        "  allowed_prefixes: [aabbccdd]\n"
-        "nodes:\n"
-        "  - pubkey_prefix: aabbccdd\n"
-        "    label: new\n"
+        "  allowed_prefixes: [aabbccdd, 11223344]\n"
     )
     secrets_path.write_text("nodes:\n  aabbccdd: newpass\n")
 
     await daemon._reload_config("test")
 
     assert daemon._config is config
-    assert config.nodes[0].label == "new"
+    assert config.messenger.allowed_prefixes == ["aabbccdd", "11223344"]
     assert config.secrets["aabbccdd"].password == "newpass"
     daemon._wq.refresh_config_state.assert_awaited_once()
     daemon._messenger.update_config.assert_called_once_with(
-        allowed_prefixes=["aabbccdd"],
+        allowed_prefixes=["aabbccdd", "11223344"],
         announce_channel=None,
     )
 
@@ -551,18 +558,17 @@ async def test_suggest_dispatch_profile_none_when_no_neighbors(db, wq, config):
     assert resp["data"][0]["neighbour_count"] is None
 
 
-async def test_prune_dispatch_lists_nodes_outside_config(db, wq, config):
-    """prune dry-run lists DB nodes whose pubkeys are no longer in config."""
+async def test_prune_dispatch_lists_retired_nodes(db, wq, config):
+    """prune dry-run lists only retired nodes; active nodes are never candidates."""
     kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     retired = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(kept)
     await db.upsert_node(retired)
-    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="kept")]
 
     resp = await _dispatch({"cmd": "prune"}, wq, db, config)
 
@@ -572,19 +578,18 @@ async def test_prune_dispatch_lists_nodes_outside_config(db, wq, config):
     assert await db.get_node(retired.pubkey) is not None
 
 
-async def test_prune_dispatch_deletes_nodes_outside_config(db, wq, config):
-    """prune with dry_run false deletes retired local DB state only."""
+async def test_prune_dispatch_deletes_retired_nodes(db, wq, config):
+    """prune with dry_run false hard-deletes retired nodes only."""
     kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     retired = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(kept)
     await db.upsert_node(retired)
     await db.upsert_fact(NodeFact(node_pubkey=retired.pubkey, key="ver", value="v1.14.1"))
-    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="kept")]
 
     resp = await _dispatch({"cmd": "prune", "dry_run": False}, wq, db, config)
 
@@ -600,15 +605,14 @@ async def test_prune_dispatch_deletes_nodes_outside_config(db, wq, config):
 # ------------------------------------------------------------------
 
 async def test_remove_dispatch_dry_run_resolves_one_node(db, wq, config):
-    """remove dry-run resolves one DB node without deleting it."""
+    """remove dry-run resolves one retired DB node without deleting it."""
     node = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(node)
-    config.nodes = []
 
     resp = await _dispatch({"cmd": "remove", "query": "old-site"}, wq, db, config)
 
@@ -619,18 +623,17 @@ async def test_remove_dispatch_dry_run_resolves_one_node(db, wq, config):
 
 
 async def test_remove_dispatch_deletes_one_retired_node(db, wq, config):
-    """remove with dry_run false deletes one node's local DB state."""
+    """remove with dry_run false deletes a retired node's local DB state, no force needed."""
     kept = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     retired = Node(
         pubkey="11223344" * 8,
         name="Retired",
         label="old-site",
-        state=NodeState.CONFIGURED,
+        state=NodeState.RETIRED,
     )
     await db.upsert_node(kept)
     await db.upsert_node(retired)
     await db.upsert_fact(NodeFact(node_pubkey=retired.pubkey, key="ver", value="v1.14.1"))
-    config.nodes = [NodeConfig(pubkey_prefix=kept.pubkey[:8], label="kept")]
 
     resp = await _dispatch(
         {"cmd": "remove", "query": "old-site", "dry_run": False},
@@ -646,11 +649,10 @@ async def test_remove_dispatch_deletes_one_retired_node(db, wq, config):
     assert await db.get_facts(retired.pubkey) == {}
 
 
-async def test_remove_dispatch_refuses_configured_node_without_force(db, wq, config):
-    """remove refuses nodes still present in config unless force is supplied."""
+async def test_remove_dispatch_refuses_active_node_without_force(db, wq, config):
+    """remove refuses a still-managed (non-retired) node unless force is supplied."""
     node = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="kept")]
 
     resp = await _dispatch(
         {"cmd": "remove", "query": "kept", "dry_run": False},
@@ -660,15 +662,14 @@ async def test_remove_dispatch_refuses_configured_node_without_force(db, wq, con
     )
 
     assert resp["ok"] is False
-    assert "still in config.yaml" in resp["error"]
+    assert "still managed" in resp["error"]
     assert await db.get_node(node.pubkey) is not None
 
 
-async def test_remove_dispatch_force_deletes_configured_node(db, wq, config):
-    """remove --force allows deleting local state for a configured node."""
+async def test_remove_dispatch_force_deletes_active_node(db, wq, config):
+    """remove --force allows deleting local state for a still-managed node."""
     node = Node(pubkey="aabbccdd" * 8, name="Kept", label="kept", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="kept")]
 
     resp = await _dispatch(
         {"cmd": "remove", "query": "kept", "dry_run": False, "force": True},
@@ -678,8 +679,58 @@ async def test_remove_dispatch_force_deletes_configured_node(db, wq, config):
     )
 
     assert resp["ok"] is True
-    assert resp["data"]["configured"] is True
+    assert resp["data"]["retired"] is False
     assert await db.get_node(node.pubkey) is None
+
+
+# ------------------------------------------------------------------
+# retire / unretire commands
+# ------------------------------------------------------------------
+
+async def test_retire_dispatch_retires_active_node(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+    retired = Node(pubkey=node.pubkey, name="N", label="site", state=NodeState.RETIRED)
+    wq.retire_node = AsyncMock(return_value=retired)
+
+    resp = await _dispatch({"cmd": "retire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["state"] == "retired"
+    wq.retire_node.assert_awaited_once_with(node.pubkey)
+
+
+async def test_retire_dispatch_already_retired_errors(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.RETIRED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "retire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "already retired" in resp["error"]
+
+
+async def test_unretire_dispatch_returns_node_to_management(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.RETIRED)
+    await db.upsert_node(node)
+    active = Node(pubkey=node.pubkey, name="N", label="site", state=NodeState.UNKNOWN)
+    wq.unretire_node = AsyncMock(return_value=active)
+
+    resp = await _dispatch({"cmd": "unretire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["state"] == "unknown"
+    wq.unretire_node.assert_awaited_once_with(node.pubkey)
+
+
+async def test_unretire_dispatch_not_retired_errors(db, wq, config):
+    node = Node(pubkey="aabbccdd" * 8, name="N", label="site", state=NodeState.CONFIGURED)
+    await db.upsert_node(node)
+
+    resp = await _dispatch({"cmd": "unretire", "query": "site"}, wq, db, config)
+
+    assert resp["ok"] is False
+    assert "not retired" in resp["error"]
 
 
 # ------------------------------------------------------------------
@@ -1055,13 +1106,11 @@ async def test_node_dispatch_resets_displayed_attempts_for_new_desired_value(db,
         policy=SettingPolicy.ENFORCE,
         update_attempts=4,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="New",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
 
@@ -1080,13 +1129,11 @@ async def test_node_dispatch_hides_prior_attempts_when_policy_changes_to_audit(d
         update_attempts=4,
         drift=True,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(desired="Managed", policy=SettingPolicy.AUDIT)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="Managed",
+        policy=SettingPolicy.AUDIT,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
 
@@ -1103,13 +1150,11 @@ async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, conf
         observed="Old",
         policy=SettingPolicy.AUDIT,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="name", desired="New",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1138,16 +1183,11 @@ async def test_plan_dispatch_uses_raw_meshcore_command_display(db, wq, config):
         observed="Old",
         policy=SettingPolicy.AUDIT,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(
-                desired="🦷 rdm",
-                policy=SettingPolicy.ENFORCE,
-            )},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="🦷 rdm",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1165,16 +1205,11 @@ async def test_plan_dispatch_skips_close_enough_radio_roundoff(db, wq, config):
         observed="915.0750122,125,9,5",
         policy=SettingPolicy.ENFORCE,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"radio": SettingConfig(
-                desired="915.075,125,9,5",
-                policy=SettingPolicy.ENFORCE,
-            )},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="radio", desired="915.075,125,9,5",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1194,13 +1229,11 @@ async def test_plan_dispatch_audit_default_does_not_write(db, wq, config):
         observed="Old",
         policy=SettingPolicy.AUDIT,
     ))
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"owner.info": SettingConfig(desired="New")},
-        )
-    ]
+    # desired with no explicit policy -> inherits the default (audit)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="owner.info", desired="New",
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1212,13 +1245,11 @@ async def test_plan_dispatch_audit_default_does_not_write(db, wq, config):
 async def test_plan_dispatch_unknown_when_no_known_setting(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
-    config.nodes = [
-        NodeConfig(
-            pubkey_prefix="aabbccdd",
-            label="site-a",
-            settings={"name": SettingConfig(desired="New", policy=SettingPolicy.ENFORCE)},
-        )
-    ]
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="name", desired="New",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
     resp = await _dispatch({"cmd": "plan"}, wq, db, config)
 
@@ -1323,26 +1354,23 @@ async def test_issues_dispatch_online_not_in_bad_state(db, wq, config):
     assert resp["data"]["bad_state"] == []
 
 
-async def test_issues_dispatch_returns_unseen_config_nodes(db, wq, config):
-    """issues unseen_nodes section lists config entries with no matching DB node."""
+async def test_issues_dispatch_has_no_unseen_config_nodes(db, wq, config):
+    """Sunset: config.yaml has no inventory, so issues never reports unseen config nodes."""
     from mch.config import NodeConfig
     config.nodes = [NodeConfig(pubkey_prefix="deadbeef", label="wrong")]
-    # DB is empty — no node with that prefix exists
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
     assert resp["data"]["ghosts"] == []
-    assert len(resp["data"]["unseen_nodes"]) == 1
-    assert resp["data"]["unseen_nodes"][0]["pubkey_prefix"] == "deadbeef"
-    assert resp["data"]["unseen_nodes"][0]["label"] == "wrong"
+    assert resp["data"]["unseen_nodes"] == []
 
 
-async def test_issues_dispatch_returns_db_only_nodes_as_ghosts(db, wq, config):
-    """issues ghosts section lists DB nodes no longer present in config."""
+async def test_issues_dispatch_treats_db_nodes_as_managed_not_ghosts(db, wq, config):
+    """Sunset: every DB node is managed inventory, so none are reported as ghosts."""
     node = Node(
         pubkey="11223344" * 8,
-        name="Retired",
-        label="old-site",
+        name="Managed",
+        label="a-site",
         state=NodeState.CONFIGURED,
     )
     await db.upsert_node(node)
@@ -1350,13 +1378,7 @@ async def test_issues_dispatch_returns_db_only_nodes_as_ghosts(db, wq, config):
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
-    assert resp["data"]["ghosts"] == [{
-        "pubkey": node.pubkey,
-        "label": "old-site",
-        "name": "Retired",
-        "state": "configured",
-        "last_seen": None,
-    }]
+    assert resp["data"]["ghosts"] == []
     assert resp["data"]["unseen_nodes"] == []
 
 
@@ -1771,7 +1793,10 @@ async def test_set_setting_requires_value_or_policy(db, wq, config):
 
 
 async def test_set_setting_group_scope_writes_group_row(db, wq):
-    config = Config(groups=[GroupConfig(name="solar")])
+    # Group membership lives in the DB now: a node assigned to "solar" makes the group real.
+    await db.upsert_node(Node(pubkey="aabbccdd" * 8, name="n", group="solar",
+                              state=NodeState.UNKNOWN))
+    config = Config()
 
     resp = await _dispatch(
         {"cmd": "set_setting", "scope": "group", "group": "solar",
@@ -1923,7 +1948,10 @@ async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
 
 
 async def test_unset_setting_group_scope_removes_row(db, wq):
-    config = Config(groups=[GroupConfig(name="solar")])
+    # A DB node in group "solar" makes the group real (membership lives in the DB now).
+    await db.upsert_node(Node(pubkey="aabbccdd" * 8, name="n", group="solar",
+                              state=NodeState.UNKNOWN))
+    config = Config()
     await _dispatch(
         {"cmd": "set_setting", "scope": "group", "group": "solar",
          "key": "txdelay", "value": "14"}, wq, db, config,
@@ -2034,19 +2062,6 @@ async def test_clean_settings_lists_orphan_not_in_desired(db, wq):
     assert resp["data"]["deleted"] == 0  # dry run by default
 
 
-async def test_clean_settings_keeps_config_desired_key(db, wq):
-    node = await _seed_plain_node(db)
-    await _seed_observed_setting(db, node, "name", observed="Test Node")
-    config = Config(nodes=[NodeConfig(
-        pubkey_prefix="aabbccdd", label="test",
-        settings={"name": SettingConfig(desired="Test Node", policy=SettingPolicy.ENFORCE)},
-    )])
-
-    resp = await _dispatch({"cmd": "clean_settings", "query": "test"}, wq, db, config)
-
-    assert resp["data"]["candidates"] == []
-
-
 async def test_clean_settings_keeps_db_set_key(db, wq, config):
     """A key set via `mch set` (DB overlay) must never be treated as an orphan."""
     node = await _seed_plain_node(db)
@@ -2073,14 +2088,16 @@ async def test_clean_settings_keeps_db_global_set_key(db, wq, config):
     assert resp["data"]["candidates"] == []
 
 
-async def test_clean_settings_keeps_db_group_set_key(db, wq):
-    """A group-scope DB key keeps the observed row wanted for a node in that group."""
+async def test_clean_settings_keeps_db_group_set_key(db, wq, config):
+    """A group-scope DB key keeps the observed row wanted for a node in that group.
+
+    Group membership is read from the DB node row (sunset: desired state and group come
+    from the DB, not config.yaml), so the group-scope key attaches to the node.
+    """
     node = await _seed_plain_node(db)
+    node.group = "g"
+    await db.upsert_node(node)
     await _seed_observed_setting(db, node, "txdelay", observed="14")
-    config = Config(
-        nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="test", group="g")],
-        groups=[GroupConfig(name="g")],
-    )
     await db.set_desired_setting(DesiredSetting(
         scope_type=Scope.GROUP, scope_id="g", key="txdelay", desired="14",
     ))
@@ -2129,3 +2146,342 @@ async def test_clean_settings_unknown_node_errors(db, wq, config):
 
     assert resp["ok"] is False
     assert "not found" in resp["error"]
+
+
+# ------ import ------
+
+async def test_import_writes_desired_rows_with_yes(db, wq):
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 1
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+
+
+async def test_import_dry_run_does_not_write(db, wq):
+    node = await _seed_plain_node(db)
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+
+    resp = await _dispatch({"cmd": "import"}, wq, db, config)  # dry_run defaults True
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 0
+    assert resp["data"]["total"] == 1
+    assert resp["data"]["counts"]["node"] == 1
+    assert await db.get_desired_settings(Scope.NODE, node.pubkey) == []
+
+
+async def test_import_updates_node_label_and_group(db, wq):
+    """Import carries inventory metadata (label/group), not just desired settings."""
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8, no label/group
+    config = Config(
+        groups=[GroupConfig(name="solar")],
+        nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge", group="solar")],
+    )
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    updated = await db.get_node(node.pubkey)
+    assert updated.label == "ridge"
+    assert updated.group == "solar"
+
+
+async def test_import_dry_run_leaves_node_label_and_group(db, wq):
+    node = await _seed_plain_node(db)
+    config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge", group="solar")])
+
+    await _dispatch({"cmd": "import"}, wq, db, config)  # dry-run
+
+    unchanged = await db.get_node(node.pubkey)
+    assert unchanged.label == node.label
+    assert unchanged.group == node.group
+
+
+async def test_import_warns_unresolvable_node(db, wq):
+    # node never seeded into the DB, so its prefix cannot resolve to a full pubkey
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="deadbeef", label="ghost",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 0
+    assert any("ghost" in w or "deadbeef" in w for w in resp["data"]["warnings"])
+
+
+async def test_import_from_explicit_path_overrides_live_config(db, wq, tmp_path):
+    """`mch import <file>` flattens that file, not the daemon's (now-stripped) live config."""
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8
+    legacy = tmp_path / "legacy.yaml"
+    legacy.write_text(
+        'nodes:\n'
+        '  - pubkey_prefix: aabbccdd\n'
+        '    settings:\n'
+        '      txdelay: "14"\n'
+    )
+
+    # Live config is empty — the write must come entirely from the path.
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(legacy)}, wq, db, Config()
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["written"] == 1
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+
+
+async def test_import_from_missing_path_errors(db, wq):
+    resp = await _dispatch(
+        {"cmd": "import", "path": "/no/such/file.yaml"}, wq, db, Config()
+    )
+
+    assert resp["ok"] is False
+    assert "cannot read import file" in resp["error"]
+
+
+async def test_import_creates_node_from_full_pubkey_not_in_db(db, wq, tmp_path):
+    """Restore: a full pubkey is the node identity, so import creates the node even with an
+    empty gateway/DB (the disaster-recovery path)."""
+    pubkey = "aabbccdd" * 8  # full 64-hex pubkey
+    backup = tmp_path / "backup.yaml"
+    backup.write_text(
+        "groups:\n"
+        "  - name: solar\n"
+        "nodes:\n"
+        f"  - pubkey_prefix: {pubkey}\n"
+        "    label: ridge\n"
+        "    group: solar\n"
+        "    settings:\n"
+        '      txdelay: "14"\n'
+    )
+
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, db, Config()
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 1
+    node = await db.get_node(pubkey)
+    assert node is not None
+    assert node.label == "ridge"
+    assert node.group == "solar"
+    assert node.state is NodeState.UNKNOWN
+    rows = await db.get_desired_settings(Scope.NODE, pubkey)
+    assert rows[0].key == "txdelay"
+    assert rows[0].desired == "14"
+
+
+async def test_import_short_prefix_unknown_node_is_not_created(db, wq, tmp_path):
+    """A short prefix's full pubkey is unknowable, so it is skipped, never invented."""
+    backup = tmp_path / "backup.yaml"
+    backup.write_text(
+        "nodes:\n"
+        "  - pubkey_prefix: deadbeef\n"
+        "    label: ghost\n"
+        "    settings:\n"
+        '      txdelay: "14"\n'
+    )
+
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, db, Config()
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 0
+    assert await db.get_all_nodes() == []
+    assert any("ghost" in w or "deadbeef" in w for w in resp["data"]["warnings"])
+
+
+async def test_export_includes_inventory_and_tags_retired(db, wq):
+    active = Node(pubkey="aabbccdd" * 8, name="Mesh", label="ridge", group="solar",
+                  state=NodeState.CONFIGURED)
+    bare = Node(pubkey="11223344" * 8, name="Bare", label="bare", state=NodeState.UNKNOWN)
+    retired = Node(pubkey="99887766" * 8, name="Old", label="old", state=NodeState.RETIRED)
+    await db.upsert_node(active)
+    await db.upsert_node(bare)
+    await db.upsert_node(retired)
+    await db.set_desired_setting(DesiredSetting(Scope.NODE, active.pubkey, "txdelay", desired="14"))
+    await db.set_desired_setting(DesiredSetting(Scope.NODE, retired.pubkey, "txdelay", desired="9"))
+
+    resp = await _dispatch({"cmd": "export"}, wq, db, Config())
+    yaml_text = resp["data"]["yaml"]
+
+    # active node: label/group/settings present; bare node present with no settings
+    assert active.pubkey in yaml_text
+    assert "label: ridge" in yaml_text
+    assert "group: solar" in yaml_text
+    assert bare.pubkey in yaml_text
+    assert "label: bare" in yaml_text
+    # retired node IS included now, tagged retired: true, and its row is round-tripped
+    assert retired.pubkey in yaml_text
+    assert "label: old" in yaml_text
+    assert "retired: true" in yaml_text
+
+
+def _backup_with_retired(tmp_path, name="backup.yaml"):
+    active = "aabbccdd" * 8
+    retired = "99887766" * 8
+    p = tmp_path / name
+    p.write_text(
+        "nodes:\n"
+        f"  - pubkey_prefix: {active}\n"
+        "    label: ridge\n"
+        "    settings:\n"
+        '      txdelay: "14"\n'
+        f"  - pubkey_prefix: {retired}\n"
+        "    label: old\n"
+        "    retired: true\n"
+        "    settings:\n"
+        '      txdelay: "9"\n'
+    )
+    return p, active, retired
+
+
+async def test_import_write_with_retired_and_no_mode_errors(db, wq, tmp_path):
+    backup, _active, _retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, db, Config()
+    )
+    assert resp["ok"] is False
+    assert "retired" in resp["error"]
+    assert "--retired keep" in resp["error"] and "--retired skip" in resp["error"]
+    assert await db.get_all_nodes() == []  # nothing written
+
+
+async def test_import_retired_keep_restores_as_retired(db, wq, tmp_path):
+    backup, active, retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup), "retired": "keep"},
+        wq, db, Config(),
+    )
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 2
+    assert (await db.get_node(retired)).state is NodeState.RETIRED
+    assert (await db.get_node(active)).state is NodeState.UNKNOWN
+    # retired node's desired row is restored too
+    assert (await db.get_desired_settings(Scope.NODE, retired))[0].desired == "9"
+
+
+async def test_import_retired_skip_omits_them(db, wq, tmp_path):
+    backup, active, retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch(
+        {"cmd": "import", "dry_run": False, "path": str(backup), "retired": "skip"},
+        wq, db, Config(),
+    )
+    assert resp["ok"] is True
+    assert resp["data"]["nodes_created"] == 1  # only the active node
+    assert await db.get_node(retired) is None
+    assert await db.get_desired_settings(Scope.NODE, retired) == []
+    assert (await db.get_node(active)).label == "ridge"
+
+
+async def test_import_dry_run_reports_retired_without_requiring_mode(db, wq, tmp_path):
+    backup, _active, _retired = _backup_with_retired(tmp_path)
+    resp = await _dispatch({"cmd": "import", "path": str(backup)}, wq, db, Config())
+    assert resp["ok"] is True
+    assert resp["data"]["retired_in_backup"] == 1
+    assert resp["data"]["retired_mode"] is None
+    assert await db.get_all_nodes() == []  # dry run writes nothing
+
+
+async def test_export_import_round_trip_rebuilds_fleet_on_fresh_db(db, wq, tmp_path):
+    """End-to-end restore: export a fleet, then import it into an empty DB (server replacement)."""
+    pubkey = "aabbccdd" * 8
+    await db.upsert_node(Node(pubkey=pubkey, name="Mesh", label="ridge", group="solar",
+                              state=NodeState.CONFIGURED))
+    await db.set_desired_setting(DesiredSetting(Scope.NODE, pubkey, "txdelay", desired="14"))
+
+    export = await _dispatch({"cmd": "export"}, wq, db, Config())
+    backup = tmp_path / "backup.yaml"
+    backup.write_text(export["data"]["yaml"])
+
+    fresh = Database(tmp_path / "fresh.db")
+    await fresh.open()
+    try:
+        resp = await _dispatch(
+            {"cmd": "import", "dry_run": False, "path": str(backup)}, wq, fresh, Config()
+        )
+        assert resp["ok"] is True
+        assert resp["data"]["nodes_created"] == 1
+        node = await fresh.get_node(pubkey)
+        assert node.label == "ridge"
+        assert node.group == "solar"
+        rows = await fresh.get_desired_settings(Scope.NODE, pubkey)
+        assert rows[0].desired == "14"
+    finally:
+        await fresh.close()
+
+
+# ------ export ------
+
+async def test_export_returns_yaml_of_db_desired_state(db, wq, config):
+    await db.set_desired_setting(DesiredSetting(Scope.GROUP, "solar", "txdelay", desired="20"))
+    await db.set_desired_setting(
+        DesiredSetting(Scope.GLOBAL, "", "owner.info", desired="rdm")
+    )
+
+    resp = await _dispatch({"cmd": "export"}, wq, db, config)
+
+    assert resp["ok"] is True
+    text = resp["data"]["yaml"]
+    assert "solar" in text and "txdelay" in text and "owner.info" in text
+    # the emitted YAML must parse back to the expected structure
+    import yaml as _yaml
+    parsed = _yaml.safe_load(text)
+    assert parsed["groups"][0]["name"] == "solar"
+    assert parsed["global"]["settings"]["owner.info"] == "rdm"
+    assert resp["data"]["total"] == 2
+
+
+async def test_export_empty_db_is_empty(db, wq, config):
+    resp = await _dispatch({"cmd": "export"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["total"] == 0
+    assert resp["data"]["yaml"].strip() in ("", "{}")
+
+
+async def test_import_writes_operations_to_db(db, wq):
+    node = await _seed_plain_node(db)  # pubkey aabbccdd*8
+    config = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="test",
+        operations=[OperationConfig(command="clock sync", every_hours=12)],
+    )])
+
+    resp = await _dispatch({"cmd": "import", "dry_run": False}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["operations"] == 1
+    ops = await db.get_desired_operations(Scope.NODE, node.pubkey)
+    assert ops[0].command == "clock sync"
+    assert ops[0].every_hours == 12
+
+
+async def test_export_includes_db_operations(db, wq, config):
+    await db.set_desired_operation(
+        DesiredOperation(Scope.GLOBAL, "", "clock sync")
+    )
+
+    resp = await _dispatch({"cmd": "export"}, wq, db, config)
+
+    assert resp["ok"] is True
+    import yaml as _yaml
+    parsed = _yaml.safe_load(resp["data"]["yaml"])
+    assert parsed["global"]["operations"] == ["clock sync"]
+    assert resp["data"]["total"] == 1

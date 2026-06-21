@@ -1263,7 +1263,7 @@ def test_status_single_match_shows_unobserved_settings_in_yellow():
     assert result.exit_code == 0
     assert "unknown = not yet observed" not in result.output
     assert re.search(
-        r"owner\.info\s+Managed by mch\s+-\s+-\s+0\s+\x1b\[33mnot observed\x1b\[0m",
+        r"owner\.info\s+Managed by mch\s+-\s+0\s+\x1b\[33mnot observed\x1b\[0m",
         result.output,
     )
 
@@ -1277,7 +1277,7 @@ def test_status_single_match_shows_tries_as_not_applicable_for_audit():
     }])
     result = _run_multi(["status", "aabb"], status, detail)
     assert re.search(
-        r"audit\s+owner\.info\s+Managed by mch\s+wrong\s+-\s+-\s+drifted", result.output
+        r"audit\s+owner\.info\s+Managed by mch\s+wrong\s+-\s+drifted", result.output
     )
 
 
@@ -1293,7 +1293,7 @@ def test_status_single_match_shows_approximate_settings_status():
     assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
-        r"radio\s+915\.075,125,9,5\s+915\.0750122,125,9,5\s+-\s+0\s+nominal",
+        r"radio\s+915\.075,125,9,5\s+915\.0750122,125,9,5\s+0\s+nominal",
         result.output,
     )
 
@@ -1317,7 +1317,7 @@ def test_status_single_match_shows_ok_settings_in_green():
 
     assert result.exit_code == 0
     assert re.search(
-        r"owner\.info\s+Managed by mch\s+Managed by mch\s+-\s+0\s+\x1b\[32mok\x1b\[0m",
+        r"owner\.info\s+Managed by mch\s+Managed by mch\s+0\s+\x1b\[32mok\x1b\[0m",
         result.output,
     )
 
@@ -1347,8 +1347,8 @@ def _prune_resp(candidates=None, deleted=0):
 def test_prune_no_candidates():
     result = _run(["prune"], _prune_resp())
     assert result.exit_code == 0
-    assert "no DB nodes outside config.yaml" in result.output
-    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+    assert "no retired nodes to prune" in result.output
+    assert "mch retire" in result.output
 
 
 def test_prune_lists_candidates_without_deleting():
@@ -1356,14 +1356,13 @@ def test_prune_lists_candidates_without_deleting():
         "pubkey": "aabbccdd" * 8,
         "label": "old-site",
         "name": "Old Site",
-        "state": "configured",
+        "state": "retired",
         "last_seen": None,
     }]))
     assert result.exit_code == 0
-    assert "DB nodes outside config.yaml" in result.output
+    assert "retired nodes" in result.output
     assert "old-site" in result.output
     assert "run 'mch prune --yes'" in result.output
-    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
 
 
 def test_prune_yes_reports_deleted_count():
@@ -1371,12 +1370,11 @@ def test_prune_yes_reports_deleted_count():
         "pubkey": "aabbccdd" * 8,
         "label": "old-site",
         "name": "Old Site",
-        "state": "configured",
+        "state": "retired",
         "last_seen": None,
     }], deleted=1))
     assert result.exit_code == 0
-    assert "deleted 1 node(s)" in result.output
-    assert "secrets.yaml entries and gateway favourites are left unchanged" in result.output
+    assert "deleted 1 retired node(s)" in result.output
 
 
 # ------ clean facts ------
@@ -1432,14 +1430,14 @@ def test_clean_facts_yes_reports_deleted_count():
 
 # ------ remove ------
 
-def _remove_resp(deleted=0, configured=False):
+def _remove_resp(deleted=0, retired=True):
     return {"ok": True, "data": {
         "pubkey": "aabbccdd" * 8,
         "label": "old-site",
         "name": "Old Site",
-        "state": "configured",
+        "state": "retired" if retired else "configured",
         "last_seen": None,
-        "configured": configured,
+        "retired": retired,
         "deleted": deleted,
     }}
 
@@ -1463,17 +1461,43 @@ def test_remove_yes_deletes_without_prompt():
     assert result.exit_code == 0
     assert "local DB node state" in result.output
     assert "deleted 1 node(s)" in result.output
-    assert "config.yaml, secrets.yaml, and gateway favourites are left unchanged" in result.output
+    assert "secrets.yaml is left unchanged" in result.output
 
 
-def test_remove_configured_node_mentions_force_when_used():
+def test_remove_active_node_notes_force_when_used():
     result = _run_multi(
         ["remove", "site-a", "--force", "--yes"],
-        _remove_resp(configured=True),
-        _remove_resp(deleted=1, configured=True),
+        _remove_resp(retired=False),
+        _remove_resp(deleted=1, retired=False),
     )
     assert result.exit_code == 0
-    assert "still present in config.yaml" in result.output
+    assert "still managed (not retired)" in result.output
+
+
+def _retire_resp(state="retired"):
+    return {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site", "name": "Site", "state": state,
+    }}
+
+
+def test_retire_command_sends_query_and_reports_state():
+    rpc = MagicMock(return_value=_retire_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "retire", "site"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "retire", "query": "site"}
+    assert "retired site" in result.output
+
+
+def test_unretire_command_sends_query_and_reports_state():
+    rpc = MagicMock(return_value=_retire_resp(state="unknown"))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "unretire", "site"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "unretire", "query": "site"}
+    assert "unretired site" in result.output
 
 
 # ------ plan ------
@@ -2132,7 +2156,8 @@ def test_commission_new_happy_path():
         result = runner.invoke(cli, ["--socket", "/fake.sock", "new"], input=inp)
     assert result.exit_code == 0, result.output
     assert "a695e2be" in result.output  # pubkey_prefix shown
-    assert "Restart or reload mchd" in result.output
+    assert "mch import" in result.output
+    assert "Reload mchd" in result.output
     assert "mch status a695e2be" in result.output
     assert "Optional: mch sync a695e2be" in result.output
     req = mock_rpc.call_args_list[1][0][1]
@@ -2862,7 +2887,8 @@ def test_unset_global_scope_sends_global_request():
     assert "all managed nodes" in result.output
 
 
-def test_status_single_match_shows_setting_source_column():
+def test_status_single_match_settings_table_has_no_source_column():
+    # Sunset: the DB is the only desired-state source, so the SOURCE column is dropped.
     status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[
         {
@@ -2870,20 +2896,15 @@ def test_status_single_match_shows_setting_source_column():
             "policy": "enforce", "source": "db", "drift": False,
             "approximate": False, "update_attempts": 0,
         },
-        {
-            "key": "name", "desired": "Tower", "observed": "Tower",
-            "policy": "enforce", "source": "config", "drift": False,
-            "approximate": False, "update_attempts": 0,
-        },
     ])
     result = _run_multi(["status", "aabb"], status, detail)
 
     assert result.exit_code == 0
-    assert "SOURCE" in result.output
+    assert "SOURCE" not in result.output
     # DESIRED comes before OBSERVED, matching the fleet drift table.
     assert re.search(r"DESIRED\s+OBSERVED", result.output)
-    assert re.search(r"txdelay\s+14\s+14\s+db\s+0\s+ok", result.output)
-    assert re.search(r"name\s+Tower\s+Tower\s+config\s+0\s+ok", result.output)
+    # No source column between OBSERVED and TRIES now.
+    assert re.search(r"txdelay\s+14\s+14\s+0\s+ok", result.output)
 
 
 def test_status_single_match_settings_show_desired_before_observed():
@@ -2898,21 +2919,7 @@ def test_status_single_match_settings_show_desired_before_observed():
 
     assert result.exit_code == 0
     # desired (14) appears before observed (20) on the row
-    assert re.search(r"txdelay\s+14\s+20\s+db\s+1\s+drifted", result.output)
-
-
-def test_status_single_match_source_defaults_to_dash_when_absent():
-    status = _status_resp(nodes=[_summary()])
-    # A setting with no source (e.g. observed-only history) renders "-".
-    detail = _detail(settings=[{
-        "key": "owner.info", "desired": "x", "observed": "x",
-        "policy": "enforce", "drift": False, "approximate": False,
-        "update_attempts": 0,
-    }])
-    result = _run_multi(["status", "aabb"], status, detail)
-
-    assert result.exit_code == 0
-    assert re.search(r"owner\.info\s+x\s+x\s+-\s+0\s+ok", result.output)
+    assert re.search(r"txdelay\s+14\s+20\s+1\s+drifted", result.output)
 
 
 # ------ clean settings ------
@@ -2926,6 +2933,134 @@ def test_clean_settings_requires_scope():
 
     assert result.exit_code != 0
     assert "choose exactly one scope" in result.output
+
+
+# ------ import ------
+
+def _import_resp(counts=None, total=0, warnings=None, written=0, dry_run=True,
+                 retired_in_backup=0, retired_mode=None):
+    return {"ok": True, "data": {
+        "counts": counts or {"global": 0, "group": 0, "node": 0},
+        "total": total,
+        "warnings": warnings or [],
+        "written": written,
+        "dry_run": dry_run,
+        "retired_in_backup": retired_in_backup,
+        "retired_mode": retired_mode,
+    }}
+
+
+def test_import_retired_flag_passes_mode():
+    rpc = MagicMock(return_value=_import_resp(written=1, dry_run=False, retired_mode="keep"))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(
+            cli, ["--socket", "/fake.sock", "import", "--retired", "keep", "--yes"]
+        )
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1]["retired"] == "keep"
+
+
+def test_import_dry_run_warns_about_retired_nodes():
+    rpc = MagicMock(return_value=_import_resp(total=2, retired_in_backup=2))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import"])
+
+    assert result.exit_code == 0
+    assert "--retired keep" in result.output
+    assert "--retired skip" in result.output
+
+
+def test_import_rejects_invalid_retired_choice():
+    result = CliRunner().invoke(
+        cli, ["--socket", "/fake.sock", "import", "--retired", "bogus"]
+    )
+    assert result.exit_code != 0
+
+
+def test_import_dry_run_previews_counts():
+    rpc = MagicMock(return_value=_import_resp(
+        counts={"global": 1, "group": 0, "node": 2}, total=3,
+    ))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "import", "dry_run": True}
+    assert "3" in result.output
+    assert "--yes" in result.output
+
+
+def test_import_yes_applies_and_reports_written():
+    rpc = MagicMock(return_value=_import_resp(
+        counts={"global": 1, "group": 0, "node": 2}, total=3, written=3, dry_run=False,
+    ))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import", "--yes"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "import", "dry_run": False}
+    assert "imported 3" in result.output
+
+
+def test_import_with_explicit_path_sends_absolute_path(tmp_path):
+    legacy = tmp_path / "legacy.yaml"
+    legacy.write_text("nodes: []\n")
+    rpc = MagicMock(return_value=_import_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(
+            cli, ["--socket", "/fake.sock", "import", str(legacy), "--yes"]
+        )
+
+    assert result.exit_code == 0
+    sent = rpc.call_args.args[1]
+    assert sent["cmd"] == "import"
+    assert sent["dry_run"] is False
+    assert sent["path"] == str(legacy.resolve())
+
+
+def test_import_with_missing_path_errors_before_rpc():
+    rpc = MagicMock(return_value=_import_resp())
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(
+            cli, ["--socket", "/fake.sock", "import", "/no/such/file.yaml"]
+        )
+
+    assert result.exit_code != 0
+    rpc.assert_not_called()
+
+
+def test_import_surfaces_warnings():
+    rpc = MagicMock(return_value=_import_resp(
+        warnings=["node 'ghost' (deadbeef) is not known to the DB yet - skipped"],
+    ))
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "import"])
+
+    assert result.exit_code == 0
+    assert "ghost" in result.output
+
+
+# ------ export ------
+
+def test_export_prints_yaml():
+    yaml_text = "global:\n  settings:\n    owner.info: rdm\n"
+    rpc = MagicMock(return_value={"ok": True, "data": {"yaml": yaml_text, "total": 1}})
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "export"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "export"}
+    assert "owner.info: rdm" in result.output
+
+
+def test_export_empty_reports_nothing_to_export():
+    rpc = MagicMock(return_value={"ok": True, "data": {"yaml": "", "total": 0}})
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "export"])
+
+    assert result.exit_code == 0
+    assert "no desired state" in result.output.lower()
 
 
 def test_clean_settings_lists_candidates_without_deleting():

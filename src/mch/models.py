@@ -18,6 +18,8 @@ class NodeState(Enum):
     CONFIGURING = "configuring"  # commands in flight
     CONFIGURED  = "configured"   # all enforced settings match desired, all operations done
     PARTIAL     = "partial"      # some settings pending/failed or drifted
+    RETIRED     = "retired"      # deliberately removed from management; skipped + unfavourited,
+    #                              kept for history (retire-don't-delete). Re-managed via unretire.
 
 
 class SettingPolicy(Enum):
@@ -98,6 +100,23 @@ class DesiredSetting:
     desired: str | None = None             # None = policy-only override (no value)
     policy: SettingPolicy | None = None    # None = inherit
     poll_hours: int | None = None          # None = inherit / built-in default
+
+
+@dataclass
+class DesiredOperation:
+    """A declared recurring/one-shot command for one scope (global/group/node).
+
+    The desired-state analogue of OperationConfig, stored in the DB so operations
+    sunset out of config.yaml like settings and directives (DESIGN.md sunset). Unlike
+    DesiredSetting there is no policy: an operation is simply run when due. ``scope_id``
+    is "" for global, the group name for group scope, the node pubkey for node scope.
+    Resolution is Node > Group > Global by command.
+    """
+    scope_type: Scope
+    scope_id: str
+    command: str              # raw CLI string, e.g. "clock sync"
+    every_hours: int = 24
+    fire_and_forget: bool = False  # treat timeout/no-response as success (e.g. reboot)
 
 
 @dataclass

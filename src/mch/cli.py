@@ -840,31 +840,27 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 else "-"
             )
 
-        def _src(setting: dict[str, Any]) -> str:
-            # "db" = set via `mch set`; "config" = from config.yaml; "-" = observed-only history.
-            return setting.get("source") or "-"
-
         click.echo("settings:")
         # column widths based on content display width, not char count
         col_pol = max(6, max(len(s["policy"]) for s in settings))
         col_key = max(3, max(_wlen(s["key"]) for s in settings))
         col_obs = max(8, max(_wlen(_sv(s.get("observed"))) for s in settings))
         col_des = max(7, max(_wlen(_sv(s.get("desired"))) for s in settings))
-        col_src = max(len("SOURCE"), max(len(_src(s)) for s in settings))
         col_tries = max(
             len("TRIES"), max(len(_tries(s)) for s in settings)
         )
         # DESIRED before OBSERVED, matching the fleet drift table (desired-vs-actual reading).
+        # No SOURCE column: the DB is the only desired-state source now (sunset).
         def _srow(
             policy: str, key: str, desired: str, observed: str,
-            source: str, tries: str, status: str,
+            tries: str, status: str,
         ) -> str:
             return (
                 f"  {_wpad(policy, col_pol)}  {_wpad(key, col_key)}  {_wpad(desired, col_des)}"
-                f"  {_wpad(observed, col_obs)}  {source:<{col_src}}  {tries:>{col_tries}}  {status}"
+                f"  {_wpad(observed, col_obs)}  {tries:>{col_tries}}  {status}"
             )
-        click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "SOURCE", "TRIES", "STATUS"))
-        click.echo(_srow("------", "---", "-------", "--------", "------", "-----", "------"))
+        click.echo(_srow("POLICY", "KEY", "DESIRED", "OBSERVED", "TRIES", "STATUS"))
+        click.echo(_srow("------", "---", "-------", "--------", "-----", "------"))
         for s in settings:
             if s.get("observed") is None:
                 status = click.style("not observed", fg="yellow")
@@ -879,7 +875,6 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 s["key"],
                 _sv(s.get("desired")),
                 _sv(s.get("observed")),
-                _src(s),
                 _tries(s),
                 status,
             ))
@@ -1459,14 +1454,14 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed local DB state.")
 @click.pass_context
 def prune(ctx: click.Context, yes: bool) -> None:
-    """List or delete DB nodes that are no longer in config.yaml."""
+    """List or hard-delete retired nodes (the purge step after `mch retire`)."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
     candidates = data.get("candidates", [])
 
     if not candidates:
-        click.echo("no DB nodes outside config.yaml")
-        click.echo("secrets.yaml entries and gateway favourites are left unchanged")
+        click.echo("no retired nodes to prune")
+        click.echo("retire a node first with `mch retire <node>`; secrets.yaml is left unchanged")
         return
 
     label_w = max(
@@ -1478,7 +1473,7 @@ def prune(ctx: click.Context, yes: bool) -> None:
         max((_wlen(n.get("name") or "-") for n in candidates), default=0),
     )
     row = "  {:<12}  {}  {}  {:<12}  {:<12}"
-    click.echo("DB nodes outside config.yaml:")
+    click.echo("retired nodes (will be hard-deleted, history and all):")
     click.echo(row.format(
         "PUBKEY",
         _wpad("LABEL", label_w),
@@ -1504,11 +1499,11 @@ def prune(ctx: click.Context, yes: bool) -> None:
 
     if yes:
         click.echo("")
-        click.echo(f"deleted {data.get('deleted', 0)} node(s) from local DB state")
+        click.echo(f"deleted {data.get('deleted', 0)} retired node(s) from local DB state")
     else:
         click.echo("")
         click.echo("run 'mch prune --yes' to delete these local DB rows")
-    click.echo("secrets.yaml entries and gateway favourites are left unchanged")
+    click.echo("secrets.yaml entries are left unchanged")
 
 
 @cli.group()
@@ -1669,11 +1664,11 @@ def clean_settings(
 @click.option(
     "--force",
     is_flag=True,
-    help="Allow deleting local DB state for a node still present in config.yaml.",
+    help="Allow deleting local DB state for a node that is still managed (not retired).",
 )
 @click.pass_context
 def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
-    """Delete one node's local DB state."""
+    """Delete one node's local DB state (prefer `mch retire` to stop managing a node)."""
     resp = _rpc(
         ctx.obj["socket"],
         {"cmd": "remove", "query": node, "dry_run": True, "force": force},
@@ -1688,11 +1683,11 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
     click.echo(f"  mesh name: {name}")
     click.echo(f"  state:     {data.get('state') or '-'}")
     click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
-    if data.get("configured"):
-        click.echo("  config:    still present in config.yaml (--force used)")
+    if not data.get("retired"):
+        click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
     click.echo("")
     click.echo("This deletes local facts, settings, operations, logs, and the DB node row.")
-    click.echo("config.yaml, secrets.yaml, and gateway favourites are left unchanged.")
+    click.echo("secrets.yaml is left unchanged.")
 
     if not yes and not click.confirm("Delete this local DB state?"):
         click.echo("not deleted")
@@ -1704,6 +1699,32 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
     )
     deleted = _check(delete_resp).get("deleted", 0)
     click.echo(f"deleted {deleted} node(s) from local DB state")
+
+
+@cli.command("retire")
+@click.argument("node")
+@click.pass_context
+def retire_node(ctx: click.Context, node: str) -> None:
+    """Stop managing a node: exclude it from sync and unfavourite it, keeping its history.
+
+    Retire-don't-delete. Re-manage later with `mch unretire`, or purge the history with
+    `mch prune`.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "retire", "query": node}))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    click.echo(f"retired {ident} ({_pk(data.get('pubkey'))}) — state now {data.get('state')}")
+    click.echo("excluded from sync and unfavourited; history kept. `mch unretire` to undo.")
+
+
+@cli.command("unretire")
+@click.argument("node")
+@click.pass_context
+def unretire_node(ctx: click.Context, node: str) -> None:
+    """Return a retired node to management: re-favourite it and schedule it for sync."""
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "unretire", "query": node}))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    click.echo(f"unretired {ident} ({_pk(data.get('pubkey'))}) — state now {data.get('state')}")
+    click.echo("re-favourited and queued for sync.")
 
 
 # ---------------------------------------------------------------------------
@@ -2126,6 +2147,105 @@ def plan(ctx: click.Context, query: str | None) -> None:
                 _value(item.get("desired")),
                 item.get("reason") or "-",
             ))
+
+
+# ---------------------------------------------------------------------------
+# import
+# ---------------------------------------------------------------------------
+
+@cli.command("import")
+@click.argument(
+    "config_file",
+    required=False,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--yes", "-y", is_flag=True, help="Write the imported rows to the DB.")
+@click.option(
+    "--retired",
+    type=click.Choice(["keep", "skip"]),
+    default=None,
+    help="For a backup that contains retired nodes: keep (restore them as retired) or skip "
+    "(omit them). Required to write when the backup has retired nodes.",
+)
+@click.pass_context
+def import_config(
+    ctx: click.Context, config_file: Path | None, yes: bool, retired: str | None
+) -> None:
+    """Seed the DB's desired state from a config.yaml (the migration on-ramp).
+
+    Flattens config.yaml settings and directives (name_prefix/default_policy/via_radio) at
+    node/group/global scope into desired_settings rows. Dry-run by default; --yes writes.
+    Idempotent - re-running upserts the same rows. A node not yet seen by the gateway is
+    skipped with a warning until it appears in the DB.
+
+    Pass an explicit CONFIG_FILE (a legacy or `mch export`-ed file) to import from it instead
+    of the daemon's loaded config. This is the migration path once config.yaml no longer holds
+    desired state — the daemon process must be able to read the file. A full `mch export` backup
+    also restores nodes the gateway has not seen yet; use --retired to choose what happens to any
+    retired nodes it carries.
+    """
+    cmd: dict[str, Any] = {"cmd": "import", "dry_run": not yes}
+    if config_file is not None:
+        # Resolve here: the daemon runs from a different cwd, so it needs an absolute path.
+        cmd["path"] = str(config_file.resolve())
+    if retired is not None:
+        cmd["retired"] = retired
+    data = _check(_rpc(ctx.obj["socket"], cmd))
+    counts = data["counts"]
+    total = data["total"]
+    operations = data.get("operations", 0)
+    nodes_created = data.get("nodes_created", 0)
+    retired_in_backup = data.get("retired_in_backup", 0)
+    retired_mode = data.get("retired_mode")
+    if yes:
+        click.echo(
+            f"imported {data['written']} desired item(s) into the DB "
+            f"(global {counts['global']}, groups {counts['group']}, nodes {counts['node']}, "
+            f"operations {operations})"
+        )
+        if nodes_created:
+            click.echo(f"created {nodes_created} new node(s) from full pubkeys (restore)")
+        if retired_in_backup:
+            verb = "restored as retired" if retired_mode == "keep" else "skipped"
+            click.echo(f"{retired_in_backup} retired node(s) in backup: {verb}")
+    else:
+        click.echo("import preview (dry run):")
+        click.echo(f"  global:     {counts['global']}")
+        click.echo(f"  groups:     {counts['group']}")
+        click.echo(f"  nodes:      {counts['node']}")
+        click.echo(f"  operations: {operations}")
+        click.echo(f"  total:      {total}")
+        if nodes_created:
+            click.echo(f"  new nodes:  {nodes_created} (created from full pubkeys on restore)")
+    for warning in data.get("warnings", []):
+        click.echo(click.style(f"  warning: {warning}", fg="yellow"))
+    if retired_in_backup and retired_mode is None:
+        click.echo(click.style(
+            f"  note: backup has {retired_in_backup} retired node(s) — add --retired keep "
+            "to restore them as retired, or --retired skip to omit them",
+            fg="yellow",
+        ))
+    if not yes and total:
+        click.echo("run again with --yes to write these to the DB")
+
+
+# ---------------------------------------------------------------------------
+# export
+# ---------------------------------------------------------------------------
+
+@cli.command("export")
+@click.pass_context
+def export_config(ctx: click.Context) -> None:
+    """Dump the DB's desired state as config.yaml-shaped YAML (the inverse of import).
+
+    Prints to stdout - redirect to save (`mch export > desired.yaml`). Round-trips with
+    `mch import`. Observed state and operations are not included.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "export"}))
+    if not data.get("total"):
+        click.echo("no desired state in the DB to export")
+        return
+    click.echo(data["yaml"], nl=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2578,19 +2698,20 @@ def _commission_new_wizard(
     click.echo("")
     click.echo("Node commissioned successfully.")
     click.echo("")
-    click.echo("Add to config.yaml under nodes:")
+    click.echo("Save this to a file (e.g. new-node.yaml) and apply it with `mch import`:")
     click.echo("")
-    click.echo(d.get("config_snippet", ""))
+    click.echo(d.get("import_yaml", ""))
     click.echo("")
     click.echo("Add to secrets.yaml under nodes:")
     click.echo("")
     click.echo(d.get("secrets_snippet", ""))
     click.echo("")
     click.echo("Next steps:")
-    click.echo("  1. Add both entries to your config files")
-    click.echo("  2. Restart or reload mchd so it reads the new entries")
-    click.echo(f"  3. Run: mch status {pubkey_prefix}")
-    click.echo(f"  4. Optional: mch sync {pubkey_prefix}")
+    click.echo("  1. Add the secrets entry to secrets.yaml")
+    click.echo("  2. Reload mchd so it seeds the new node from gateway favourites")
+    click.echo("  3. Run: mch import new-node.yaml   (then again with --yes to write)")
+    click.echo(f"  4. Run: mch status {pubkey_prefix}")
+    click.echo(f"  5. Optional: mch sync {pubkey_prefix}")
 
 
 def _commission_replace_wizard(socket: str) -> None:

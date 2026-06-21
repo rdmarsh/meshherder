@@ -165,6 +165,12 @@ Set the `device` path in `/etc/meshherder/config.yaml` to `/dev/meshcore0`.
 
 ## Upgrade
 
+> **Steady state is `main`.** These steps fast-forward whatever branch `/opt` is **already** on —
+> `git pull --ff-only` does **not** switch branches, so if you are on `main` it will never pull an
+> unmerged feature branch (and silently no-ops). To bench-test an unmerged branch, use
+> [Testing a feature branch on the bench](#testing-a-feature-branch-on-the-bench) instead, then
+> return to `main` when done.
+
 Use the same checkout and venv that were created during production install:
 
 ```bash
@@ -199,3 +205,47 @@ systemd unit are otherwise correct.
 
 If `mchd` exits because `config.yaml` is invalid, the service stops instead of restart-looping.
 Fix the config with `mch validate`, then restart `mchd`.
+
+## Testing a feature branch on the bench
+
+To try an unmerged branch (e.g. a PR you are reviewing) on the bench host, *check out the branch*
+instead of fast-forward-pulling `main`. Substitute the branch name for `<branch>` below.
+
+```bash
+# 1. operator checkout: fetch from GitHub and switch to the branch
+cd ~/code/meshherder
+git fetch origin
+git checkout <branch>          # first time; later updates on the same branch: git pull --ff-only
+
+# 2. /opt checkout (origin points at the operator checkout): fetch + switch
+cd /opt/meshherder
+sudo git remote set-url origin ~/code/meshherder
+sudo git fetch origin
+sudo git checkout <branch>
+
+# 3. install + restart (same as Upgrade)
+sudo /opt/meshherder/.venv/bin/pip install .
+sudo systemctl restart mchd
+```
+
+Verify the branch is actually deployed (a stale `/opt` tree silently downgrades the daemon - see
+the Upgrade notes):
+
+```bash
+mch --version
+git -C /opt/meshherder status --short --branch    # confirms the branch name
+systemctl status mchd --no-pager
+```
+
+**Test safely first.** Prefer read-only and dry-run commands before anything that writes. Commands
+that only read the DB or mesh (`mch status`, `mch export`, `mch plan`) are safe; `mch import`
+defaults to a dry-run preview and only writes with `--yes`. `mch import`/`mch export` are local DB
+operations with no mesh traffic, so they cannot strand or disturb field nodes.
+
+**Return to `main` when done:**
+
+```bash
+cd ~/code/meshherder && git checkout main
+cd /opt/meshherder  && sudo git checkout main
+sudo /opt/meshherder/.venv/bin/pip install . && sudo systemctl restart mchd
+```

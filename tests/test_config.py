@@ -8,15 +8,26 @@ import yaml
 
 from mch.config import (
     ApiConfig,
+    Config,
     GroupConfig,
     NodeConfig,
+    OperationConfig,
     RadioConfig,
     SettingConfig,
+    config_dict_to_yaml,
+    config_to_desired_operations,
+    config_to_desired_rows,
+    desired_rows_to_config_dict,
     load,
     overlay_db_group_settings,
     overlay_db_settings,
+    resolve_desired,
+    resolve_desired_configs,
+    resolve_name_prefix,
 )
-from mch.models import DesiredSetting, Scope, SettingPolicy
+from mch.db import Database
+from mch.models import DesiredOperation, DesiredSetting, Node, Scope, SettingPolicy
+from mch.queue import all_setting_keys
 
 
 def _write_config(tmp_path: Path, text: str) -> Path:
@@ -88,6 +99,71 @@ def test_load_records_config_and_secrets_paths(tmp_path):
 
     assert cfg.config_path == str(p.resolve())
     assert cfg.secrets_path == str(secrets.resolve())
+
+
+def test_strict_load_rejects_nodes_block(tmp_path):
+    """The daemon loads strict: leftover desired state in config.yaml is a hard error."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbcc
+            settings:
+              txdelay: "14"
+        """)
+    with pytest.raises(ValueError, match="mch import"):
+        load(p, strict=True)
+
+
+def test_strict_load_rejects_groups_block(tmp_path):
+    p = _write_config(tmp_path, """\
+        groups:
+          - name: solar
+            settings:
+              advert.interval: "240"
+        """)
+    with pytest.raises(ValueError, match="mch import"):
+        load(p, strict=True)
+
+
+def test_strict_load_rejects_global_desired_block(tmp_path):
+    p = _write_config(tmp_path, """\
+        global:
+          settings:
+            powersaving: "on"
+        """)
+    with pytest.raises(ValueError, match="mch import"):
+        load(p, strict=True)
+
+
+def test_strict_load_allows_daemon_only_config(tmp_path):
+    """gateway/scheduler/etc. are fine under strict; only desired state is rejected."""
+    p = _write_config(tmp_path, """\
+        gateway:
+          device: /dev/meshcore0
+        scheduler:
+          inter_node_delay_seconds: 30
+        """)
+    cfg = load(p, strict=True)
+    assert cfg.gateway.device == "/dev/meshcore0"
+    assert cfg.nodes == []
+
+
+def test_strict_load_tolerates_empty_desired_blocks(tmp_path):
+    """An empty `nodes: []` left behind after migration should not block startup."""
+    p = _write_config(tmp_path, "nodes: []\ngroups: []\n")
+    cfg = load(p, strict=True)
+    assert cfg.nodes == []
+
+
+def test_lenient_load_still_accepts_desired_state(tmp_path):
+    """Default (non-strict) load keeps reading desired state — the import on-ramp."""
+    p = _write_config(tmp_path, """\
+        nodes:
+          - pubkey_prefix: aabbccdd
+            settings:
+              txdelay: "14"
+        """)
+    cfg = load(p)
+    assert cfg.nodes[0].pubkey_prefix == "aabbccdd"
 
 
 def test_api_config_is_disabled_and_loopback_by_default():
@@ -1191,3 +1267,369 @@ def test_overlay_via_radio_strips_surrounding_space():
     rows = [DesiredSetting(Scope.NODE, "aabbccdd", "via_radio", desired=" 915.8,250,11,5 ")]
     merged, _ = overlay_db_settings(node, rows)
     assert merged.via_radio == RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5)
+
+
+# ------------------------------------------------------------------
+# config_to_desired_rows: flatten loaded config -> desired_settings rows (mch import)
+# ------------------------------------------------------------------
+
+_PK = "aabbccdd" + "0" * 56  # a full 64-hex pubkey for prefix aabbccdd
+
+
+def _resolver(mapping=None):
+    return (mapping or {"aabbccdd": _PK}).get
+
+
+def test_import_node_settings_to_node_scope_rows():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd", label="n1",
+        settings={"txdelay": SettingConfig(desired="14", policy=SettingPolicy.ENFORCE)},
+    )])
+    rows, warnings = config_to_desired_rows(cfg, _resolver())
+    assert warnings == []
+    # default poll_hours (24) stores as None (inherit), matching `mch set`
+    assert rows == [
+        DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14",
+                       policy=SettingPolicy.ENFORCE, poll_hours=None),
+    ]
+
+
+def test_import_preserves_non_default_poll_hours():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        settings={"owner.info": SettingConfig(desired="x", poll_hours=6)},
+    )])
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    assert rows[0].poll_hours == 6
+
+
+def test_import_unresolvable_node_is_warned_and_skipped():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="deadbeef", label="ghost",
+        settings={"txdelay": SettingConfig(desired="14")},
+    )])
+    rows, warnings = config_to_desired_rows(cfg, _resolver())  # no deadbeef mapping
+    assert rows == []
+    assert len(warnings) == 1
+    assert "deadbeef" in warnings[0] or "ghost" in warnings[0]
+
+
+def test_import_group_settings_and_overrides_to_group_scope():
+    cfg = Config(groups=[GroupConfig(
+        name="solar",
+        settings={"txdelay": SettingConfig(desired="20")},
+        setting_overrides={"powersaving": SettingConfig(policy=SettingPolicy.SKIP)},
+    )])
+    rows, warnings = config_to_desired_rows(cfg, _resolver())
+    assert warnings == []
+    assert DesiredSetting(Scope.GROUP, "solar", "txdelay", desired="20",
+                          policy=None, poll_hours=None) in rows
+    # policy-only override -> desired=None row
+    assert DesiredSetting(Scope.GROUP, "solar", "powersaving", desired=None,
+                          policy=SettingPolicy.SKIP, poll_hours=None) in rows
+
+
+def test_import_global_settings_to_global_scope():
+    cfg = Config(global_settings=GroupConfig(
+        name="global", settings={"owner.info": SettingConfig(desired="rdm")},
+    ))
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    assert DesiredSetting(Scope.GLOBAL, "", "owner.info", desired="rdm",
+                          policy=None, poll_hours=None) in rows
+
+
+def test_import_directives_serialize_to_rows():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="aabbccdd",
+        name_prefix="\U0001f31e ",
+        default_policy=SettingPolicy.AUDIT,
+        via_radio=RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5),
+    )])
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    by_key = {r.key: r.desired for r in rows}
+    assert by_key["name_prefix"] == "\U0001f31e "
+    assert by_key["default_policy"] == "audit"
+    assert by_key["via_radio"] == "915.8,250,11,5"  # bw 250.0 -> "250" (round-trips)
+
+
+def test_import_via_radio_row_round_trips_through_parser():
+    from mch.config import _parse_radio
+    cfg = Config(groups=[GroupConfig(
+        name="g", via_radio=RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5),
+    )])
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    via = next(r for r in rows if r.key == "via_radio")
+    assert _parse_radio(via.desired) == RadioConfig(freq=915.075, bw=125.0, sf=9, cr=5)
+
+
+# ------------------------------------------------------------------
+# desired_rows_to_config_dict: rows -> config.yaml structure (mch export, inverse of import)
+# ------------------------------------------------------------------
+
+def test_export_empty_rows_is_empty_dict():
+    assert desired_rows_to_config_dict([]) == {}
+
+
+def test_export_node_setting_uses_shorthand():
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14")]
+    assert desired_rows_to_config_dict(rows) == {
+        "nodes": [{"pubkey_prefix": _PK, "settings": {"txdelay": "14"}}],
+    }
+
+
+def test_export_node_inventory_adds_label_group_and_group_block():
+    # A node with a label/group but settings too: label+group emitted, and the group it belongs
+    # to is listed under groups: (so the result re-imports without "unknown group").
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14")]
+    node = Node(pubkey=_PK, name="Mesh", label="ridge", group="solar")
+    result = desired_rows_to_config_dict(rows, node_inventory=[node])
+
+    assert result["nodes"] == [{
+        "pubkey_prefix": _PK, "label": "ridge", "group": "solar",
+        "settings": {"txdelay": "14"},
+    }]
+    assert result["groups"] == [{"name": "solar"}]
+
+
+def test_export_includes_inventory_node_with_no_desired_settings():
+    # A node with only inventory (no desired rows) must still appear, so a backup is complete.
+    node = Node(pubkey=_PK, name="Mesh", label="bare", group=None)
+    result = desired_rows_to_config_dict([], node_inventory=[node])
+
+    assert result["nodes"] == [{"pubkey_prefix": _PK, "label": "bare"}]
+
+
+def test_export_setting_with_policy_uses_mapping():
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14",
+                           policy=SettingPolicy.ENFORCE)]
+    node = desired_rows_to_config_dict(rows)["nodes"][0]
+    assert node["settings"]["txdelay"] == {"desired": "14", "policy": "enforce"}
+
+
+def test_export_poll_hours_preserved_in_mapping():
+    rows = [DesiredSetting(Scope.NODE, _PK, "owner.info", desired="x", poll_hours=6)]
+    node = desired_rows_to_config_dict(rows)["nodes"][0]
+    assert node["settings"]["owner.info"] == {"desired": "x", "poll_hours": 6}
+
+
+def test_export_node_policy_only_uses_settings_mapping():
+    # nodes have no setting_overrides; a policy-only row renders as settings.<key>.policy
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired=None,
+                           policy=SettingPolicy.SKIP)]
+    node = desired_rows_to_config_dict(rows)["nodes"][0]
+    assert node["settings"]["txdelay"] == {"policy": "skip"}
+
+
+def test_export_group_settings_and_overrides():
+    rows = [
+        DesiredSetting(Scope.GROUP, "solar", "txdelay", desired="20"),
+        DesiredSetting(Scope.GROUP, "solar", "powersaving", desired=None,
+                       policy=SettingPolicy.SKIP),
+    ]
+    group = desired_rows_to_config_dict(rows)["groups"][0]
+    assert group["name"] == "solar"
+    assert group["settings"] == {"txdelay": "20"}
+    assert group["setting_overrides"] == {"powersaving": "skip"}
+
+
+def test_export_global_directives():
+    rows = [
+        DesiredSetting(Scope.GLOBAL, "", "name_prefix", desired="G"),
+        DesiredSetting(Scope.GLOBAL, "", "default_policy", desired="audit"),
+        DesiredSetting(Scope.GLOBAL, "", "via_radio", desired="915.8,250,11,5"),
+    ]
+    g = desired_rows_to_config_dict(rows)["global"]
+    assert g["name_prefix"] == "G"
+    assert g["default_policy"] == "audit"
+    assert g["via_radio"] == "915.8,250,11,5"
+
+
+def test_config_dict_to_yaml_is_loadable(tmp_path):
+    rows = [DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14")]
+    text = config_dict_to_yaml(desired_rows_to_config_dict(rows))
+    p = tmp_path / "exported.yaml"
+    p.write_text(text)
+    cfg = load(p, load_secrets=False)
+    assert cfg.nodes[0].pubkey_prefix == _PK
+    assert cfg.nodes[0].settings["txdelay"].desired == "14"
+
+
+def test_import_export_round_trip_through_load(tmp_path):
+    cfg = Config(
+        global_settings=GroupConfig(
+            name="global", settings={"owner.info": SettingConfig(desired="rdm")},
+        ),
+        groups=[GroupConfig(
+            name="solar",
+            settings={"txdelay": SettingConfig(desired="20", policy=SettingPolicy.ENFORCE)},
+            setting_overrides={"powersaving": SettingConfig(policy=SettingPolicy.SKIP)},
+        )],
+        nodes=[NodeConfig(
+            pubkey_prefix=_PK,
+            settings={"owner.info": SettingConfig(desired="x", poll_hours=6)},
+            via_radio=RadioConfig(freq=915.8, bw=250.0, sf=11, cr=5),
+        )],
+    )
+    resolve = {_PK: _PK}.get
+    rows, warnings = config_to_desired_rows(cfg, resolve)
+    assert warnings == []
+
+    text = config_dict_to_yaml(desired_rows_to_config_dict(rows))
+    p = tmp_path / "exported.yaml"
+    p.write_text(text)
+    rows2, _ = config_to_desired_rows(load(p, load_secrets=False), resolve)
+
+    def key(r):
+        return (r.scope_type.value, r.scope_id, r.key)
+    assert sorted(rows, key=key) == sorted(rows2, key=key)
+
+
+async def _open_db(tmp_path) -> Database:
+    db = Database(tmp_path / "resolve.db")
+    await db.open()
+    return db
+
+
+async def test_resolve_desired_configs_db_only_node(tmp_path):
+    """A node present only in the DB (never in config.yaml) resolves fully.
+
+    This closes the slice-6 group-attribution limitation: with sunset, desired state is
+    built from DB rows alone, so a node, its group, and global all resolve without any
+    config-derived NodeConfig/GroupConfig base.
+    """
+    db = await _open_db(tmp_path)
+    try:
+        pubkey = "aa11bb22cc33dd44ee55"
+        await db.upsert_node(Node(pubkey=pubkey, name="MeshName", label="NodeA", group="solar"))
+        # node-scope desired value + a node directive
+        await db.set_desired_setting(
+            DesiredSetting(
+                Scope.NODE, pubkey, "name", desired="NodeA", policy=SettingPolicy.ENFORCE
+            )
+        )
+        await db.set_desired_setting(
+            DesiredSetting(Scope.NODE, pubkey, "name_prefix", desired="🌞 ")
+        )
+        # group-scope desired value applied to members
+        await db.set_desired_setting(
+            DesiredSetting(Scope.GROUP, "solar", "tx", desired="20", policy=SettingPolicy.ENFORCE)
+        )
+        # global-scope default
+        await db.set_desired_setting(
+            DesiredSetting(Scope.GLOBAL, "", "role", desired="repeater", policy=SettingPolicy.AUDIT)
+        )
+
+        node = await db.get_node(pubkey)
+        node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(db, node)
+
+        assert warnings == []
+        assert node_cfg.pubkey_prefix == pubkey
+        assert node_cfg.label == "NodeA"
+        assert node_cfg.group == "solar"
+        assert group_cfg is not None and group_cfg.name == "solar"
+        # name with the node name_prefix prepended (no separator)
+        assert resolve_desired("name", node_cfg, group_cfg, global_cfg) == "🌞 NodeA"
+        assert resolve_name_prefix(node_cfg, group_cfg, global_cfg) == "🌞 "
+        # group value reaches the node
+        assert resolve_desired("tx", node_cfg, group_cfg, global_cfg) == "20"
+        # global value reaches the node
+        assert resolve_desired("role", node_cfg, group_cfg, global_cfg) == "repeater"
+        # all three scopes contribute keys
+        assert {"name", "tx", "role"} <= all_setting_keys(node_cfg, group_cfg, global_cfg)
+    finally:
+        await db.close()
+
+
+async def test_resolve_desired_configs_no_group(tmp_path):
+    """A DB node with no group yields group_cfg None and still resolves node + global."""
+    db = await _open_db(tmp_path)
+    try:
+        pubkey = "ffeeddccbbaa99887766"
+        await db.upsert_node(Node(pubkey=pubkey, name="Solo", label="Solo", group=None))
+        await db.set_desired_setting(
+            DesiredSetting(Scope.NODE, pubkey, "name", desired="Solo")
+        )
+        node = await db.get_node(pubkey)
+        node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(db, node)
+        assert group_cfg is None
+        assert warnings == []
+        assert resolve_desired("name", node_cfg, group_cfg, global_cfg) == "Solo"
+    finally:
+        await db.close()
+
+
+# ------------------------------------------------------------------
+# slice 8i: operations migrate to the DB (desired_operations)
+# ------------------------------------------------------------------
+
+def test_import_operations_to_scope_rows():
+    cfg = Config(
+        global_settings=GroupConfig(
+            name="global", operations=[OperationConfig(command="clock sync")],
+        ),
+        groups=[GroupConfig(
+            name="solar", operations=[OperationConfig(command="reboot", every_hours=168,
+                                                      fire_and_forget=True)],
+        )],
+        nodes=[NodeConfig(
+            pubkey_prefix="aabbccdd",
+            operations=[OperationConfig(command="advert", every_hours=12)],
+        )],
+    )
+    ops, warnings = config_to_desired_operations(cfg, _resolver())
+    assert warnings == []
+    assert DesiredOperation(Scope.GLOBAL, "", "clock sync") in ops
+    assert DesiredOperation(Scope.GROUP, "solar", "reboot", every_hours=168,
+                            fire_and_forget=True) in ops
+    assert DesiredOperation(Scope.NODE, _PK, "advert", every_hours=12) in ops
+
+
+def test_import_unresolvable_node_operations_warned_and_skipped():
+    cfg = Config(nodes=[NodeConfig(
+        pubkey_prefix="deadbeef", label="ghost",
+        operations=[OperationConfig(command="clock sync")],
+    )])
+    ops, warnings = config_to_desired_operations(cfg, _resolver())  # no deadbeef mapping
+    assert ops == []
+    assert len(warnings) == 1
+    assert "deadbeef" in warnings[0] or "ghost" in warnings[0]
+
+
+def test_export_operation_shorthand_when_all_default():
+    ops = [DesiredOperation(Scope.NODE, _PK, "clock sync")]
+    node = desired_rows_to_config_dict([], ops)["nodes"][0]
+    assert node["operations"] == ["clock sync"]
+
+
+def test_export_operation_mapping_when_non_default():
+    ops = [DesiredOperation(Scope.GROUP, "solar", "reboot", every_hours=168,
+                            fire_and_forget=True)]
+    group = desired_rows_to_config_dict([], ops)["groups"][0]
+    assert group["operations"] == [
+        {"command": "reboot", "every_hours": 168, "fire_and_forget": True},
+    ]
+
+
+def test_import_export_operations_round_trip_through_load(tmp_path):
+    cfg = Config(
+        global_settings=GroupConfig(
+            name="global", operations=[OperationConfig(command="clock sync")],
+        ),
+        nodes=[NodeConfig(
+            pubkey_prefix=_PK,
+            operations=[OperationConfig(command="reboot", every_hours=168,
+                                        fire_and_forget=True)],
+        )],
+    )
+    resolve = {_PK: _PK}.get
+    ops, warnings = config_to_desired_operations(cfg, resolve)
+    assert warnings == []
+
+    text = config_dict_to_yaml(desired_rows_to_config_dict([], ops))
+    p = tmp_path / "exported.yaml"
+    p.write_text(text)
+    ops2, _ = config_to_desired_operations(load(p, load_secrets=False), resolve)
+
+    def key(o):
+        return (o.scope_type.value, o.scope_id, o.command)
+    assert sorted(ops, key=key) == sorted(ops2, key=key)

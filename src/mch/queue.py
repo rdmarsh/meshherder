@@ -35,9 +35,8 @@ from mch.config import (
     OperationConfig,
     RadioConfig,
     _parse_radio,
-    overlay_db_group_settings,
-    overlay_db_settings,
     resolve_desired,
+    resolve_desired_configs,
     resolve_via_radio,
 )
 from mch.db import Database
@@ -81,20 +80,6 @@ def _format_radio(freq: Any, bw: Any, sf: Any, cr: Any) -> str:
 def _format_radio_tuple(radio: tuple[float, float, int, int]) -> str:
     return _format_radio(*radio)
 
-
-def _resolve_operations(
-    node_cfg: NodeConfig,
-    group_cfg: GroupConfig | None,
-    global_cfg: GroupConfig | None,
-) -> list[OperationConfig]:
-    """Return operations with Node > Group > Global precedence by command."""
-    by_command: dict[str, OperationConfig] = {}
-    for source in (global_cfg, group_cfg, node_cfg):
-        if source is None:
-            continue
-        for op in source.operations:
-            by_command[op.command] = op
-    return list(by_command.values())
 
 
 def _operation_succeeded(res: CommandResult) -> bool:
@@ -528,8 +513,7 @@ class WorkQueue:
         log.info("work queue started (interval=%.1fd)", self._config.scheduler.sync_interval_days)
 
         self._contacts = await self._gateway.get_contacts(managed_only=False)
-        await self._seed_from_config()
-        await self._seed_node_labels()
+        await self._reconcile_favourites()
         await self._recover_interrupted_nodes()
         await self._reschedule_overdue()
 
@@ -630,12 +614,11 @@ class WorkQueue:
             log.info("manual sync cycle finished: %d nodes", len(results))
 
     async def refresh_config_state(self) -> None:
-        """Refresh gateway contacts and reseed DB metadata after config reload."""
+        """Refresh gateway contacts and reconcile favourites after config reload."""
         self.pause()
         try:
             self._contacts = await self._gateway.get_contacts(managed_only=False)
-            await self._seed_from_config()
-            await self._seed_node_labels()
+            await self._reconcile_favourites()
         finally:
             self.resume()
 
@@ -653,6 +636,39 @@ class WorkQueue:
             if not result.success:
                 raise ValueError(result.error or "no response")
             return result.text or "(ok)"
+
+    async def retire_node(self, pubkey: str) -> Node:
+        """Retire a node: exclude it from sync and unfavourite its contact, keep its history.
+
+        Retire-don't-delete — the node row, facts, and logs stay for the record; only its
+        lifecycle changes. Unfavouriting is eviction-pin removal, not contact deletion.
+        """
+        node = await self._db.get_node(pubkey)
+        if node is None:
+            raise ValueError(f"node {pubkey[:12]} not found")
+        node.state = NodeState.RETIRED
+        await self._db.upsert_node(node)
+        contact = self._contact_for_pubkey(pubkey)
+        if contact is not None and contact.get("flags", 0) & 1:
+            await self._gateway.unset_contact_favourite(contact)
+        await self._db.write_log(
+            pubkey, "INFO", "node retired — excluded from sync and unfavourited"
+        )
+        return node
+
+    async def unretire_node(self, pubkey: str) -> Node:
+        """Return a retired node to management: re-favourite it and schedule it for sync."""
+        node = await self._db.get_node(pubkey)
+        if node is None:
+            raise ValueError(f"node {pubkey[:12]} not found")
+        node.state = NodeState.UNKNOWN
+        node.next_sync_at = None  # due immediately so it reconverges
+        await self._db.upsert_node(node)
+        contact = self._contact_for_pubkey(pubkey)
+        if contact is not None and not contact.get("flags", 0) & 1:
+            await self._gateway.set_contact_favourite(contact)
+        await self._db.write_log(pubkey, "INFO", "node unretired — returned to management")
+        return node
 
     async def unfiled_contacts(self) -> list[dict[str, Any]]:
         """Return visible repeater contacts that are not yet in config."""
@@ -1159,16 +1175,6 @@ class WorkQueue:
             None,
         )
 
-        # find config entry
-        node_cfg = next(
-            (nc for nc in self._config.nodes if node.pubkey.startswith(nc.pubkey_prefix)),
-            None,
-        )
-        group_cfg = (
-            {g.name: g for g in self._config.groups}.get(node_cfg.group)
-            if node_cfg and node_cfg.group else None
-        )
-
         log.debug(
             "gateway radio: %.3f/%.0f/SF%d/CR%d",
             self._gateway.info.get("radio_freq", 0),
@@ -1181,19 +1187,16 @@ class WorkQueue:
         await self._paused.wait()
 
         operation_label = (
-            (node_cfg.label if node_cfg else "")
-            or node.label
+            node.label
             or node.name
             or node.pubkey[:12]
         )
         async with self.operation(f"scheduled sync {operation_label}", wait=True):
-            if contact and node_cfg:
-                await self._process_node(
-                    node_cfg, group_cfg, self._config.global_settings, contact
-                )
+            if contact:
+                await self._process_node(contact)
             else:
                 log.warning(
-                    "node %r not in current contacts or config — skipping",
+                    "node %r not in current contacts — skipping",
                     node.pubkey[:12],
                 )
 
@@ -1202,86 +1205,47 @@ class WorkQueue:
         next_sync = datetime.now(UTC) + timedelta(seconds=interval_s + jitter)
         await self._db.set_next_sync(node.pubkey, next_sync)
 
-    async def _seed_from_config(self) -> None:
-        """Seed DB entries for config nodes visible to the gateway.
+    async def _reconcile_favourites(self) -> None:
+        """Reconcile the gateway's favourited repeaters with the DB managed set (sunset).
 
-        Cross-references config.nodes against all gateway contacts. Inserts any
-        config-listed node found in contacts that isn't already in the DB.
-        Auto-favourites matched nodes so they aren't evicted on a dense mesh.
-        Logs a warning for config nodes with no matching gateway contact.
+        The DB is the inventory now (config.yaml no longer lists nodes), so favourites and
+        the DB managed set are kept in step by *adding* in both directions:
+
+          1. SEED: a favourited repeater contact the gateway knows but the DB does not is
+             inserted as a managed node. This bootstraps inventory from the gateway's
+             favourites (the "Initialisation from gateway favourites" design) and treats a
+             manual favourite as "manage this node".
+          2. PIN: a managed DB node whose contact has lost the favourite flag is re-favourited
+             so a dense mesh can't evict it from the gateway's contact store.
+
+        Removing a node from the managed set (and unfavouriting its contact) is the retire/
+        remove path, not this reconcile — so this never unfavourites, and can't fight a
+        bootstrap that just seeded the same contact.
         """
         db_nodes = await self._db.get_all_nodes()
-        known_pubkeys = {n.pubkey for n in db_nodes}
+        known = {n.pubkey for n in db_nodes}  # all DB nodes — never re-seed one
+        # Retired nodes are intentionally unfavourited; never re-pin them.
+        managed = {n.pubkey for n in db_nodes if n.state != NodeState.RETIRED}
 
-        for node_cfg in self._config.nodes:
-            contact = next(
-                (c for c in self._contacts
-                 if c["public_key"].startswith(node_cfg.pubkey_prefix)
-                 and c.get("type") == CONTACT_TYPE_REPEATER),
-                None,
-            )
-            if contact is None:
-                message = "config node not visible to gateway - cannot manage"
-                log.warning(
-                    "config node %r (prefix: %s) not visible to gateway - cannot manage",
-                    node_cfg.label or node_cfg.pubkey_prefix,
-                    node_cfg.pubkey_prefix,
-                )
-                await self._db.write_log(
-                    None,
-                    "WARNING",
-                    message,
-                    display_pubkey=node_cfg.pubkey_prefix,
-                    display_label=node_cfg.label or node_cfg.pubkey_prefix,
-                )
+        for contact in self._contacts:
+            if contact.get("type") != CONTACT_TYPE_REPEATER:
                 continue
-
             pubkey = contact["public_key"]
+            favourited = bool(contact.get("flags", 0) & 1)
 
-            if pubkey not in known_pubkeys:
-                node = Node(
+            if favourited and pubkey not in known:
+                await self._db.upsert_node(Node(
                     pubkey=pubkey,
                     name=contact.get("adv_name", ""),
-                    label=node_cfg.label or "",
-                    group=node_cfg.group,
                     state=NodeState.UNKNOWN,
-                )
-                await self._db.upsert_node(node)
-                log.info(
-                    "seeded node '%s' from config (%s)",
-                    node_cfg.label or pubkey[:12],
-                    pubkey[:12],
-                )
-
-            # auto-favourite: guard against eviction on a dense mesh
-            if not contact.get("flags", 0) & 1:
+                ))
+                known.add(pubkey)
+                managed.add(pubkey)
+                log.info("seeded node '%s' from gateway favourites (%s)",
+                         contact.get("adv_name") or pubkey[:12], pubkey[:12])
+            elif pubkey in managed and not favourited:
                 await self._gateway.set_contact_favourite(contact)
-                log.info("favourited '%s' (%s)", node_cfg.label or pubkey[:12], pubkey[:12])
-
-    async def _seed_node_labels(self) -> None:
-        """Write labels and groups from config into the DB for any nodes already in the DB.
-
-        Ensures labels and groups are current immediately on restart — not just after the
-        next sync cycle for each node. Fixes stale group fields after config edits.
-        """
-        all_nodes = await self._db.get_all_nodes()
-        pubkey_to_node = {n.pubkey: n for n in all_nodes}
-        for node_cfg in self._config.nodes:
-            node = next(
-                (n for pk, n in pubkey_to_node.items() if pk.startswith(node_cfg.pubkey_prefix)),
-                None,
-            )
-            if node is None:
-                continue
-            changed = False
-            if node.label != node_cfg.label:
-                node.label = node_cfg.label
-                changed = True
-            if node.group != node_cfg.group:
-                node.group = node_cfg.group
-                changed = True
-            if changed:
-                await self._db.upsert_node(node)
+                log.info("favourited managed node %s (eviction pin)", pubkey[:12])
 
     async def _recover_interrupted_nodes(self) -> None:
         """Mark nodes left mid-sync by an earlier daemon stop as needing attention."""
@@ -1307,6 +1271,8 @@ class WorkQueue:
         now = datetime.now(UTC)
         nodes = await self._db.get_all_nodes()
         for node in nodes:
+            if node.state == NodeState.RETIRED:
+                continue  # retired nodes are never scheduled for sync
             if node.next_sync_at is None or node.next_sync_at < now:
                 delay = random.uniform(0, interval_s)
                 await self._db.set_next_sync(node.pubkey, now + timedelta(seconds=delay))
@@ -1343,27 +1309,9 @@ class WorkQueue:
             contact = matches[0]
             pubkey = contact["public_key"]
 
-            node_cfg = next(
-                (nc for nc in self._config.nodes if pubkey.startswith(nc.pubkey_prefix)),
-                None,
-            )
-            group_cfg = (
-                {g.name: g for g in self._config.groups}.get(node_cfg.group)
-                if node_cfg and node_cfg.group else None
-            )
-
-            global_cfg: GroupConfig | None = self._config.global_settings
-            if node_cfg is None:
-                # not in config — create a minimal NodeConfig so we can at least process it
-                from mch.config import NodeConfig as _NC
-                node_cfg = _NC(pubkey_prefix=pubkey[:8])
-                global_cfg = None
-
             await self._db.write_log(pubkey, "INFO", "manual sync started")
             try:
-                result = await self._process_node(
-                    node_cfg, group_cfg, global_cfg, contact, progress=progress
-                )
+                result = await self._process_node(contact, progress=progress)
             except asyncio.CancelledError:
                 await self._db.write_log(pubkey, "WARNING", "manual sync aborted")
                 raise
@@ -1424,17 +1372,23 @@ class WorkQueue:
             for c in self._contacts:
                 self._messenger.register_contact(c["public_key"][:12], c)
 
-        group_configs = {g.name: g for g in self._config.groups}
         results: list[NodeResult] = []
 
-        for node_cfg in self._config.nodes:
-            contact = self._find_contact(node_cfg.pubkey_prefix, contact_by_pubkey)
+        # Inventory lives in the DB now (sunset): sweep every managed DB node, not config
+        # entries. A DB node carries its full pubkey, so the gateway contact is a direct lookup.
+        # Retired nodes are kept for history but never swept.
+        nodes = [n for n in await self._db.get_all_nodes() if n.state != NodeState.RETIRED]
+        for node in nodes:
+            label = node.label or node.name or node.pubkey[:12]
+            contact = contact_by_pubkey.get(node.pubkey) or self._find_contact(
+                node.pubkey, contact_by_pubkey
+            )
             if contact is None:
                 log.warning("node %r (%s) not in gateway contacts — skipping",
-                            node_cfg.label, node_cfg.pubkey_prefix)
+                            label, node.pubkey[:12])
                 results.append(NodeResult(
-                    pubkey=node_cfg.pubkey_prefix,
-                    name=node_cfg.label,
+                    pubkey=node.pubkey,
+                    name=label,
                     reachable=False,
                     error="not in gateway contacts",
                 ))
@@ -1442,22 +1396,19 @@ class WorkQueue:
 
             if contact.get("type") != CONTACT_TYPE_REPEATER:
                 log.warning("node %r (%s) is not a repeater (type=%s) — skipping",
-                            node_cfg.label, node_cfg.pubkey_prefix, contact.get("type"))
+                            label, node.pubkey[:12], contact.get("type"))
                 results.append(NodeResult(
-                    pubkey=node_cfg.pubkey_prefix,
-                    name=node_cfg.label,
+                    pubkey=node.pubkey,
+                    name=label,
                     reachable=False,
                     error="not a repeater",
                 ))
                 continue
 
-            group_cfg = group_configs.get(node_cfg.group) if node_cfg.group else None
-            result = await self._process_node(
-                node_cfg, group_cfg, self._config.global_settings, contact
-            )
+            result = await self._process_node(contact)
             results.append(result)
 
-            if len(self._config.nodes) > 1:
+            if len(nodes) > 1:
                 delay = self._config.scheduler.inter_node_delay_seconds
                 log.debug("rate-limit delay: %ds", delay)
                 await asyncio.sleep(delay)
@@ -1484,48 +1435,35 @@ class WorkQueue:
 
     async def _process_node(
         self,
-        node_cfg: NodeConfig,
-        group_cfg: GroupConfig | None,
-        global_cfg: GroupConfig | None,
         contact: dict[str, Any],
         *,
         progress: ProgressCallback = None,
     ) -> NodeResult:
         pubkey = contact["public_key"]
-        name = contact.get("adv_name", node_cfg.label)
-        result = NodeResult(pubkey=pubkey, name=name)
 
-        # Overlay DB node-scope desired settings onto the config-derived node_cfg.
-        # The DB is the authoritative source of desired state (DESIGN.md "Desired state
-        # in the DB"); a DB row wins over the same key in config.yaml. Everything below
-        # (resolve_desired/all_setting_keys/operations) then sees the merged desired state
-        # with no change to the resolver. Warnings flag YAML keys now overridden by the DB.
-        db_rows = await self._db.get_desired_settings(Scope.NODE, pubkey)
-        node_cfg, overlay_warnings = overlay_db_settings(node_cfg, db_rows)
-        for warning in overlay_warnings:
+        # ensure node exists in db so we can resolve desired state keyed on its identity
+        node = await self._db.get_node(pubkey) or Node(
+            pubkey=pubkey, name=contact.get("adv_name", "")
+        )
+
+        # Resolve desired state entirely from the DB (DESIGN.md "Desired state in the DB"
+        # / sunset): the node, its group, and global configs are rebuilt from DB rows, so
+        # a value set with `mch set` (any scope) reconciles without any config.yaml entry.
+        # Warnings flag malformed/duplicate DB rows; they are rare once config.yaml no
+        # longer carries desired state.
+        node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(
+            self._db, node
+        )
+        for warning in warnings:
             log.warning("%s", warning)
             await self._db.write_log(pubkey, "WARNING", warning)
 
-        # Overlay DB group- and global-scope desired settings the same way, so a value
-        # set with `mch set --group/--global` reconciles like a node-scope one. These
-        # conflict warnings are config-level (not node-specific), so they go to the app
-        # log only — writing them to every group member's per-node DB history is noise.
-        if group_cfg is not None:
-            group_rows = await self._db.get_desired_settings(Scope.GROUP, group_cfg.name)
-            group_cfg, group_warnings = overlay_db_group_settings(group_cfg, group_rows)
-            for warning in group_warnings:
-                log.warning("%s", warning)
-        if global_cfg is not None:
-            global_rows = await self._db.get_desired_settings(Scope.GLOBAL, "")
-            global_cfg, global_warnings = overlay_db_group_settings(global_cfg, global_rows)
-            for warning in global_warnings:
-                log.warning("%s", warning)
+        name = contact.get("adv_name", node_cfg.label)
+        result = NodeResult(pubkey=pubkey, name=name)
 
         log.info("processing node %r (%s…)", name, pubkey[:12])
         await _progress(progress, f"syncing {name!r} ({pubkey[:12]})")
 
-        # ensure node exists in db
-        node = await self._db.get_node(pubkey) or Node(pubkey=pubkey, name=name)
         node.name = name
         node.label = node_cfg.label
         node.state = NodeState.CONFIGURING
@@ -1745,8 +1683,9 @@ class WorkQueue:
             result.enforced_settings_drifted = enforce_drifted
             result.enforced_settings_failed = enforce_failed
 
-            # seed operations from config into DB, then run what's pending
-            operations = _resolve_operations(node_cfg, group_cfg, global_cfg)
+            # resolve operations from the DB (desired_operations), seed the run queue, then
+            # run what's pending. Operations sunset out of config.yaml like settings.
+            operations = await self._resolve_db_operations(node)
             await self._seed_operations(pubkey, operations)
             op_run, op_failed = await self._run_operations(
                 pubkey, contact, node_cfg, node, operations, progress=progress
@@ -2323,6 +2262,27 @@ class WorkQueue:
             await self._db.upsert_setting(setting)
 
         return checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed
+
+    async def _resolve_db_operations(self, node: Node) -> list[OperationConfig]:
+        """Operations (Node > Group > Global) for a node, resolved from the DB.
+
+        Operations now live in the desired_operations table (sunset), so they resolve the
+        same way settings/directives do: global, then the node's group, then node scope,
+        with a later scope's command overriding an earlier one.
+        """
+        by_command: dict[str, OperationConfig] = {}
+        scopes: list[tuple[Scope, str]] = [(Scope.GLOBAL, "")]
+        if node.group:
+            scopes.append((Scope.GROUP, node.group))
+        scopes.append((Scope.NODE, node.pubkey))
+        for scope, scope_id in scopes:
+            for op in await self._db.get_desired_operations(scope, scope_id):
+                by_command[op.command] = OperationConfig(
+                    command=op.command,
+                    every_hours=op.every_hours,
+                    fire_and_forget=op.fire_and_forget,
+                )
+        return list(by_command.values())
 
     async def _seed_operations(self, pubkey: str, operations: list[OperationConfig]) -> None:
         """Queue any config operations that are due (never run, or past every_hours)."""

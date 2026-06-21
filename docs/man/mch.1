@@ -65,6 +65,65 @@ nodes.
 .B plan \fILABEL_OR_PREFIX\fR
 Filter planned writes, audit drift, and unknown values.
 .TP
+.B set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]
+Record a desired setting in the database, the authoritative source of desired
+state. \fIKEY\fR is a writable setting (for example \fBname\fR or \fBtxdelay\fR) or
+a directive (\fBname_prefix\fR, \fBdefault_policy\fR, \fBvia_radio\fR). The write is
+synchronous and does not trigger a sync; run
+.B sync
+.I NODE
+to converge. Use
+.B \-\-group
+.I NAME
+or
+.B \-\-global
+to set the value at group or global scope instead of one node.
+.TP
+.B unset \fINODE KEY\fR
+Remove a database-set desired setting; observed state is left intact. Accepts
+.B \-\-group
+.I NAME
+and
+.B \-\-global
+like
+.BR set .
+.TP
+.B import [\fIFILE\fR] [\-\-yes]
+Seed the database's desired state and node label/group inventory from
+.IR config.yaml ,
+or from an explicit
+.I FILE
+(a legacy or exported config), flattening settings and directives at node, group,
+and global scope into desired rows. The explicit-file form lets the migration
+on-ramp work against a daemon that no longer keeps desired state in its own
+.IR config.yaml .
+Without
+.B \-\-yes
+this is a dry-run preview. Re-running is idempotent. A node identified by a full
+64-hex public key (as
+.B export
+emits) is created even if the gateway has not seen it yet \(em the restore path; a
+node given only a short prefix needs to be known already and is otherwise skipped
+with a warning. If the file contains retired nodes (tagged
+.BR "retired: true" ),
+choose
+.B \-\-retired keep
+to restore them as retired or
+.B \-\-retired skip
+to omit them; a write is refused until one is chosen.
+.TP
+.B export
+Print the whole fleet as config.yaml-shaped YAML on standard output \(em a complete
+backup and the inverse of
+.BR import .
+Includes every node's full public key, label, group, desired settings, and
+operations (even a node with no desired settings); retired nodes are tagged
+.BR "retired: true" .
+Redirect to save, for example
+.BR "mch export > backup.yaml" ,
+and rebuild after a server or gateway loss with
+.BR "mch import backup.yaml \-\-yes" .
+.TP
 .B suggest
 Show suggested settings for all nodes based on neighbour count.
 .TP
@@ -80,15 +139,23 @@ Show recent activity for one node.
 .B contacts
 Show repeater contacts visible to the gateway that are not yet in config.
 .TP
+.B retire \fILABEL_OR_PREFIX\fR
+Stop managing a node: set its state to
+.BR retired ,
+unfavourite its gateway contact (clearing the eviction pin; the contact itself is
+kept), and exclude it from sync, while keeping its history. Retire-don't-delete is
+the normal way to decommission a node.
+.TP
+.B unretire \fILABEL_OR_PREFIX\fR
+Return a retired node to management: re-favourite it and queue it to reconverge.
+.TP
 .B prune
-List database nodes no longer present in
-.IR config.yaml .
+List retired nodes \(em the candidates for a hard delete.
 .TP
 .B prune \-\-yes
-Delete listed local database state for retired nodes. This does not edit
-.IR config.yaml ,
-.IR secrets.yaml ,
-or gateway favourites.
+Hard-delete retired nodes' local database state (facts, settings, operations, logs,
+and the node row). This does not edit
+.IR secrets.yaml .
 .TP
 .B clean facts \fINODE\fR [\-\-fact \fIKEY\fR] [\-\-yes]
 List or delete cached fact rows that are no longer present in the configured
@@ -102,14 +169,27 @@ Without
 .B \-\-yes
 this is a dry run.
 .TP
+.B clean settings \fINODE\fR [\-\-setting \fIKEY\fR] [\-\-yes]
+List or delete observed setting rows whose key is no longer in the node's resolved
+desired set (config plus database). Scope may be one node,
+.B \-\-group
+.IR NAME ,
+or
+.B \-\-all .
+Without
+.B \-\-yes
+this is a dry run. Observed rows are a cache and are re-read on the next sync if
+still wanted.
+.TP
 .B remove \fILABEL_OR_PREFIX\fR
 Delete one node's local database state after confirmation. This deletes local
-facts, settings, operations, logs, and the database node row. It refuses nodes
-still present in
-.I config.yaml
-unless
+facts, settings, operations, logs, and the database node row. It refuses a
+still-managed (non-retired) node unless
 .B \-\-force
-is supplied.
+is supplied, because an un-retired node is re-seeded from gateway favourites on the
+next restart \(em prefer
+.B retire
+for active nodes.
 .TP
 .B remove \fILABEL_OR_PREFIX\fR \-\-yes
 Delete without prompting.

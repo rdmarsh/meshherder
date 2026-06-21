@@ -322,6 +322,47 @@ mch discover --radio F,B,S,C  # active bounded scan on a temporary gateway radio
 readable values, for example `powersavings` to `powersaving`. Unknown fact keys are still allowed
 so newly added firmware reads can be evaluated before mch metadata catches up.
 
+### Editing desired state in the database
+
+Desired state and inventory live in the SQLite database; `config.yaml` carries only daemon settings
+(gateway, scheduler, messenger, api, paths, facts, profiles). **The daemon refuses to start if
+`config.yaml` still contains a `nodes:`, `groups:`, or `global:` desired-state block** — it points
+you at `mch import`. The DB is edited directly by `mch` (and, later, an HTTP API and web UI). Writes
+are synchronous, so `mch status <node>` shows the new intent immediately; convergence still waits for
+the next sync (or `mch sync <node>`).
+
+```
+mch set <prefix> txdelay 14          # node scope
+mch set --group solar txdelay 20     # group scope
+mch set --global default_policy audit
+mch set <prefix> name_prefix "🌞 "    # directives: name_prefix, default_policy, via_radio
+mch unset <prefix> txdelay           # remove a DB-set value (observed state untouched)
+mch import                           # preview seeding the DB from the daemon's config (dry run)
+mch import legacy.yaml --yes         # seed from an explicit file (settings + label/group inventory)
+mch export > backup.yaml             # complete fleet backup (inventory + desired state)
+mch clean settings <prefix>          # drop observed rows for keys no longer desired (dry run)
+```
+
+**Migrating an existing `config.yaml`:** on the running daemon, `mch import` (then `--yes`) to seed
+the DB, `mch export` to verify, then delete the `nodes:`/`groups:`/`global:` blocks from
+`config.yaml` (keep the daemon settings) and restart. When importing a *legacy* config (nodes given
+by short `pubkey_prefix`), a node must already be in the DB — seen as a favourited gateway contact —
+for import to resolve its full pubkey; unseen nodes are skipped with a warning until they appear.
+
+**Backup and restore.** Because the DB is now the only copy of desired state, keep periodic
+`mch export > backup.yaml` snapshots (a daily cron/systemd timer is ideal). The export is a complete
+backup — every node's full public key, label, group, desired settings, and operations, with retired
+nodes tagged `retired: true`. To restore after a server or gateway replacement, point a fresh daemon
+at a clean `config.yaml` (daemon settings only) and run `mch import backup.yaml --yes`: because the
+backup carries full public keys, import recreates every node up-front even before the new gateway has
+favourited them, and the favourite mirror re-pins each node as its contact reappears on the mesh.
+If the backup contains retired nodes, import makes you choose: `--retired keep` restores them as
+retired, `--retired skip` omits them (a write is refused until you pick one). A plain dry-run
+preview just warns that they are present.
+
+`mch status <prefix>` settings table reads `POLICY / KEY / DESIRED / OBSERVED / TRIES / STATUS`
+(no source column — the DB is the only source now).
+
 ### Forcing a sync
 
 ```
@@ -604,12 +645,17 @@ mch suggest                      Suggested txdelay for all nodes based on neighb
 mch suggest <label|prefix>       Full suggestions + paste-ready config block for one node
 mch logs                      Recent per-node activity across all nodes
 mch logs <prefix>             Activity for one node
-mch contacts                  Repeater nodes visible to the gateway not yet in config
-mch prune                     List DB nodes no longer present in config.yaml
-mch prune --yes               Delete listed local DB state for retired nodes
+mch contacts                  Repeater nodes visible to the gateway not yet managed in the DB
+mch import [FILE]             Seed DB inventory + desired state from config.yaml or a FILE (dry run)
+mch import [FILE] --yes       Write it (idempotent; full-pubkey nodes created even if unseen)
+mch export > backup.yaml      Complete fleet backup as YAML (inventory + desired; inverse of import)
+mch retire <label|prefix>     Stop managing a node: skip sync + unfavourite, keep history
+mch unretire <label|prefix>   Return a retired node to management (re-favourite + reconverge)
+mch prune                     List retired nodes (hard-delete candidates)
+mch prune --yes               Hard-delete retired nodes' local DB state
 mch clean facts --all         List cached facts no longer present in facts:
 mch clean facts NODE --fact K Delete one stale fact key with --yes
-mch remove <label|prefix>     Delete one node's local DB state
+mch remove <label|prefix>     Delete one node's local DB state (prefer mch retire)
 mch sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch sync <prefix>             Sync one node; stream progress while waiting for the result
 mch exec <label|prefix> <command>  Run one raw remote command through mchd over the mesh
@@ -628,13 +674,17 @@ mode-600 secrets file as well.
 `meshcore-cli` process back to the invoking user so the interactive serial session is not run as
 root.
 
-`mch prune` is deliberately conservative: removing a node from `config.yaml` stops future syncs,
-but does not automatically delete historical DB state. Run `mch prune` to review retired DB nodes
-and `mch prune --yes` to delete their local facts, settings, operations, and logs. It does not edit
-`config.yaml`, `secrets.yaml`, or gateway favourites. Secrets entries without matching config nodes
-are allowed; operators may keep passwords or private keys there for replacement hardware.
-Use `mch remove <label|prefix>` to delete one retired node's local DB state. It refuses nodes still
-present in `config.yaml` unless `--force` is supplied.
+To stop managing a node, `mch retire <label|prefix>`: it sets the node's state to `retired`,
+unfavourites its gateway contact (clears the eviction pin; the contact itself is kept), and excludes
+it from sync — while keeping its history. `mch unretire` reverses it (re-favourite and reconverge).
+Retire-don't-delete is the normal way to decommission a node.
+
+`mch prune` then hard-deletes retired nodes (their local facts, settings, operations, and logs) —
+the deliberate purge step. It is dry-run first; `mch prune --yes` deletes. It does not edit
+`secrets.yaml`, so operators may keep passwords or private keys there for replacement hardware.
+`mch remove <label|prefix>` deletes one node's local DB state directly; it refuses a still-managed
+(non-retired) node unless `--force` is supplied, because an un-retired node is re-seeded from gateway
+favourites on the next restart — prefer `mch retire` for active nodes.
 
 `mch clean facts` is also dry-run first. Use it after changing `facts:` to review cached fact rows
 that are no longer collected, then add `--yes` to delete them. It can be scoped to one node,

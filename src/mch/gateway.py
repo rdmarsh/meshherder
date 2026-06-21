@@ -437,6 +437,23 @@ class Gateway:
         log.debug("favourited contact %s", contact.get("public_key", "?")[:12])
         return True
 
+    async def unset_contact_favourite(self, contact: dict[str, Any]) -> bool:
+        """Clear the favourite flag (bit 0) on a gateway contact. Returns True on success.
+
+        Eviction-pin removal only: the contact itself is kept, but clearing the flag lets the
+        gateway evict it from a full contact store. Used when a node is retired/removed.
+        """
+        mc = self._require_connected()
+        new_flags = contact.get("flags", 0) & ~1
+        result = await mc.commands.change_contact_flags(contact, new_flags)
+        if result.type == EventType.ERROR:
+            log.warning("unset_contact_favourite failed for %s: %s",
+                        contact.get("public_key", "?")[:12], result.payload)
+            return False
+        contact["flags"] = new_flags
+        log.debug("unfavourited contact %s", contact.get("public_key", "?")[:12])
+        return True
+
     async def discover_contact_path(
         self, contact: dict[str, Any], timeout: float = 30.0
     ) -> dict[str, Any]:

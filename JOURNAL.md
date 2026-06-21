@@ -4,12 +4,52 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (updated 2026-06-13) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-06-19) - update or clear this block when you pick up <<<
 
-**Workflow: new work goes on a branch + PR, no more direct commits to `main`** (journal/handoff
-commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed direct on `main`.
+**Workflow (updated 2026-06-18): risk-based branching.** Risky/large changes (daemon startup, queue,
+migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit straight to `main`.
+`/opt/meshherder` on luna steady-state tracks `main` (a branch only runs there transiently for
+bench-testing, via INSTALL's "Testing a feature branch" procedure). See the `use-branches-not-main`
+auto-memory.
 
-**Status (2026-06-13): slices 6 AND 7 MERGED to `main`. Next: slice 8.**
+**Status (2026-06-19): SLICE 8 COMPLETE + deployed + post-review refinements done, on
+`slice8-config-import` (PR #3, open against `main`, 13 commits). 867 tests pass, ruff clean, mypy 7
+(pre-existing).** The DB is the single source of truth for inventory + desired state; config.yaml
+carries only daemon settings. The operator has migrated luna onto the sunset build (imported, stripped
+config, verified `mch export` round-trips clean) and it is running.
+
+Sub-slices (8a-8d/8i earlier; 8e-8h + refinements this work):
+- **8a/8b/8c/8d/8i**: `mch import`/`export`, the DB resolver `resolve_desired_configs`, all
+  desired-state read paths on the DB, operations in `desired_operations`.
+- **8e**: `run_cycle` sweeps `db.get_all_nodes()` (`a838889`); `config.load(strict=True)` for the
+  daemon hard-errors on leftover `nodes:`/`groups:`/`global:` desired state, parser lenient by
+  default, `mch import [FILE]` takes an explicit path (`1e05bad`).
+- **8f (`7dc72f3`)**: `_reconcile_favourites` (seed favourited repeaters into the DB; pin managed
+  nodes) replaces config seeding. `mch set --group` validates DB membership; report drops
+  ghost/unseen (every DB node is managed).
+- **8g (`301b620`)**: `NodeState.RETIRED` + `mch retire`/`unretire` (unfavourite via new
+  `Gateway.unset_contact_favourite`); retired excluded from sync everywhere. `prune` purges retired;
+  `remove` guards a managed node behind `--force`.
+- **8h (`65a298e`)**: `mch commission` prints an importable `nodes:` doc + `mch import` guidance;
+  `mch import` carries node label/group inventory.
+- **Post-review (`d8cb4ad`, `08e6444`, `5e4ae99`)**: dropped the always-`db` SOURCE column from `mch
+  status`; made `mch export`/`mch import` a **complete fleet backup/restore** (full pubkeys, label/
+  group, bare nodes, self-contained groups; import recreates full-pubkey nodes without the gateway);
+  retired nodes round-trip via an `export` `retired: true` tag with `mch import --retired keep|skip`
+  (write refused until chosen). INSTALL signpost about `git pull --ff-only` not switching branches.
+
+**Known follow-ups (BACKLOG, none blocking):** commission **replace**/scan still read config
+inventory; no `mch group` to reassign a node's group; make `facts` a scoped **union** (global ∪ group
+∪ node - decided); installable scheduled-backup systemd timer; cut the **0.10.0** release (breaking:
+strict daemon); deferred decision on `retired: true` vs a richer `status:` lifecycle enum (lean: keep
+the boolean).
+
+**NEXT: review + merge PR #3** into `main`, then delete the branch and clear/replace this block. The
+post-merge release cut (version bump + CHANGELOG) is the first backlog item.
+
+_Earlier slice-8 sub-steps (8a/8b), kept for context:_
+
+**Prior status (2026-06-13): slices 6 AND 7 MERGED to `main`.**
 - **Slice 6 (group/global scopes) MERGED** via PR #1 (merge commit `8b393e9`). Branch
   `slice6-group-global-scopes` deleted (local + remote). 6a `overlay_db_group_settings`,
   6b reconcile (`_process_node`) + clean (`_wanted_setting_keys`) wiring, 6c `mch set/unset
@@ -22,9 +62,24 @@ commits like this one excepted). Slices 1-5 + the DESIRED/OBSERVED swap landed d
   malformed DB row instead of wedging the cycle); 7c `via_radio`; 7d whitespace normalisation
   (`_normalize_directive_text`: drop leading space, all-space -> cleared, `name_prefix` keeps a
   meaningful trailing space `" 🌞 "` -> `"🌞 "`). All settable at node/group/global. DESIGN.md slice 7.
-- **NEXT: slice 8** - config.yaml import/export + sunset. Also closes the slice-6 group-attribution
-  limitation: the clean path can only attribute a *group*-scope key to a node in config (to know its
-  group); global keys are seeded unconditionally.
+- **Slice 8 STARTED on branch `slice8-config-import`** (off `main` after #2 merged). **8a `mch import`
+  DONE** (uncommitted as of writing this line, then committed). Pure `config_to_desired_rows(cfg,
+  resolve_pubkey)` flattens config desired state (settings + directives, all scopes) into
+  `desired_settings` rows; node scope needs the full pubkey, resolved from the prefix against DB-known
+  nodes (unresolvable = warn + skip). `_radio_to_str` serialises via_radio (round-trips `_parse_radio`);
+  default poll_hours 24 -> None to match `mch set`; operations not imported. Daemon `_handle_import`
+  (dry-run default, `--yes` upserts, idempotent) + CLI `mch import`. 812 tests pass, ruff clean, mypy 7.
+- **8b `mch export` DONE.** Inverse of import: `desired_rows_to_config_dict` (settings shorthand vs
+  mapping; policy-only -> setting_overrides / node settings.policy; directives -> top-level; node
+  scope_id -> pubkey_prefix) + `config_dict_to_yaml` + new DB `get_all_desired_settings`. Daemon
+  `_handle_export`, CLI `mch export` (stdout). Round-trip test proves config->rows->YAML->load->rows
+  is stable. 827 tests pass, ruff clean, mypy 7.
+- **NEXT: 8c+ sunset** - build NodeConfig/GroupConfig directly from DB rows so the daemon can run with
+  no desired state in config.yaml; DB owns inventory, favourites become a downstream mirror,
+  retire-don't-delete lifecycle. Open call: does config.yaml stay a readable seed after sunset, or
+  error if it still carries desired state? This is the big, one-way step - decompose before starting.
+- Slice-6 group-attribution limitation (clean path needs node-in-config to know its group) closes
+  with sunset/inventory, since import+inventory give every desired node a DB identity.
 - **BACKLOG (Operation Safety):** validate a desired value is *correct/usable*, not just well-formed,
   before mch acts on it - esp. `via_radio` (a valid-but-wrong tuple can strand a node; ties into the
   radio-strand item). Relevant now that 7c made `via_radio` operator-settable.
