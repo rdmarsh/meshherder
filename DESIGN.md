@@ -501,40 +501,94 @@ what other nodes display, not the stored value mch verifies, and is not enforced
 
 ## Facts vs settings
 
-A value read from a setting is an observed fact in the ordinary English sense, and a future
-node-detail screen may reasonably display observed facts and observed settings together. They
-should not become the same data type in the management model.
+**Decision (2026-06-24): a fact is a fourth policy, not a separate data type.** This supersedes the
+earlier stance (kept below for history) that facts and settings should be modelled separately. The
+trigger was the realisation that "the set of facts to collect" is the last desired-ish knob still
+living only in config.yaml after the slice-8 sunset, and that facts and settings are the *same
+observation* underneath — the only difference is whether mch has an opinion (a desired value +
+enforcement) about the observed value.
 
-**Facts** are inventory/evidence mch collects without an intended desired value, policy, or
-write-back action, such as firmware version, hardware board, neighbours, or a value selected for
-visibility only.
+### One concept: an observable key with a resolved policy per scope
 
-Configured fact keys are checked by `mch validate` against the command registry's known readable
-facts and settings. Unknown keys remain legal and retain the ordinary `get <key>` fallback so a
-new firmware value can be investigated before the registry is updated, but validation warns and
-suggests close registered names to prevent silent repeated reads of a typo.
+`SettingPolicy` becomes four values (it was `enforce` / `audit` / `skip`):
 
-Status presentation should be able to hide cached fact rows that are no longer configured, for
-example after correcting a misspelled fact key. Hiding keeps routine status output clean while
-retaining the historical observation in the local database. Permanent deletion should be a
-separate explicit cleanup action so operators can review stale rows before discarding them.
+| policy    | read? | desired needed? | on drift            | use                                  |
+|-----------|-------|-----------------|---------------------|--------------------------------------|
+| `enforce` | yes   | yes             | write desired       | "make it so"                         |
+| `audit`   | yes   | yes             | log, never write    | "tell me if it drifts"               |
+| `fact`    | yes   | **no**          | nothing — just store | "record it, I have no opinion"       |
+| `skip`    | no    | no              | —                   | "leave alone / parked placeholder"   |
 
-**Settings** are managed values with additional meaning: desired value, inheritance from
-global/group/node configuration, enforcement or audit policy, comparison status, write attempts,
-and a planned action. Even when the current setting is only being observed, retaining that
-classification permits it to be enforced later and explains why it appears in a plan or drift
-report.
+A fact is therefore an **audit-style observation with no desired value to compare against**. Policy
+resolves Node > Group > Global like every other setting — strictly more expressive than the
+previously-considered `global ∪ group ∪ node` union (set `neighbors: fact` globally to collect
+everywhere, then `neighbors: skip` on one node to opt it out, which a pure union cannot express).
+The union plan in BACKLOG is retired in favour of this.
 
-The API and database should therefore retain separate `facts` and `settings` collections. UI
-presentation may combine them under an "observed values" heading where useful, while exposing the
-desired/policy/action fields for settings.
+**Read-only constraint:** registry `kind="fact"` keys (`ver`, `board`, `role`, `neighbors`) have no
+write command, so only `fact` or `skip` are legal for them; `enforce`/`audit` require a writable
+key with a desired value. This is validated at the `mch set` gate. `mch set NODE KEY --policy fact`
+(no value) declares a fact via the existing policy-only path; `mch unset` clears it; a read-side
+`mch show KEY` (name TBD) prints a key's resolved policy/desired/observed across scopes.
 
-Separate representation does not justify duplicate mesh traffic. If a key is selected as a
-collected fact and is also configured as a setting, one sync cycle should execute its read
-command only once and use the single observed value for both records. This is especially
-important on a low-bandwidth shared mesh. The sync implementation should eventually plan reads
-by resolved command, then feed each result into fact storage and setting comparison/write logic
-as required. A write prompted by drift remains a separate deliberate command.
+### One read pass — never poll a key twice
+
+The decisive operational win: the separate `_collect_facts` pass over `config.facts` is deleted.
+A single per-node pass reads every key whose resolved policy ∈ {`enforce`, `audit`, `fact`} exactly
+once, then routes the observed value by policy (`fact` → store only; `enforce`/`audit` → compare,
+and write if `enforce`). Because resolution yields exactly one policy per (node, key), a key can no
+longer be read once as a fact and again as a setting — the latent `name` double-poll disappears
+structurally. The existing reuse of the reachability probe's `ver` reply (`queue.py`) is the same
+principle and is retained; harvesting other incidental observations (a login reply, a composite
+status command) is a separate bench-tested investigation (see JOURNAL/BACKLOG) because which
+commands carry which values is firmware-specific.
+
+### Storage: the single-observation invariant
+
+There is only ever **one stored observation per (node, key)** — never two copies that could drift
+apart. For now this is enforced by *routing*, reusing the two existing tables: resolved `enforce`/
+`audit` → the `settings` row (desired, policy, drift, write attempts); resolved `fact` → the
+`node_facts` row (value, `collected_at`). A test asserts no (node, key) ever appears in both. The
+inventory/"facts" view reads observed values from **both** tables (`settings.observed` ∪
+`node_facts.value`) so an enforced key (e.g. `owner`) still shows in the CMDB view — sourced from
+the one observation, not a copy. Both tables already timestamp observations (`node_facts.collected_at`,
+`settings.last_checked`), so freshness is retained whichever home a key lands in.
+
+Folding the two tables into a single `observations` table (one row per node/key, `desired`/`policy`
+nullable) would make divergence *structurally* impossible rather than merely disciplined, and is
+the natural endpoint — but it is a larger migration and is deferred as a follow-up, not a blocker.
+
+**Migration:** the legacy global `config.facts` default `["ver", "board", "role"]` becomes global
+`policy: fact` rows for those keys, preserving today's out-of-box collection explicitly rather than
+by a hidden default. A readable key with no scoped row is simply not read — facts stay opt-in. The
+`default_policy` directive keeps its `enforce`/`audit`/`skip` range; a global "everything is a fact"
+default is meaningless.
+
+Configured fact keys remain checked by `mch validate` against the command registry's readable keys;
+unknown keys stay legal with the `get <key>` fallback but warn and suggest close names to prevent a
+typo causing silent repeated reads. Status presentation can still hide cached observation rows whose
+key is no longer configured, retaining the historical row until an explicit cleanup discards it.
+
+### Slice plan (implementation pending, on a branch)
+
+- **F1** — `SettingPolicy.FACT` + validation + `mch set --policy fact` gate widening.
+- **F2** — unify the read pass: delete `_collect_facts`, route by resolved policy, one read per key.
+- **F3** — migrate `config.facts` → global fact rows; retire `config.facts`; add the both-tables
+  invariant test.
+- **F4** — report "configured facts" follows the resolved per-node fact set; add `mch show KEY`;
+  `mch clean facts`/`clean settings` follow their resolved sets.
+- **F5 (separate, bench on luna)** — investigate free/batched/incidental facts; record in JOURNAL
+  before turning any of it into a rule.
+
+### Earlier stance (superseded 2026-06-24, kept for history)
+
+The original model held that facts and settings should stay distinct data types: facts as
+inventory/evidence with no desired value/policy/write-back, settings as managed values carrying
+desired value, scope inheritance, policy, comparison status, write attempts, and a planned action.
+The API/DB kept separate `facts` and `settings` collections, combined only at presentation under an
+"observed values" heading. That separation already forbade duplicate mesh traffic — a key that was
+both a fact and a setting was to be read once and fed to both records — which is exactly the
+single-read invariant the policy unification now makes structural rather than aspirational.
 
 **Operations** are scheduled commands with no read-back or desired-value comparison. mchd sends
 the command string, records success or failure, and re-runs it after `every_hours` have elapsed

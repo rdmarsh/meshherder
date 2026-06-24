@@ -158,19 +158,27 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Configuration And Radio Semantics
 
-- **Make `facts` a scoped (global/group/node) value, not a single top-level list.** Today the set of
-  facts to collect is one flat `config.facts` list (default `["ver", "board", "role"]`), read in
-  `daemon.py`, `report.py`, and the CLI — the last desired-ish knob still living only in config.yaml
-  after the sunset. It should resolve per scope like settings/directives (global default, refined per
-  group/node) so e.g. repeaters collect `neighbors` while other roles don't, or a single node can add
-  an extra fact. **Decided: resolution is a union, not an override** — a node collects
-  `global ∪ group ∪ node` facts, *not* the Node>Group>Global most-specific-wins used for settings.
-  Union is both the most useful (base set everywhere, plus per-group/node extras) and the simplest;
-  anything else needs per-key true/false enable flags and more complexity. Remaining open questions:
-  (a) where it lives — a reserved key in `desired_settings` (like the directives) vs a small
-  dedicated table; (b) `mch clean facts` and the report's "configured facts" must follow the resolved
-  per-node union instead of one global list. Fits the DB-scoped model and finishes moving desired-ish
-  state off config.yaml.
+- **Make `facts` a fourth policy (`enforce`/`audit`/`fact`/`skip`), retiring the flat `config.facts`
+  list. SUPERSEDES the earlier "scoped union" plan (2026-06-24).** A fact is an audit-style
+  observation with no desired value; it resolves per scope Node > Group > Global like every other
+  setting (strictly more expressive than the union once considered — `neighbors: fact` globally,
+  `neighbors: skip` on one node). The separate `_collect_facts` pass is deleted so each key is read
+  at most once per cycle (kills the latent `name` double-poll). Storage keeps the single-observation
+  invariant (no key in both `settings` and `node_facts`; display unions them); folding both into one
+  `observations` table is a later cleanup. Read-only keys (`ver`/`board`/`role`/`neighbors`) accept
+  only `fact`/`skip`. Migration: `config.facts` default → global `policy: fact` rows. Full design +
+  F1–F5 slice plan in DESIGN.md "Facts vs settings". **Active — on a branch.**
+- **Free / batched / incidental facts (bench-test on luna first).** Some observations may come for
+  "free" — a login reply or a composite status command carrying several values — or MeshCore CLI may
+  support reading several keys in one round-trip. Either would cut mesh traffic. Firmware-specific;
+  test on luna's `915.800` bench node and record in JOURNAL before turning into a rule (this is F5).
+- **Variable + adaptive poll cadence per item.** Today every read uses a fixed `poll_hours` (default
+  24h). Two improvements: (a) let cadence vary per key/scope — some settings need checking less often
+  (every 2 days), some facts more often; (b) once a setting is confirmed correct with no drift, back
+  off re-reading it (escalating interval), since re-checking an unchanged-correct value is wasted mesh
+  traffic — `mch sync` (force) always re-reads regardless. Also keep cadence expressed in **hours**
+  end-to-end (the schema is already `poll_hours`; audit any "days" surfaced in config/CLI/output and
+  normalise to hours). Ties into the convergence/backoff signals already noted elsewhere in BACKLOG.
 - Extend `mch adopt` beyond the initial DB/contact seed: retain the discovery evidence used for
   adoption, expose adopted-radio/path caveats in status, and make follow-up path/radio repair
   steps explicit. (Partially done, Unreleased: adopt now installs a direct zero-hop route and runs
