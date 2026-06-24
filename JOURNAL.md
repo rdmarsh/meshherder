@@ -12,17 +12,30 @@ migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit st
 bench-testing, via INSTALL's "Testing a feature branch" procedure). See the `use-branches-not-main`
 auto-memory.
 
-**Status (2026-06-21): SLICE 8 MERGED to `main` (PR #3, `--no-ff` merge, branch deleted) and
-0.10.0 RELEASED (`bb592b6`; version-bump + CHANGELOG; breaking — daemon strict-loads config).
-867 tests pass, ruff clean. Clean base on `main`.** The DB is the single source of truth for
-inventory + desired state; config.yaml carries only daemon settings. luna is running the sunset build.
-(Releases are not git-tagged in this repo.)
+**Status (2026-06-24): FACTS-AS-POLICY F1–F4 DONE on branch `facts-as-policy` (pushed, not yet
+PR'd/merged). 888 tests pass, ruff clean, mypy 7 (pre-existing).** Base context: SLICE 8 merged +
+0.10.0 released on `main` (DB is the single source of truth; config.yaml carries only daemon
+settings). luna is running the sunset build (the operator plans a fresh luna reinstall with no data
+migration, so the facts breaking change is fine).
 
-**NEXT: the `facts` migration** — make `facts` a scoped **union** (global ∪ group ∪ node — decided),
-the last desired-ish knob still living only in config.yaml. Open sub-questions to settle before
-coding: (a) reserved key in `desired_settings` vs. a small dedicated table; (b) `mch clean facts` +
-report "configured facts" must follow the resolved per-node union. Goes on a branch (risky: touches
-daemon/report/CLI read paths). See BACKLOG "Make `facts` a scoped value".
+**Facts are now a fourth `SettingPolicy` (`enforce`/`audit`/`fact`/`skip`), superseding the earlier
+"scoped union" plan.** A fact is an audit-style observation with no desired value; resolution is the
+normal Node > Group > Global. See DESIGN.md "Facts vs settings" for the full design.
+- **F1 (`2f38845`)**: `SettingPolicy.FACT` + `mch set` gate (read-only keys take only fact/skip, no
+  value; fact rejects a value on any key).
+- **F2 (`68dbec2`)**: unified read pass — `_collect_facts`+`_process_settings` → one
+  `_process_observations`; each key read once, routed by resolved policy; kills the `name` double-poll.
+- **F3 (`f77293e`)**: retired `config.facts` end-to-end — `mch import` folds `facts:` → global
+  `policy: fact` rows; strict-load rejects a leftover `facts:` block; daemon read pass / report
+  "configured facts" / `mch clean facts` all follow each node's resolved fact set
+  (`resolved_fact_keys`); single-observation invariant test. (Folded the report/clean rework in here,
+  originally F4, to avoid a broken intermediate.)
+- **F4 (`6b9f89b`)**: new `mch show NODE KEY` — per-scope rows, resolved policy/desired (+ source),
+  observed value; read-only.
+
+**NEXT: (a) open a PR for `facts-as-policy` and merge to `main` (then a release cut: this is breaking
+— the `facts:` retirement); (b) F5 — bench-test free/batched/incidental facts on luna (gated on the
+luna reinstall), record in JOURNAL before any rule. See BACKLOG "Free / batched / incidental facts".**
 
 _Slice-8 detail (kept for context):_
 

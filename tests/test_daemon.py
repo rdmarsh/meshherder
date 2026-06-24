@@ -1012,6 +1012,12 @@ async def test_clean_facts_dispatch_lists_stale_facts_without_deleting(db, wq, c
     await db.upsert_node(node)
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="powersavings", value="on"))
+    # ver is a configured fact (policy=fact, sunset); 'powersavings' is a typo never
+    # configured, so it is the stale candidate.
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.GLOBAL, scope_id="", key="ver",
+                       desired=None, policy=SettingPolicy.FACT)
+    )
 
     resp = await _dispatch({"cmd": "clean_facts", "query": "site-a"}, wq, db, config)
 
@@ -1857,6 +1863,97 @@ async def test_set_setting_accepts_default_policy_directive(db, wq, config):
     assert rows[0].desired == "enforce"
 
 
+# --- F1: fact is a fourth policy (enforce/audit/fact/skip) -------------------
+# A fact is an audit-style observation with no desired value. `--policy fact`
+# (no value) is legal for any *readable* key, including read-only fact keys
+# (ver/board/role/neighbors) that are not writable settings. enforce/audit still
+# require a writable key with a value. See DESIGN.md "Facts vs settings".
+
+async def test_set_setting_fact_policy_on_readonly_key(db, wq, config):
+    # `ver` is read-only (not a writable setting) but is a collectable fact.
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "ver", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "ver"
+    assert rows[0].desired is None
+    assert rows[0].policy is SettingPolicy.FACT
+
+
+async def test_set_setting_fact_policy_on_writable_key(db, wq, config):
+    # A writable key can be collected as a pure fact (observe, no desired/opinion).
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].policy is SettingPolicy.FACT
+    assert rows[0].desired is None
+
+
+async def test_set_setting_fact_policy_rejects_value(db, wq, config):
+    # A fact records the observed value; a desired value is contradictory.
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name", "value": "Foo", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "fact" in resp["error"]
+
+
+async def test_set_setting_readonly_key_rejects_value(db, wq, config):
+    # `ver` is read-only — you can collect it as a fact but never set a value.
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "ver", "value": "1.2.3", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "read-only" in resp["error"]
+
+
+async def test_set_setting_readonly_key_rejects_enforce(db, wq, config):
+    # enforce/audit need a writable key with a desired value; a read-only fact key
+    # cannot be enforced.
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "ver", "policy": "enforce"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "read-only" in resp["error"]
+
+
+async def test_set_setting_skip_parks_a_readonly_fact(db, wq, config):
+    # skip is a placeholder ("stop collecting for now") and is legal on a fact key.
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "neighbors", "policy": "skip"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].policy is SettingPolicy.SKIP
+
+
 async def test_set_setting_rejects_invalid_default_policy(db, wq, config):
     await _seed_plain_node(db)
 
@@ -2032,6 +2129,76 @@ async def test_unset_setting_leaves_other_keys(db, wq, config):
     assert [r.key for r in rows] == ["name"]
 
 
+# --- F4: mch show — explain one key's resolution for one node ---------------
+
+async def test_show_setting_resolves_node_over_global_with_observed(db, wq, config):
+    node = await _seed_plain_node(db)
+    # global desired txdelay=10, node overrides to 14; an observed value is recorded.
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="txdelay", desired="10",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey, key="txdelay", desired="14",
+        policy=SettingPolicy.ENFORCE, observed="14",
+    ))
+
+    resp = await _dispatch(
+        {"cmd": "show_setting", "query": "test", "key": "txdelay"}, wq, db, config
+    )
+
+    assert resp["ok"] is True
+    data = resp["data"]
+    assert data["configured"] is True
+    assert data["resolved"]["desired"] == "14"
+    assert data["resolved"]["desired_source"] == "node"
+    assert data["resolved"]["policy"] == "enforce"
+    assert data["resolved"]["observed"] == "14"
+    scopes = {s["scope"]: s for s in data["scopes"]}
+    assert scopes["global"]["desired"] == "10"
+    assert scopes["node"]["desired"] == "14"
+
+
+async def test_show_setting_fact_has_no_desired_reads_node_facts(db, wq, config):
+    node = await _seed_plain_node(db)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="ver", desired=None,
+        policy=SettingPolicy.FACT,
+    ))
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
+
+    resp = await _dispatch({"cmd": "show_setting", "query": "test", "key": "ver"}, wq, db, config)
+
+    assert resp["ok"] is True
+    data = resp["data"]
+    assert data["configured"] is True
+    assert data["resolved"]["policy"] == "fact"
+    assert data["resolved"]["desired"] is None
+    assert data["resolved"]["observed"] == "v1.14.1"  # from node_facts
+
+
+async def test_show_setting_unconfigured_key(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "show_setting", "query": "test", "key": "txdelay"}, wq, db, config
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["configured"] is False
+    assert resp["data"]["scopes"] == []
+
+
+async def test_show_setting_unknown_node_errors(db, wq, config):
+    resp = await _dispatch({"cmd": "show_setting", "query": "ghost", "key": "ver"}, wq, db, config)
+    assert resp["ok"] is False
+    assert "not found" in resp["error"]
+
+
 # ------------------------------------------------------------------
 # clean_settings — orphaned observed setting rows
 # ------------------------------------------------------------------
@@ -2152,7 +2319,7 @@ async def test_clean_settings_unknown_node_errors(db, wq, config):
 
 async def test_import_writes_desired_rows_with_yes(db, wq):
     node = await _seed_plain_node(db)  # pubkey aabbccdd*8
-    config = Config(nodes=[NodeConfig(
+    config = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="aabbccdd", label="test",
         settings={"txdelay": SettingConfig(desired="14")},
     )])
@@ -2168,7 +2335,7 @@ async def test_import_writes_desired_rows_with_yes(db, wq):
 
 async def test_import_dry_run_does_not_write(db, wq):
     node = await _seed_plain_node(db)
-    config = Config(nodes=[NodeConfig(
+    config = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="aabbccdd", label="test",
         settings={"txdelay": SettingConfig(desired="14")},
     )])
@@ -2211,7 +2378,7 @@ async def test_import_dry_run_leaves_node_label_and_group(db, wq):
 
 async def test_import_warns_unresolvable_node(db, wq):
     # node never seeded into the DB, so its prefix cannot resolve to a full pubkey
-    config = Config(nodes=[NodeConfig(
+    config = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="deadbeef", label="ghost",
         settings={"txdelay": SettingConfig(desired="14")},
     )])
@@ -2228,6 +2395,7 @@ async def test_import_from_explicit_path_overrides_live_config(db, wq, tmp_path)
     node = await _seed_plain_node(db)  # pubkey aabbccdd*8
     legacy = tmp_path / "legacy.yaml"
     legacy.write_text(
+        'facts: []\n'
         'nodes:\n'
         '  - pubkey_prefix: aabbccdd\n'
         '    settings:\n'

@@ -275,6 +275,24 @@ def all_setting_keys(
     return keys
 
 
+def resolved_fact_keys(
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
+) -> set[str]:
+    """Keys this node collects as facts: those whose resolved policy is FACT.
+
+    A fact is now a policy (Node > Group > Global), not a separate config.facts list
+    (sunset). This is the per-node "configured facts" set used by the report and by
+    `mch clean facts`. See DESIGN.md "Facts vs settings".
+    """
+    return {
+        key
+        for key in all_setting_keys(node_cfg, group_cfg, global_cfg)
+        if resolve_policy(key, node_cfg, group_cfg, global_cfg) == SettingPolicy.FACT
+    }
+
+
 def _radio_from_setting(raw: str | None, source: str) -> _RadioCandidate | None:
     if raw is None:
         return None
@@ -1658,23 +1676,20 @@ class WorkQueue:
             await self._db.upsert_node(node)
             read_retry_budget = [_STORED_PATH_READ_RETRY_BUDGET]
 
-            # collect facts (reusing the probe's `ver` reply where applicable)
-            result.facts_collected = await self._collect_facts(
-                pubkey, contact, node, node_cfg, progress=progress,
-                probe_result=probe_result, read_retry_budget=read_retry_budget,
-            )
-
-            # enforce / audit settings
-            (
+            # single read pass: read each observable key once, routing by resolved policy
+            # (fact -> store; enforce/audit -> compare/write). Reuses the probe's `ver`
+            # reply where applicable. See _process_observations / DESIGN.md "Facts vs settings".
+            result.facts_collected, (
                 s_checked,
                 s_enforced,
                 s_drifted,
                 s_failed,
                 enforce_drifted,
                 enforce_failed,
-            ) = await self._process_settings(
+            ) = await self._process_observations(
                 pubkey, contact, node_cfg, group_cfg, global_cfg, node,
-                progress=progress, read_retry_budget=read_retry_budget,
+                progress=progress, probe_result=probe_result,
+                read_retry_budget=read_retry_budget,
             )
             result.settings_checked = s_checked
             result.settings_enforced = s_enforced
@@ -2063,67 +2078,64 @@ class WorkQueue:
             )
         return retry
 
-    async def _collect_facts(
+    async def _collect_one_fact(
         self,
         pubkey: str,
         contact: dict[str, Any],
         node: Node,
         node_cfg: NodeConfig,
+        key: str,
         *,
-        progress: ProgressCallback = None,
         probe_result: CommandResult | None = None,
         read_retry_budget: list[int] | None = None,
+        progress: ProgressCallback = None,
     ) -> int:
-        """Run all declared fact commands and store results.
+        """Read one fact key and store the observation. Returns 1 on success, 0 on failure.
 
-        Fact order is randomised each cycle so a marginal link does not keep
-        losing the same trailing observations. If the reachability probe already
-        read a value (it sends bare `ver`), that reply is reused instead of
-        reading the same value again over the mesh.
+        If the reachability probe already read this value (it sends bare `ver`), that reply
+        is reused instead of reading the same value again over the mesh. Called once per
+        FACT-policy key by the unified read pass (``_process_observations``); the per-cycle
+        read-order shuffle lives there so a marginal link does not keep losing the same
+        trailing observations.
         """
-        collected = 0
         if read_retry_budget is None:
             read_retry_budget = [0]
-        keys = list(self._config.facts)
-        random.shuffle(keys)
-        for key in keys:
-            # neighbors, ver/board, and clock are bare commands; everything else is `get <key>`
-            cmd = read_command_for_key(key)
-            if probe_result is not None and cmd == _PROBE_COMMAND:
-                # reuse the reachability probe's reply — no second read over the mesh
-                res = probe_result
+        # neighbors, ver/board, and clock are bare commands; everything else is `get <key>`
+        cmd = read_command_for_key(key)
+        if probe_result is not None and cmd == _PROBE_COMMAND:
+            # reuse the reachability probe's reply — no second read over the mesh
+            res = probe_result
+        else:
+            await _progress(progress, f"reading fact: {key}")
+            res = await self._send_read_with_lossy_retry(
+                pubkey,
+                contact,
+                cmd,
+                node,
+                node_cfg,
+                read_retry_budget=read_retry_budget,
+                progress=progress,
+            )
+        if res.success and res.text:
+            if key == "neighbors":
+                # store the count, not the raw multi-line list
+                from mch.recommend import parse_neighbour_count
+                value = str(parse_neighbour_count(res.text))
             else:
-                await _progress(progress, f"reading fact: {key}")
-                res = await self._send_read_with_lossy_retry(
-                    pubkey,
-                    contact,
-                    cmd,
-                    node,
-                    node_cfg,
-                    read_retry_budget=read_retry_budget,
-                    progress=progress,
-                )
-            if res.success and res.text:
-                if key == "neighbors":
-                    # store the count, not the raw multi-line list
-                    from mch.recommend import parse_neighbour_count
-                    value = str(parse_neighbour_count(res.text))
-                else:
-                    value = res.text.strip()
-                await self._db.upsert_fact(NodeFact(
-                    node_pubkey=pubkey,
-                    key=key,
-                    value=value,
-                ))
-                collected += 1
-            else:
-                error = res.error or "no response"
-                log.debug("fact %r failed for %s: %s", key, pubkey[:12], error)
-                await self._db.write_log(pubkey, "WARNING", f"fact {key} failed: {error}")
-                await _progress(progress, f"fact {key} failed: {error}")
-        return collected
+                value = res.text.strip()
+            await self._db.upsert_fact(NodeFact(
+                node_pubkey=pubkey,
+                key=key,
+                value=value,
+            ))
+            return 1
+        error = res.error or "no response"
+        log.debug("fact %r failed for %s: %s", key, pubkey[:12], error)
+        await self._db.write_log(pubkey, "WARNING", f"fact {key} failed: {error}")
+        await _progress(progress, f"fact {key} failed: {error}")
+        return 0
 
-    async def _process_settings(
+    async def _process_observations(
         self,
         pubkey: str,
         contact: dict[str, Any],
@@ -2133,25 +2145,54 @@ class WorkQueue:
         node: Node,
         *,
         progress: ProgressCallback = None,
+        probe_result: CommandResult | None = None,
         read_retry_budget: list[int] | None = None,
-    ) -> tuple[int, int, int, int, int, int]:
-        """Check settings, including reportable drift and enforce-blocking failures."""
+    ) -> tuple[int, tuple[int, int, int, int, int, int]]:
+        """Single per-node read pass: read each observable key once, route by policy.
+
+        Replaces the former separate fact-collection and setting-check passes. The key
+        set is the union of desired-setting keys and configured fact keys; a key present
+        only as a fact resolves to FACT. Resolution is Node > Group > Global, and the
+        resolved policy decides routing:
+          - SKIP    - not read.
+          - FACT    - read once, store the observation in node_facts (no desired/compare).
+          - ENFORCE - read once, compare to desired, write on drift.
+          - AUDIT   - read once, compare to desired, log drift but never write.
+        Because a key has exactly one resolved policy, it is read at most once and stored
+        in exactly one place - the single-observation invariant (no key in both tables),
+        which removes the old fact/setting double-poll. See DESIGN.md "Facts vs settings".
+
+        Returns ``(facts_collected, settings_tuple)`` where settings_tuple is
+        ``(checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed)``.
+        """
         checked = enforced = drifted = read_failed = 0
         enforced_drifted = enforced_read_failed = 0
+        facts_collected = 0
         if read_retry_budget is None:
             read_retry_budget = [0]
+        # Facts and settings are one resolved-policy space now (sunset): a fact is a
+        # policy=fact desired row, so it is already in all_setting_keys and resolves to FACT.
         keys = list(all_setting_keys(node_cfg, group_cfg, global_cfg))
-        # Randomise read order each cycle so a marginal link does not keep losing
-        # the same trailing settings (mirrors the fact-collection shuffle).
+        # Randomise read order each cycle so a marginal link does not keep losing the
+        # same trailing observations.
         random.shuffle(keys)
         existing = {s.key: s for s in await self._db.get_settings(pubkey)}
 
         for key in keys:
             policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
-            desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
 
             if policy == SettingPolicy.SKIP:
                 continue
+
+            if policy == SettingPolicy.FACT:
+                facts_collected += await self._collect_one_fact(
+                    pubkey, contact, node, node_cfg, key,
+                    probe_result=probe_result, read_retry_budget=read_retry_budget,
+                    progress=progress,
+                )
+                continue
+
+            desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
 
             read_cmd = read_command_for_key(key)
             await _progress(progress, f"reading setting: {key}")
@@ -2261,7 +2302,9 @@ class WorkQueue:
 
             await self._db.upsert_setting(setting)
 
-        return checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed
+        return facts_collected, (
+            checked, enforced, drifted, read_failed, enforced_drifted, enforced_read_failed
+        )
 
     async def _resolve_db_operations(self, node: Node) -> list[OperationConfig]:
         """Operations (Node > Group > Global) for a node, resolved from the DB.

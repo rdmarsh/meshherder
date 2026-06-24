@@ -25,6 +25,7 @@ from mch import __version__
 from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     parse_radio_tuple,
+    readable_observation_keys,
     validate_radio_tuple,
 )
 from mch.command_safety import blocked_exec_command, confirm_exec_command
@@ -1926,9 +1927,10 @@ def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) 
               help="Set at global scope: applies to every managed node.")
 @click.option(
     "--policy",
-    type=click.Choice(["enforce", "audit", "skip"]),
+    type=click.Choice(["enforce", "audit", "fact", "skip"]),
     default=None,
-    help="Override this setting's policy (default: inherit).",
+    help="Override this setting's policy (default: inherit). 'fact' collects a "
+         "read-only observation with no desired value.",
 )
 @click.pass_context
 def set_setting(
@@ -1946,8 +1948,10 @@ def set_setting(
     Global scope: mch set --global KEY [VALUE]
 
     NODE: pubkey prefix, label substring, or name substring.
-    KEY:  a writable setting, e.g. name, txdelay, advert.interval.
-    VALUE: the desired value (omit for a policy-only override with --policy).
+    KEY:  a writable setting (e.g. name, txdelay), or a read-only fact key
+          (e.g. ver, board, neighbors) when collecting it with --policy fact.
+    VALUE: the desired value (omit for a policy-only override with --policy;
+           --policy fact/skip take no value).
     Node wins over group wins over global at resolution time.
 
     Writing is synchronous, so `mch status` shows the new intent immediately. Nodes
@@ -1968,7 +1972,10 @@ def set_setting(
 
     if value is None and policy is None:
         raise click.UsageError("provide a VALUE, --policy, or both")
-    if key not in settable_keys():
+    # A read-only fact key (e.g. ver) is not a writable setting but may be collected
+    # with --policy fact/skip; let it through and let the daemon enforce the precise
+    # rules (no value, only fact/skip). A bare unknown key is still a usage error here.
+    if key not in settable_keys() | readable_observation_keys():
         valid = ", ".join(sorted(settable_keys()))
         raise click.UsageError(f"{key!r} is not a writable setting (choose from: {valid})")
 
@@ -2036,6 +2043,47 @@ def unset_setting(
 
     data = _check(_rpc(ctx.obj["socket"], req))
     _scoped_target_echo("unset", key, "", data)
+
+
+@cli.command("show")
+@click.argument("node")
+@click.argument("key")
+@click.pass_context
+def show_setting(ctx: click.Context, node: str, key: str) -> None:
+    """Explain one KEY for one NODE: per-scope config, what resolves, what's observed.
+
+    \b
+    mch show NODE KEY
+
+    Shows the desired/policy row at each scope (global, the node's group, the node),
+    the resolved policy and desired value (Node > Group > Global), and the value mch
+    has observed. Read-only: it sends no mesh traffic.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "show_setting", "query": node, "key": key}))
+    target = data.get("label") or data.get("name") or data["pubkey"][:8]
+    resolved = data["resolved"]
+
+    click.echo(f"{key}  on  {target}  ({data['pubkey'][:12]})")
+    if not data["configured"]:
+        click.echo("  not configured for this node "
+                   "(no desired/policy row resolves at any scope)")
+    desired = resolved["desired"]
+    desired_str = repr(desired) if desired is not None else "-"
+    src = f"  (from {resolved['desired_source']})" if resolved["desired_source"] else ""
+    click.echo(f"  resolved:  policy={resolved['policy']}  desired={desired_str}{src}")
+    obs = resolved["observed"]
+    if obs is None:
+        click.echo("  observed:  (never read)")
+    else:
+        when = f"  [{resolved['observed_at']}]" if resolved["observed_at"] else ""
+        click.echo(f"  observed:  {obs!r}{when}")
+    if data["scopes"]:
+        click.echo("  scopes:")
+        for s in data["scopes"]:
+            label = s["scope"] if s["scope"] != "group" else f"group {s['scope_id']!r}"
+            sd = repr(s["desired"]) if s["desired"] is not None else "-"
+            sp = s["policy"] or "(inherit)"
+            click.echo(f"    {label:<16}  policy={sp:<9}  desired={sd}")
 
 
 # ---------------------------------------------------------------------------

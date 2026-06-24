@@ -569,14 +569,19 @@ unknown keys stay legal with the `get <key>` fallback but warn and suggest close
 typo causing silent repeated reads. Status presentation can still hide cached observation rows whose
 key is no longer configured, retaining the historical row until an explicit cleanup discards it.
 
-### Slice plan (implementation pending, on a branch)
+### Slice plan (on branch `facts-as-policy`)
 
-- **F1** — `SettingPolicy.FACT` + validation + `mch set --policy fact` gate widening.
-- **F2** — unify the read pass: delete `_collect_facts`, route by resolved policy, one read per key.
-- **F3** — migrate `config.facts` → global fact rows; retire `config.facts`; add the both-tables
-  invariant test.
-- **F4** — report "configured facts" follows the resolved per-node fact set; add `mch show KEY`;
-  `mch clean facts`/`clean settings` follow their resolved sets.
+- **F1 (done)** — `SettingPolicy.FACT` + validation + `mch set --policy fact` gate widening.
+- **F2 (done)** — unify the read pass: deleted `_collect_facts`/`_process_settings` into one
+  `_process_observations`, routing by resolved policy, one read per key.
+- **F3 (done)** — migrated `config.facts` → global `policy: fact` rows (`mch import`); strict-error
+  on a leftover `facts:` block; the daemon read pass, the report's "configured facts", and
+  `mch clean facts` all follow each node's resolved fact set (`resolved_fact_keys`) instead of one
+  global list. Added the single-observation invariant test (no key in both tables). The report/clean
+  switch was folded in here (originally F4) to avoid a broken intermediate state.
+- **F4 (done)** — added `mch show NODE KEY`: prints a key's per-scope desired/policy rows, the
+  resolved policy/desired (with the source scope), and the observed value. Read-only. (The report/
+  clean rework moved into F3.)
 - **F5 (separate, bench on luna)** — investigate free/batched/incidental facts; record in JOURNAL
   before turning any of it into a rule.
 

@@ -635,6 +635,17 @@ def config_to_desired_rows(
     warnings: list[str] = []
 
     rows += _scope_rows(Scope.GLOBAL, "", cfg.global_settings)
+    # Migrate the legacy flat `facts:` list into global policy=fact rows (sunset). A fact is
+    # now a policy, not a separate top-level list; collecting it everywhere = a global fact row.
+    # A key already carried as a global desired setting keeps that (more specific) row.
+    global_keys = {row.key for row in rows}
+    for key in cfg.facts:
+        if key in global_keys:
+            continue
+        rows.append(DesiredSetting(
+            scope_type=Scope.GLOBAL, scope_id="", key=key,
+            desired=None, policy=SettingPolicy.FACT,
+        ))
     for group in cfg.groups:
         rows += _scope_rows(Scope.GROUP, group.name, group)
     for node in cfg.nodes:
@@ -877,13 +888,15 @@ def load(
     # are tolerated so stripping is forgiving. The lenient default keeps the `mch import` on-ramp
     # and the config-parser unit tests working.
     if strict:
-        offenders = [key for key in ("nodes", "groups", "global") if raw.get(key)]
+        offenders = [key for key in ("nodes", "groups", "global", "facts") if raw.get(key)]
         if offenders:
             raise ValueError(
                 f"config.yaml still carries desired state ({', '.join(offenders)}); "
                 "desired state now lives in the DB. Migrate it with "
                 "`mch import <this-file>`, verify with `mch export`, then delete these "
-                "blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md slice 8."
+                "blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md slice 8. "
+                "Facts are now a policy (`mch set <node> <key> --policy fact`); import folds a "
+                "legacy `facts:` list into global fact rows."
             )
 
     gw_raw = _mapping(raw.get("gateway", {}), "gateway")

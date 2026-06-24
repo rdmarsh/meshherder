@@ -667,6 +667,112 @@ async def test_probe_ver_reply_reused_as_fact_no_second_read(db):
 
 
 # ------------------------------------------------------------------
+# F2: unified read pass — one read per key, route by resolved policy
+# ------------------------------------------------------------------
+
+async def test_shared_fact_and_setting_key_read_once(db):
+    """A key that is BOTH a configured fact and an enforced setting is read once.
+
+    Previously the fact pass and the setting pass each issued the read (the latent
+    'name' double-poll). The unified pass reads it once and routes by policy.
+    """
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"name": SettingConfig(desired="Tower", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["name"]  # also list it as a fact — the overlap case
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+
+    async def _send(contact, command, **kwargs):
+        if command == "ver":
+            return CommandResult(success=True, text="v1.14.1")  # probe
+        if command == "get name":
+            return CommandResult(success=True, text="Tower")    # matches desired
+        return CommandResult(success=True, text="ok")
+
+    gw.send_command = AsyncMock(side_effect=_send)
+    wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
+
+    await wq.run_cycle()
+
+    calls = [c.args[1] for c in gw.send_command.await_args_list]
+    assert calls.count("get name") == 1  # not read twice
+    # name is an enforced setting, so the observation lives in settings, not node_facts
+    settings = {s.key: s for s in await db.get_settings("aabbccdd1122")}
+    assert "name" in settings
+    facts = await db.get_facts("aabbccdd1122")
+    assert "name" not in facts
+
+
+async def test_fact_policy_row_stored_in_node_facts_not_settings(db):
+    """A desired row with policy=fact is read and stored as a fact, never a setting."""
+    node_cfg = _node(pubkey="aabbcc", label="TestNode")
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []  # board is a fact only via the policy=fact row, not config.facts
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+
+    async def _send(contact, command, **kwargs):
+        if command == "ver":
+            return CommandResult(success=True, text="v1.14.1")  # probe
+        if command == "board":
+            return CommandResult(success=True, text="Heltec V3")
+        return CommandResult(success=True, text="ok")
+
+    gw.send_command = AsyncMock(side_effect=_send)
+    wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id="aabbccdd1122",
+        key="board", desired=None, policy=SettingPolicy.FACT,
+    ))
+
+    results = await wq.run_cycle()
+
+    facts = await db.get_facts("aabbccdd1122")
+    assert facts.get("board") == "Heltec V3"
+    assert results[0].facts_collected == 1
+    # the single-observation invariant: a fact key is not also a settings row
+    settings = {s.key: s for s in await db.get_settings("aabbccdd1122")}
+    assert "board" not in settings
+
+
+async def test_single_observation_invariant_no_key_in_both_tables(db):
+    """After a cycle, no (node, key) is stored in both settings and node_facts."""
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"txdelay": SettingConfig(desired="14", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver", "board"]  # facts plus an enforced setting
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+
+    async def _send(contact, command, **kwargs):
+        if command == "ver":
+            return CommandResult(success=True, text="v1.14.1")
+        if command == "board":
+            return CommandResult(success=True, text="Heltec V3")
+        if command == "txdelay":
+            return CommandResult(success=True, text="14")
+        return CommandResult(success=True, text="ok")
+
+    gw.send_command = AsyncMock(side_effect=_send)
+    wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
+
+    await wq.run_cycle()
+
+    fact_keys = set(await db.get_facts("aabbccdd1122"))
+    setting_keys = {s.key for s in await db.get_settings("aabbccdd1122")}
+    assert fact_keys & setting_keys == set()  # the single-observation invariant
+    assert "txdelay" in setting_keys
+    assert {"ver", "board"} <= fact_keys
+
+
+# ------------------------------------------------------------------
 # drift detection and enforcement
 # ------------------------------------------------------------------
 

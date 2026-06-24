@@ -2753,6 +2753,31 @@ def test_set_invalid_policy_choice_rejected():
     assert result.exit_code != 0
 
 
+def test_set_fact_policy_accepted_in_choice():
+    # 'fact' is a valid --policy choice and Click must not reject it.
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["--socket", "/fake.sock", "set", "site-a", "txdelay", "--policy", "fact"]
+    )
+    assert "'fact'" not in result.output or "invalid choice" not in result.output.lower()
+
+
+def test_set_readonly_fact_key_passes_gate_to_daemon():
+    # A read-only fact key (ver) is not a writable setting, but `--policy fact`
+    # must pass the client gate and reach the daemon (which validates the rest).
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp(value=None, policy="fact"))
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "site-a", "ver", "--policy", "fact"]
+        )
+
+    assert result.exit_code == 0
+    rpc.assert_called_once()
+    assert rpc.call_args.args[1]["key"] == "ver"
+    assert rpc.call_args.args[1]["policy"] == "fact"
+
+
 def test_unset_sends_query_and_key():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
@@ -2776,6 +2801,52 @@ def test_unset_surfaces_daemon_error():
 
     assert result.exit_code != 0
     assert "no DB-set" in result.output
+
+
+def test_show_sends_query_and_renders_resolution():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "key": "txdelay",
+        "pubkey": "aabbccdd" * 8,
+        "label": "site-a",
+        "name": "Tower",
+        "group": "solar",
+        "configured": True,
+        "resolved": {
+            "policy": "enforce", "desired": "14", "desired_source": "node",
+            "observed": "14", "observed_at": "2026-06-24T00:00:00+00:00",
+        },
+        "scopes": [
+            {"scope": "global", "scope_id": "", "desired": "10", "policy": "enforce"},
+            {"scope": "node", "scope_id": "aabbccdd" * 8, "desired": "14", "policy": "enforce"},
+        ],
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "show", "site-a", "txdelay"])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "show_setting", "query": "site-a", "key": "txdelay"}
+    assert "policy=enforce" in result.output
+    assert "desired='14'" in result.output
+    assert "from node" in result.output
+    assert "global" in result.output
+
+
+def test_show_reports_unconfigured_key():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "key": "txdelay", "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower",
+        "group": None, "configured": False,
+        "resolved": {"policy": "audit", "desired": None, "desired_source": None,
+                     "observed": None, "observed_at": None},
+        "scopes": [],
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "show", "site-a", "txdelay"])
+
+    assert result.exit_code == 0
+    assert "not configured" in result.output
+    assert "never read" in result.output
 
 
 def test_set_group_scope_sends_group_request():
