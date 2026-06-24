@@ -1012,6 +1012,12 @@ async def test_clean_facts_dispatch_lists_stale_facts_without_deleting(db, wq, c
     await db.upsert_node(node)
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="powersavings", value="on"))
+    # ver is a configured fact (policy=fact, sunset); 'powersavings' is a typo never
+    # configured, so it is the stale candidate.
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.GLOBAL, scope_id="", key="ver",
+                       desired=None, policy=SettingPolicy.FACT)
+    )
 
     resp = await _dispatch({"cmd": "clean_facts", "query": "site-a"}, wq, db, config)
 
@@ -2243,7 +2249,7 @@ async def test_clean_settings_unknown_node_errors(db, wq, config):
 
 async def test_import_writes_desired_rows_with_yes(db, wq):
     node = await _seed_plain_node(db)  # pubkey aabbccdd*8
-    config = Config(nodes=[NodeConfig(
+    config = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="aabbccdd", label="test",
         settings={"txdelay": SettingConfig(desired="14")},
     )])
@@ -2259,7 +2265,7 @@ async def test_import_writes_desired_rows_with_yes(db, wq):
 
 async def test_import_dry_run_does_not_write(db, wq):
     node = await _seed_plain_node(db)
-    config = Config(nodes=[NodeConfig(
+    config = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="aabbccdd", label="test",
         settings={"txdelay": SettingConfig(desired="14")},
     )])
@@ -2302,7 +2308,7 @@ async def test_import_dry_run_leaves_node_label_and_group(db, wq):
 
 async def test_import_warns_unresolvable_node(db, wq):
     # node never seeded into the DB, so its prefix cannot resolve to a full pubkey
-    config = Config(nodes=[NodeConfig(
+    config = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="deadbeef", label="ghost",
         settings={"txdelay": SettingConfig(desired="14")},
     )])
@@ -2319,6 +2325,7 @@ async def test_import_from_explicit_path_overrides_live_config(db, wq, tmp_path)
     node = await _seed_plain_node(db)  # pubkey aabbccdd*8
     legacy = tmp_path / "legacy.yaml"
     legacy.write_text(
+        'facts: []\n'
         'nodes:\n'
         '  - pubkey_prefix: aabbccdd\n'
         '    settings:\n'

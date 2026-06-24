@@ -52,6 +52,7 @@ from mch.queue import (
     OperationBusyError,
     WorkQueue,
     all_setting_keys,
+    resolved_fact_keys,
 )
 from mch.report import (
     build_fleet_report,
@@ -179,7 +180,6 @@ async def _stale_fact_candidates(
     group: str | None = None,
     fact_key: str | None = None,
 ) -> list[dict[str, Any]]:
-    configured_facts = set(config.facts)
     if query:
         node = await _resolve_node(query, db)
         if not node:
@@ -192,6 +192,11 @@ async def _stale_fact_candidates(
 
     candidates: list[dict[str, Any]] = []
     for node in nodes:
+        # "Configured facts" is now per-node: the keys resolving to policy=fact (sunset),
+        # not one global config.facts list. A cached fact whose key no longer resolves to
+        # fact for this node is stale and offered for cleanup.
+        node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
+        configured_facts = resolved_fact_keys(node_cfg, group_cfg, global_cfg)
         for fact in await db.get_fact_records(node.pubkey):
             if fact_key is not None and fact.key != fact_key:
                 continue
@@ -607,7 +612,7 @@ async def _dispatch(
         if not node:
             return {"ok": False, "error": f"node {pubkey!r} not found"}
         report = await build_node_report(db, config, node)
-        return {"ok": True, "data": legacy_node(report, config)}
+        return {"ok": True, "data": legacy_node(report)}
 
     if cmd == "path":
         query = req.get("query", "")

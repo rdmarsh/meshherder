@@ -739,6 +739,39 @@ async def test_fact_policy_row_stored_in_node_facts_not_settings(db):
     assert "board" not in settings
 
 
+async def test_single_observation_invariant_no_key_in_both_tables(db):
+    """After a cycle, no (node, key) is stored in both settings and node_facts."""
+    node_cfg = _node(
+        pubkey="aabbcc",
+        label="TestNode",
+        settings={"txdelay": SettingConfig(desired="14", policy=SettingPolicy.ENFORCE)},
+    )
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = ["ver", "board"]  # facts plus an enforced setting
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+
+    async def _send(contact, command, **kwargs):
+        if command == "ver":
+            return CommandResult(success=True, text="v1.14.1")
+        if command == "board":
+            return CommandResult(success=True, text="Heltec V3")
+        if command == "txdelay":
+            return CommandResult(success=True, text="14")
+        return CommandResult(success=True, text="ok")
+
+    gw.send_command = AsyncMock(side_effect=_send)
+    wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
+
+    await wq.run_cycle()
+
+    fact_keys = set(await db.get_facts("aabbccdd1122"))
+    setting_keys = {s.key for s in await db.get_settings("aabbccdd1122")}
+    assert fact_keys & setting_keys == set()  # the single-observation invariant
+    assert "txdelay" in setting_keys
+    assert {"ver", "board"} <= fact_keys
+
+
 # ------------------------------------------------------------------
 # drift detection and enforcement
 # ------------------------------------------------------------------

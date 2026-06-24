@@ -134,6 +134,24 @@ def test_strict_load_rejects_global_desired_block(tmp_path):
         load(p, strict=True)
 
 
+def test_strict_load_rejects_facts_block(tmp_path):
+    """facts: is desired state now (a fact is a policy); strict load rejects it."""
+    p = _write_config(tmp_path, """\
+        facts:
+          - ver
+          - neighbors
+        """)
+    with pytest.raises(ValueError, match="mch import"):
+        load(p, strict=True)
+
+
+def test_strict_load_tolerates_empty_facts_block(tmp_path):
+    """An empty `facts: []` left behind after migration should not block startup."""
+    p = _write_config(tmp_path, "facts: []\n")
+    cfg = load(p, strict=True)
+    assert cfg.facts == []
+
+
 def test_strict_load_allows_daemon_only_config(tmp_path):
     """gateway/scheduler/etc. are fine under strict; only desired state is rejected."""
     p = _write_config(tmp_path, """\
@@ -1281,7 +1299,7 @@ def _resolver(mapping=None):
 
 
 def test_import_node_settings_to_node_scope_rows():
-    cfg = Config(nodes=[NodeConfig(
+    cfg = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="aabbccdd", label="n1",
         settings={"txdelay": SettingConfig(desired="14", policy=SettingPolicy.ENFORCE)},
     )])
@@ -1294,8 +1312,35 @@ def test_import_node_settings_to_node_scope_rows():
     ]
 
 
+def test_import_migrates_facts_to_global_fact_rows():
+    """A legacy `facts:` list becomes global policy=fact rows (no desired value)."""
+    cfg = Config(facts=["ver", "neighbors"])
+    rows, warnings = config_to_desired_rows(cfg, _resolver())
+    assert warnings == []
+    assert DesiredSetting(Scope.GLOBAL, "", "ver",
+                          desired=None, policy=SettingPolicy.FACT) in rows
+    assert DesiredSetting(Scope.GLOBAL, "", "neighbors",
+                          desired=None, policy=SettingPolicy.FACT) in rows
+
+
+def test_import_fact_does_not_shadow_a_global_desired_setting():
+    """A key that is both a global setting and a fact keeps its (more specific) setting row."""
+    cfg = Config(
+        facts=["txdelay"],
+        global_settings=GroupConfig(
+            name="global",
+            settings={"txdelay": SettingConfig(desired="14", policy=SettingPolicy.ENFORCE)},
+        ),
+    )
+    rows, _ = config_to_desired_rows(cfg, _resolver())
+    txdelay_rows = [r for r in rows if r.key == "txdelay"]
+    assert len(txdelay_rows) == 1
+    assert txdelay_rows[0].policy == SettingPolicy.ENFORCE
+    assert txdelay_rows[0].desired == "14"
+
+
 def test_import_preserves_non_default_poll_hours():
-    cfg = Config(nodes=[NodeConfig(
+    cfg = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="aabbccdd",
         settings={"owner.info": SettingConfig(desired="x", poll_hours=6)},
     )])
@@ -1304,7 +1349,7 @@ def test_import_preserves_non_default_poll_hours():
 
 
 def test_import_unresolvable_node_is_warned_and_skipped():
-    cfg = Config(nodes=[NodeConfig(
+    cfg = Config(facts=[], nodes=[NodeConfig(
         pubkey_prefix="deadbeef", label="ghost",
         settings={"txdelay": SettingConfig(desired="14")},
     )])

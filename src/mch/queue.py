@@ -275,6 +275,24 @@ def all_setting_keys(
     return keys
 
 
+def resolved_fact_keys(
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None = None,
+) -> set[str]:
+    """Keys this node collects as facts: those whose resolved policy is FACT.
+
+    A fact is now a policy (Node > Group > Global), not a separate config.facts list
+    (sunset). This is the per-node "configured facts" set used by the report and by
+    `mch clean facts`. See DESIGN.md "Facts vs settings".
+    """
+    return {
+        key
+        for key in all_setting_keys(node_cfg, group_cfg, global_cfg)
+        if resolve_policy(key, node_cfg, group_cfg, global_cfg) == SettingPolicy.FACT
+    }
+
+
 def _radio_from_setting(raw: str | None, source: str) -> _RadioCandidate | None:
     if raw is None:
         return None
@@ -2152,21 +2170,16 @@ class WorkQueue:
         facts_collected = 0
         if read_retry_budget is None:
             read_retry_budget = [0]
-        setting_keys = all_setting_keys(node_cfg, group_cfg, global_cfg)
-        # config.facts is still the fact source until F3 migrates it to policy=fact rows;
-        # a key present only as a fact (not a desired setting) resolves to FACT below.
-        fact_only_keys = set(self._config.facts) - setting_keys
-        keys = list(setting_keys | fact_only_keys)
+        # Facts and settings are one resolved-policy space now (sunset): a fact is a
+        # policy=fact desired row, so it is already in all_setting_keys and resolves to FACT.
+        keys = list(all_setting_keys(node_cfg, group_cfg, global_cfg))
         # Randomise read order each cycle so a marginal link does not keep losing the
         # same trailing observations.
         random.shuffle(keys)
         existing = {s.key: s for s in await self._db.get_settings(pubkey)}
 
         for key in keys:
-            policy = (
-                SettingPolicy.FACT if key in fact_only_keys
-                else resolve_policy(key, node_cfg, group_cfg, global_cfg)
-            )
+            policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
 
             if policy == SettingPolicy.SKIP:
                 continue

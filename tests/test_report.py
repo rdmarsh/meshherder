@@ -70,6 +70,11 @@ async def test_fleet_report_classifies_node_health_settings_and_actions(db):
                        policy=SettingPolicy.AUDIT),
         DesiredSetting(Scope.NODE, node.pubkey, "powersaving", desired="on",
                        policy=SettingPolicy.SKIP),
+        # Facts are policy=fact rows now (sunset), resolved per node. Seed the former
+        # default fact set globally so the report's "configured facts" still lists them.
+        DesiredSetting(Scope.GLOBAL, "", "ver", desired=None, policy=SettingPolicy.FACT),
+        DesiredSetting(Scope.GLOBAL, "", "board", desired=None, policy=SettingPolicy.FACT),
+        DesiredSetting(Scope.GLOBAL, "", "role", desired=None, policy=SettingPolicy.FACT),
     ):
         await db.set_desired_setting(setting)
     config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge")])
@@ -80,7 +85,7 @@ async def test_fleet_report_classifies_node_health_settings_and_actions(db):
     assert report["summary"]["critical_nodes"] == 1
     assert report["summary"]["drifted_settings"] == 1
     api_node = report["nodes"][0]
-    assert api_node["fact_keys"] == ["ver", "board", "role"]
+    assert api_node["fact_keys"] == ["board", "role", "ver"]  # sorted resolved fact keys
     assert api_node["facts"]["lat"] == "-33.731"
     assert api_node["facts_collected_at"]["lat"] == collected.isoformat()
     settings = {setting["key"]: setting for setting in api_node["settings"]}
@@ -110,7 +115,7 @@ async def test_legacy_node_includes_next_sync_at(db):
     config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge")])
 
     report = await build_node_report(db, config, node)
-    detail = legacy_node(report, config)
+    detail = legacy_node(report)
 
     assert detail["next_sync_at"] == next_sync_at.isoformat()
 
@@ -195,7 +200,7 @@ async def test_legacy_node_includes_setting_source(db):
     config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge")])
 
     report = await build_node_report(db, config, node)
-    detail = legacy_node(report, config)
+    detail = legacy_node(report)
     sources = {s["key"]: s["source"] for s in detail["settings"]}
 
     # All desired state resolves from the DB now (sunset), so its source is "db".

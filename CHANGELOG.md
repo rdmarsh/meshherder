@@ -5,6 +5,24 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Facts are now a policy, not a separate `facts:` list.** `SettingPolicy` gains a fourth value,
+  `fact`: read and record the observed value with no desired value and no write-back (the others
+  stay `enforce`/`audit`/`skip`). A fact is just an observation mch has no opinion about, so facts
+  and settings are one resolved-policy space (Node > Group > Global). Collect a key as a fact with
+  `mch set <node> <key> --policy fact` (no value); read-only keys like `ver`/`board`/`role`/
+  `neighbors` accept only `fact`/`skip` and can never take a desired value. Because a key resolves
+  to exactly one policy, the daemon reads it **once per cycle** and stores it in exactly one place —
+  removing the latent double-poll where a key listed as both a fact and a setting was read twice.
+  "Configured facts" in the report and `mch clean facts` now follow each node's resolved fact set
+  instead of one global list.
+- **Breaking: the flat top-level `facts:` list is retired from config.yaml.** It was the last
+  desired-ish knob still living in config.yaml after the 0.10.0 sunset. The daemon now strict-loads
+  and refuses to start if a `facts:` block remains (joining `nodes:`/`groups:`/`global:`). Migrate
+  it like the rest: `mch import <config-with-facts>` folds a legacy `facts:` list into global
+  `policy: fact` rows (a key already carried as a global desired setting keeps that row), then delete
+  `facts:` from config.yaml. An absent/empty `facts:` is tolerated. After upgrading, a node collects
+  no facts until its fact rows exist, so run the import before stripping the block.
+
 ## 0.10.0 - 2026-06-21
 
 - **config.yaml desired-state sunset.** The SQLite DB is now the single source of truth for node

@@ -15,7 +15,7 @@ from mch.config import (
 )
 from mch.db import Database
 from mch.models import Node, NodeState, SettingPolicy, SettingRecord
-from mch.queue import all_setting_keys, resolve_policy
+from mch.queue import all_setting_keys, resolve_policy, resolved_fact_keys
 from mch.settings_compare import compare_setting
 
 SCHEMA_VERSION = 2
@@ -68,7 +68,7 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
                 "password_known": _password_known(node, config),
                 "open": open_node,
             },
-            "fact_keys": list(config.facts),
+            "fact_keys": sorted(resolved_fact_keys(node_cfg, group_cfg, global_cfg)),
             "facts": facts,
             "facts_collected_at": facts_collected_at,
             "settings": settings,
@@ -140,9 +140,9 @@ def legacy_issues(report: dict[str, Any]) -> dict[str, Any]:
     return dict(report["issues"])
 
 
-def legacy_node(node: dict[str, Any], config: Config) -> dict[str, Any]:
+def legacy_node(node: dict[str, Any]) -> dict[str, Any]:
     """Adapt one canonical node report to the established detail RPC payload."""
-    configured_facts: dict[str, str | None] = {key: "???" for key in config.facts}
+    configured_facts: dict[str, str | None] = {key: "???" for key in node["fact_keys"]}
     configured_facts.update(node["facts"])
     configured_fact_times: dict[str, str | None] = {key: None for key in configured_facts}
     configured_fact_times.update(node.get("facts_collected_at", {}))
