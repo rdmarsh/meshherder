@@ -25,6 +25,7 @@ from mch import __version__
 from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     parse_radio_tuple,
+    readable_observation_keys,
     validate_radio_tuple,
 )
 from mch.command_safety import blocked_exec_command, confirm_exec_command
@@ -1926,9 +1927,10 @@ def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) 
               help="Set at global scope: applies to every managed node.")
 @click.option(
     "--policy",
-    type=click.Choice(["enforce", "audit", "skip"]),
+    type=click.Choice(["enforce", "audit", "fact", "skip"]),
     default=None,
-    help="Override this setting's policy (default: inherit).",
+    help="Override this setting's policy (default: inherit). 'fact' collects a "
+         "read-only observation with no desired value.",
 )
 @click.pass_context
 def set_setting(
@@ -1946,8 +1948,10 @@ def set_setting(
     Global scope: mch set --global KEY [VALUE]
 
     NODE: pubkey prefix, label substring, or name substring.
-    KEY:  a writable setting, e.g. name, txdelay, advert.interval.
-    VALUE: the desired value (omit for a policy-only override with --policy).
+    KEY:  a writable setting (e.g. name, txdelay), or a read-only fact key
+          (e.g. ver, board, neighbors) when collecting it with --policy fact.
+    VALUE: the desired value (omit for a policy-only override with --policy;
+           --policy fact/skip take no value).
     Node wins over group wins over global at resolution time.
 
     Writing is synchronous, so `mch status` shows the new intent immediately. Nodes
@@ -1968,7 +1972,10 @@ def set_setting(
 
     if value is None and policy is None:
         raise click.UsageError("provide a VALUE, --policy, or both")
-    if key not in settable_keys():
+    # A read-only fact key (e.g. ver) is not a writable setting but may be collected
+    # with --policy fact/skip; let it through and let the daemon enforce the precise
+    # rules (no value, only fact/skip). A bare unknown key is still a usage error here.
+    if key not in settable_keys() | readable_observation_keys():
         valid = ", ".join(sorted(settable_keys()))
         raise click.UsageError(f"{key!r} is not a writable setting (choose from: {valid})")
 

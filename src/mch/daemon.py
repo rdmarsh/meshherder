@@ -27,7 +27,7 @@ from typing import Any
 from meshcore.events import EventType
 
 from mch.api import ReadOnlyApi
-from mch.command_registry import validate_value
+from mch.command_registry import readable_observation_keys, validate_value
 from mch.command_safety import blocked_exec_command
 from mch.config import (
     DIRECTIVE_KEYS,
@@ -332,10 +332,40 @@ async def _handle_set_setting(
 
     if not key:
         return {"ok": False, "error": "missing setting key"}
-    if key not in settable_keys():
-        return {"ok": False, "error": f"{key!r} is not a writable setting"}
     if value is None and policy_raw is None:
         return {"ok": False, "error": "provide a value, a --policy, or both"}
+
+    # Parse the policy first so the key gate below can reason about it: a fact
+    # (the fourth policy) is legal on read-only keys, a desired value is not.
+    policy: SettingPolicy | None = None
+    if policy_raw is not None:
+        try:
+            policy = SettingPolicy(str(policy_raw))
+        except ValueError:
+            valid = ", ".join(p.value for p in SettingPolicy)
+            return {"ok": False, "error": f"invalid policy {policy_raw!r} (choose from: {valid})"}
+
+    # Key gate. Writable settings and directives accept any policy/value. A read-only
+    # fact key (ver/board/role/neighbors/owner.name) is not a writable setting, but it
+    # can still be collected as a fact (--policy fact) or parked (--policy skip) - never
+    # given a desired value, since there is no `set` command for it. enforce/audit are
+    # rejected on such keys. See DESIGN.md "Facts vs settings" (fact is a fourth policy).
+    if key not in settable_keys():
+        is_readable = key in readable_observation_keys()
+        if policy in (SettingPolicy.FACT, SettingPolicy.SKIP) and is_readable:
+            if value is not None:
+                return {"ok": False, "error": f"{key!r} is read-only; drop the value "
+                        "(use --policy fact to collect it as an observation)"}
+        elif is_readable:
+            return {"ok": False, "error": f"{key!r} is a read-only fact; only --policy fact "
+                    "or skip is allowed (it cannot be enforced)"}
+        else:
+            return {"ok": False, "error": f"{key!r} is not a writable setting"}
+
+    # A fact has no opinion, so a desired value is contradictory even on a writable key.
+    if policy is SettingPolicy.FACT and value is not None:
+        return {"ok": False, "error": "--policy fact takes no value "
+                "(it records the observed value, not a desired one)"}
 
     if value is not None:
         value = str(value)
@@ -348,14 +378,6 @@ async def _handle_set_setting(
         error = validate_value(key, value) or validate_directive_value(key, value)
         if error:
             return {"ok": False, "error": f"{key} {error}: {value!r}"}
-
-    policy: SettingPolicy | None = None
-    if policy_raw is not None:
-        try:
-            policy = SettingPolicy(str(policy_raw))
-        except ValueError:
-            valid = ", ".join(p.value for p in SettingPolicy)
-            return {"ok": False, "error": f"invalid policy {policy_raw!r} (choose from: {valid})"}
 
     scope, scope_id, data, error = await _resolve_setting_scope(req, db)
     if error or scope is None:

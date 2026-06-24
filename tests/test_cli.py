@@ -2753,6 +2753,31 @@ def test_set_invalid_policy_choice_rejected():
     assert result.exit_code != 0
 
 
+def test_set_fact_policy_accepted_in_choice():
+    # 'fact' is a valid --policy choice and Click must not reject it.
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["--socket", "/fake.sock", "set", "site-a", "txdelay", "--policy", "fact"]
+    )
+    assert "'fact'" not in result.output or "invalid choice" not in result.output.lower()
+
+
+def test_set_readonly_fact_key_passes_gate_to_daemon():
+    # A read-only fact key (ver) is not a writable setting, but `--policy fact`
+    # must pass the client gate and reach the daemon (which validates the rest).
+    runner = CliRunner()
+    rpc = MagicMock(return_value=_set_resp(value=None, policy="fact"))
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "set", "site-a", "ver", "--policy", "fact"]
+        )
+
+    assert result.exit_code == 0
+    rpc.assert_called_once()
+    assert rpc.call_args.args[1]["key"] == "ver"
+    assert rpc.call_args.args[1]["policy"] == "fact"
+
+
 def test_unset_sends_query_and_key():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {

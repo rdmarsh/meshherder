@@ -25,6 +25,7 @@ class NodeState(Enum):
 class SettingPolicy(Enum):
     ENFORCE = "enforce"  # check value; set it if it differs from desired
     AUDIT   = "audit"    # check value; flag drift but never set
+    FACT    = "fact"     # read and record the observed value; no desired, no write
     SKIP    = "skip"     # don't touch this setting at all
 
 

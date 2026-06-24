@@ -1857,6 +1857,97 @@ async def test_set_setting_accepts_default_policy_directive(db, wq, config):
     assert rows[0].desired == "enforce"
 
 
+# --- F1: fact is a fourth policy (enforce/audit/fact/skip) -------------------
+# A fact is an audit-style observation with no desired value. `--policy fact`
+# (no value) is legal for any *readable* key, including read-only fact keys
+# (ver/board/role/neighbors) that are not writable settings. enforce/audit still
+# require a writable key with a value. See DESIGN.md "Facts vs settings".
+
+async def test_set_setting_fact_policy_on_readonly_key(db, wq, config):
+    # `ver` is read-only (not a writable setting) but is a collectable fact.
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "ver", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].key == "ver"
+    assert rows[0].desired is None
+    assert rows[0].policy is SettingPolicy.FACT
+
+
+async def test_set_setting_fact_policy_on_writable_key(db, wq, config):
+    # A writable key can be collected as a pure fact (observe, no desired/opinion).
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].policy is SettingPolicy.FACT
+    assert rows[0].desired is None
+
+
+async def test_set_setting_fact_policy_rejects_value(db, wq, config):
+    # A fact records the observed value; a desired value is contradictory.
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "name", "value": "Foo", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "fact" in resp["error"]
+
+
+async def test_set_setting_readonly_key_rejects_value(db, wq, config):
+    # `ver` is read-only — you can collect it as a fact but never set a value.
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "ver", "value": "1.2.3", "policy": "fact"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "read-only" in resp["error"]
+
+
+async def test_set_setting_readonly_key_rejects_enforce(db, wq, config):
+    # enforce/audit need a writable key with a desired value; a read-only fact key
+    # cannot be enforced.
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "ver", "policy": "enforce"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is False
+    assert "read-only" in resp["error"]
+
+
+async def test_set_setting_skip_parks_a_readonly_fact(db, wq, config):
+    # skip is a placeholder ("stop collecting for now") and is legal on a fact key.
+    node = await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_setting", "query": "test", "key": "neighbors", "policy": "skip"},
+        wq, db, config,
+    )
+
+    assert resp["ok"] is True
+    rows = await db.get_desired_settings(Scope.NODE, node.pubkey)
+    assert rows[0].policy is SettingPolicy.SKIP
+
+
 async def test_set_setting_rejects_invalid_default_policy(db, wq, config):
     await _seed_plain_node(db)
 
