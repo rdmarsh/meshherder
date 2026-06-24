@@ -12,11 +12,11 @@ migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit st
 bench-testing, via INSTALL's "Testing a feature branch" procedure). See the `use-branches-not-main`
 auto-memory.
 
-**Status (2026-06-24): FACTS-AS-POLICY F1–F4 DONE on branch `facts-as-policy` (pushed, not yet
-PR'd/merged). 888 tests pass, ruff clean, mypy 7 (pre-existing).** Base context: SLICE 8 merged +
-0.10.0 released on `main` (DB is the single source of truth; config.yaml carries only daemon
-settings). luna is running the sunset build (the operator plans a fresh luna reinstall with no data
-migration, so the facts breaking change is fine).
+**Status (2026-06-24): FACTS-AS-POLICY F1–F4 MERGED to `main` (`--no-ff` merge `5b4ec61`, branch
+deleted local + remote). 888 tests pass, ruff clean, mypy 7 (pre-existing).** Base context: SLICE 8
++ 0.10.0 already on `main` (DB is the single source of truth; config.yaml carries only daemon
+settings). The operator plans a fresh luna reinstall with no data migration, so the facts breaking
+change is fine.
 
 **Facts are now a fourth `SettingPolicy` (`enforce`/`audit`/`fact`/`skip`), superseding the earlier
 "scoped union" plan.** A fact is an audit-style observation with no desired value; resolution is the
@@ -33,9 +33,10 @@ normal Node > Group > Global. See DESIGN.md "Facts vs settings" for the full des
 - **F4 (`6b9f89b`)**: new `mch show NODE KEY` — per-scope rows, resolved policy/desired (+ source),
   observed value; read-only.
 
-**NEXT: (a) open a PR for `facts-as-policy` and merge to `main` (then a release cut: this is breaking
-— the `facts:` retirement); (b) F5 — bench-test free/batched/incidental facts on luna (gated on the
-luna reinstall), record in JOURNAL before any rule. See BACKLOG "Free / batched / incidental facts".**
+**NEXT: (a) cut the next release** — the `facts:` retirement is breaking, so a minor bump (0.11.0)
++ CHANGELOG move from Unreleased. **(b) F5** — bench-test free/batched/incidental facts on luna
+(gated on the luna reinstall), record in JOURNAL before any rule. See BACKLOG "Free / batched /
+incidental facts". The `facts` Unreleased CHANGELOG block is ready to become the release entry.
 
 _Slice-8 detail (kept for context):_
 
