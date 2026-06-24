@@ -2129,6 +2129,76 @@ async def test_unset_setting_leaves_other_keys(db, wq, config):
     assert [r.key for r in rows] == ["name"]
 
 
+# --- F4: mch show — explain one key's resolution for one node ---------------
+
+async def test_show_setting_resolves_node_over_global_with_observed(db, wq, config):
+    node = await _seed_plain_node(db)
+    # global desired txdelay=10, node overrides to 14; an observed value is recorded.
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="txdelay", desired="10",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey, key="txdelay", desired="14",
+        policy=SettingPolicy.ENFORCE, observed="14",
+    ))
+
+    resp = await _dispatch(
+        {"cmd": "show_setting", "query": "test", "key": "txdelay"}, wq, db, config
+    )
+
+    assert resp["ok"] is True
+    data = resp["data"]
+    assert data["configured"] is True
+    assert data["resolved"]["desired"] == "14"
+    assert data["resolved"]["desired_source"] == "node"
+    assert data["resolved"]["policy"] == "enforce"
+    assert data["resolved"]["observed"] == "14"
+    scopes = {s["scope"]: s for s in data["scopes"]}
+    assert scopes["global"]["desired"] == "10"
+    assert scopes["node"]["desired"] == "14"
+
+
+async def test_show_setting_fact_has_no_desired_reads_node_facts(db, wq, config):
+    node = await _seed_plain_node(db)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="ver", desired=None,
+        policy=SettingPolicy.FACT,
+    ))
+    await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
+
+    resp = await _dispatch({"cmd": "show_setting", "query": "test", "key": "ver"}, wq, db, config)
+
+    assert resp["ok"] is True
+    data = resp["data"]
+    assert data["configured"] is True
+    assert data["resolved"]["policy"] == "fact"
+    assert data["resolved"]["desired"] is None
+    assert data["resolved"]["observed"] == "v1.14.1"  # from node_facts
+
+
+async def test_show_setting_unconfigured_key(db, wq, config):
+    await _seed_plain_node(db)
+
+    resp = await _dispatch(
+        {"cmd": "show_setting", "query": "test", "key": "txdelay"}, wq, db, config
+    )
+
+    assert resp["ok"] is True
+    assert resp["data"]["configured"] is False
+    assert resp["data"]["scopes"] == []
+
+
+async def test_show_setting_unknown_node_errors(db, wq, config):
+    resp = await _dispatch({"cmd": "show_setting", "query": "ghost", "key": "ver"}, wq, db, config)
+    assert resp["ok"] is False
+    assert "not found" in resp["error"]
+
+
 # ------------------------------------------------------------------
 # clean_settings — orphaned observed setting rows
 # ------------------------------------------------------------------

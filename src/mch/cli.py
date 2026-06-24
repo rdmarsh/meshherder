@@ -2045,6 +2045,47 @@ def unset_setting(
     _scoped_target_echo("unset", key, "", data)
 
 
+@cli.command("show")
+@click.argument("node")
+@click.argument("key")
+@click.pass_context
+def show_setting(ctx: click.Context, node: str, key: str) -> None:
+    """Explain one KEY for one NODE: per-scope config, what resolves, what's observed.
+
+    \b
+    mch show NODE KEY
+
+    Shows the desired/policy row at each scope (global, the node's group, the node),
+    the resolved policy and desired value (Node > Group > Global), and the value mch
+    has observed. Read-only: it sends no mesh traffic.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "show_setting", "query": node, "key": key}))
+    target = data.get("label") or data.get("name") or data["pubkey"][:8]
+    resolved = data["resolved"]
+
+    click.echo(f"{key}  on  {target}  ({data['pubkey'][:12]})")
+    if not data["configured"]:
+        click.echo("  not configured for this node "
+                   "(no desired/policy row resolves at any scope)")
+    desired = resolved["desired"]
+    desired_str = repr(desired) if desired is not None else "-"
+    src = f"  (from {resolved['desired_source']})" if resolved["desired_source"] else ""
+    click.echo(f"  resolved:  policy={resolved['policy']}  desired={desired_str}{src}")
+    obs = resolved["observed"]
+    if obs is None:
+        click.echo("  observed:  (never read)")
+    else:
+        when = f"  [{resolved['observed_at']}]" if resolved["observed_at"] else ""
+        click.echo(f"  observed:  {obs!r}{when}")
+    if data["scopes"]:
+        click.echo("  scopes:")
+        for s in data["scopes"]:
+            label = s["scope"] if s["scope"] != "group" else f"group {s['scope_id']!r}"
+            sd = repr(s["desired"]) if s["desired"] is not None else "-"
+            sp = s["policy"] or "(inherit)"
+            click.echo(f"    {label:<16}  policy={sp:<9}  desired={sd}")
+
+
 # ---------------------------------------------------------------------------
 # plan
 # ---------------------------------------------------------------------------

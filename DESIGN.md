@@ -579,8 +579,9 @@ key is no longer configured, retaining the historical row until an explicit clea
   `mch clean facts` all follow each node's resolved fact set (`resolved_fact_keys`) instead of one
   global list. Added the single-observation invariant test (no key in both tables). The report/clean
   switch was folded in here (originally F4) to avoid a broken intermediate state.
-- **F4** — add a read-side `mch show KEY` (name TBD) that prints a key's resolved policy/desired/
-  observed across scopes. (The report/clean rework moved into F3.)
+- **F4 (done)** — added `mch show NODE KEY`: prints a key's per-scope desired/policy rows, the
+  resolved policy/desired (with the source scope), and the observed value. Read-only. (The report/
+  clean rework moved into F3.)
 - **F5 (separate, bench on luna)** — investigate free/batched/incidental facts; record in JOURNAL
   before turning any of it into a rule.
 

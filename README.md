@@ -335,8 +335,10 @@ the next sync (or `mch sync <node>`).
 mch set <prefix> txdelay 14          # node scope
 mch set --group solar txdelay 20     # group scope
 mch set --global default_policy audit
+mch set --global ver --policy fact   # collect a read-only fact (no value); policy: enforce/audit/fact/skip
 mch set <prefix> name_prefix "🌞 "    # directives: name_prefix, default_policy, via_radio
 mch unset <prefix> txdelay           # remove a DB-set value (observed state untouched)
+mch show <prefix> txdelay            # explain one key: per-scope rows, resolved value, observed
 mch import                           # preview seeding the DB from the daemon's config (dry run)
 mch import legacy.yaml --yes         # seed from an explicit file (settings + label/group inventory)
 mch export > backup.yaml             # complete fleet backup (inventory + desired state)
@@ -344,8 +346,9 @@ mch clean settings <prefix>          # drop observed rows for keys no longer des
 ```
 
 **Migrating an existing `config.yaml`:** on the running daemon, `mch import` (then `--yes`) to seed
-the DB, `mch export` to verify, then delete the `nodes:`/`groups:`/`global:` blocks from
-`config.yaml` (keep the daemon settings) and restart. When importing a *legacy* config (nodes given
+the DB, `mch export` to verify, then delete the `nodes:`/`groups:`/`global:`/`facts:` blocks from
+`config.yaml` (keep the daemon settings) and restart. Import folds a legacy `facts:` list into global
+`policy: fact` rows. When importing a *legacy* config (nodes given
 by short `pubkey_prefix`), a node must already be in the DB — seen as a favourited gateway contact —
 for import to resolve its full pubkey; unseen nodes are skipped with a warning until they appear.
 

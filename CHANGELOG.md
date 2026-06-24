@@ -15,6 +15,10 @@ and backlog history. Dates use the project repository's commit dates.
   removing the latent double-poll where a key listed as both a fact and a setting was read twice.
   "Configured facts" in the report and `mch clean facts` now follow each node's resolved fact set
   instead of one global list.
+- **New `mch show NODE KEY`** — the read-side complement to `mch set`/`mch unset`. It explains one
+  key for one node: the desired/policy row at each scope (global, the node's group, the node), the
+  resolved policy and desired value (Node > Group > Global) with which scope supplied it, and the
+  value mch has observed (from the settings or fact store). Read-only; sends no mesh traffic.
 - **Breaking: the flat top-level `facts:` list is retired from config.yaml.** It was the last
   desired-ish knob still living in config.yaml after the 0.10.0 sunset. The daemon now strict-loads
   and refuses to start if a `facts:` block remains (joining `nodes:`/`groups:`/`global:`). Migrate

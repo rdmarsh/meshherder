@@ -38,6 +38,7 @@ from mch.config import (
     desired_rows_to_config_dict,
     is_full_pubkey,
     normalize_directive_value,
+    resolve_desired,
     resolve_desired_configs,
     settable_keys,
     validate_directive_value,
@@ -52,6 +53,7 @@ from mch.queue import (
     OperationBusyError,
     WorkQueue,
     all_setting_keys,
+    resolve_policy,
     resolved_fact_keys,
 )
 from mch.report import (
@@ -427,6 +429,89 @@ async def _handle_unset_setting(
     await db.delete_desired_setting(scope, scope_id, key)
     data["key"] = key
     return {"ok": True, "data": data}
+
+
+async def _handle_show_setting(
+    req: dict[str, Any], db: Database, config: Config
+) -> dict[str, Any]:
+    """Explain one key for one node: how each scope sets it, what resolves, what's observed.
+
+    The read-side complement to `mch set`/`mch unset`. Resolution is Node > Group > Global,
+    so this shows the per-scope desired/policy rows that feed `resolve_desired`/`resolve_policy`
+    plus the value mch has actually observed (from the settings or node_facts store - a key
+    lives in exactly one, per the single-observation invariant). It sends no mesh traffic.
+    """
+    key = str(req.get("key") or "")
+    if not key:
+        return {"ok": False, "error": "missing setting key"}
+
+    node = await _resolve_node(str(req.get("query") or ""), db)
+    if not node:
+        return {"ok": False, "error": f"node {req.get('query')!r} not found"}
+
+    node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
+    configured = key in all_setting_keys(node_cfg, group_cfg, global_cfg)
+    resolved_policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
+    resolved_desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
+
+    # Which scope supplied the resolved desired value (first non-None, most specific wins).
+    desired_source: str | None = None
+    for scope_name, cfg_obj in (
+        ("node", node_cfg), ("group", group_cfg), ("global", global_cfg)
+    ):
+        sc = cfg_obj.settings.get(key) if cfg_obj else None
+        if sc and sc.desired is not None:
+            desired_source = scope_name
+            break
+
+    # Observed value: a key lives in exactly one store, so check both (settings then facts).
+    observed: str | None = None
+    observed_at: str | None = None
+    for setting in await db.get_settings(node.pubkey):
+        if setting.key == key:
+            observed = setting.observed
+            observed_at = setting.last_checked.isoformat() if setting.last_checked else None
+            break
+    else:
+        for fact in await db.get_fact_records(node.pubkey):
+            if fact.key == key:
+                observed = fact.value
+                observed_at = fact.collected_at.isoformat()
+                break
+
+    # Per-scope rows that exist for this key, for the resolution trace.
+    scopes: list[dict[str, Any]] = []
+    scope_lookups: list[tuple[str, Scope, str]] = [("global", Scope.GLOBAL, "")]
+    if node.group:
+        scope_lookups.append(("group", Scope.GROUP, node.group))
+    scope_lookups.append(("node", Scope.NODE, node.pubkey))
+    for scope_name, scope, scope_id in scope_lookups:
+        for row in await db.get_desired_settings(scope, scope_id):
+            if row.key == key:
+                scopes.append({
+                    "scope": scope_name,
+                    "scope_id": scope_id,
+                    "desired": row.desired,
+                    "policy": row.policy.value if row.policy else None,
+                })
+                break
+
+    return {"ok": True, "data": {
+        "key": key,
+        "pubkey": node.pubkey,
+        "label": node.label,
+        "name": node.name,
+        "group": node.group,
+        "configured": configured,
+        "resolved": {
+            "policy": resolved_policy.value,
+            "desired": resolved_desired,
+            "desired_source": desired_source,
+            "observed": observed,
+            "observed_at": observed_at,
+        },
+        "scopes": scopes,
+    }}
 
 
 async def _handle_import(
@@ -949,6 +1034,9 @@ async def _dispatch(
 
     if cmd == "unset_setting":
         return await _handle_unset_setting(req, db, config)
+
+    if cmd == "show_setting":
+        return await _handle_show_setting(req, db, config)
 
     if cmd == "import":
         return await _handle_import(req, db, config)
