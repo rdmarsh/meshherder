@@ -19,10 +19,11 @@ only daemon settings). The operator plans a fresh luna reinstall with no data mi
 breaking change is fine.
 
 **Tagging convention changed at 0.11.0:** earlier releases were not git-tagged; from 0.11.0 on,
-releases are tagged. `v0.11.0` annotated tag is pushed. The GitHub *Release object* could not be
-created from the sandbox (gh needs API auth the proxy doesn't inject — it only does git-over-HTTPS),
-so the operator creates it on the host: `gh release create v0.11.0 --notes-from-tag` (the tag
-annotation carries the notes), or via the Releases UI from the existing tag.
+releases are tagged. `v0.11.0` annotated tag is pushed and the GitHub *Release object* is published
+(2026-06-25) at https://github.com/rdmarsh/meshherder/releases/tag/v0.11.0, created with
+`gh release create v0.11.0 --notes-from-tag --verify-tag` (the tag annotation carries the notes).
+Note: the original release sandbox could not reach the GitHub API (only git-over-HTTPS); a later
+session with `gh` keyring auth created the object.
 
 **Facts are now a fourth `SettingPolicy` (`enforce`/`audit`/`fact`/`skip`), superseding the earlier
 "scoped union" plan.** A fact is an audit-style observation with no desired value; resolution is the
@@ -39,8 +40,7 @@ normal Node > Group > Global. See DESIGN.md "Facts vs settings" for the full des
 - **F4 (`6b9f89b`)**: new `mch show NODE KEY` — per-scope rows, resolved policy/desired (+ source),
   observed value; read-only.
 
-**NEXT: (a)** operator publishes the GitHub Release object for `v0.11.0` on the host (see tagging note
-above). **(b) F5** — bench-test free/batched/incidental facts on luna (gated on the luna reinstall),
+**NEXT: F5** — bench-test free/batched/incidental facts on luna (gated on the luna reinstall),
 record in JOURNAL before any rule. See BACKLOG "Free / batched / incidental facts". Also queued:
 scoped node scheduling (windows/cadence/drift/jitter) in BACKLOG, design agreed, not built.
 
