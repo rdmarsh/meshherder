@@ -3,37 +3,52 @@
 This document explains the design decisions behind mch for contributors and operators who want
 to understand why things work the way they do.
 
-## Source of truth
+## Source of truth: managing the daemon vs. managing the mesh
 
-**config.yaml is the source of truth for desired state.** The SQLite database reflects observed
-(actual) state. mchd never writes to config.yaml or secrets.yaml — those are operator-owned files.
+There is one bright line that decides where every piece of configuration lives:
+
+> **Managing the daemon lives in `config.yaml`. Managing the mesh lives in the DB (the CMDB side).**
+
+- **`config.yaml`** — how *this daemon instance* runs and connects: the gateway it talks to, where
+  its files are, how it paces itself, which features it exposes. Operator-owned, version-controllable,
+  per-deployment. mchd never writes to it.
+- **The SQLite DB** — the fleet itself: inventory, desired state (settings, directives, facts,
+  operations), and the observed state / history mch records. This is the CMDB. Edited by `mch`
+  commands (and, later, an HTTP API / web frontend), never by hand-editing YAML.
+- **`secrets.yaml`** — passwords and private keys, kept a 0600 file deliberately out of the DB (a
+  read-only/loopback HTTP API and web UI will read the DB; secrets must not be there). Operator-owned.
+
+**The test for "config or DB?":** *could two different daemons managing the same fleet legitimately
+hold different values?* If yes, it is per-daemon and belongs in `config.yaml` (a different gateway
+device, API port, or sync cadence). If no — it is a property of the fleet — it belongs in the DB.
 
 | Layer | Owns | Written by |
 |---|---|---|
-| `config.yaml` | Desired state: which nodes to manage, what settings to enforce, how to reach them | Operator |
-| `secrets.yaml` | Passwords, private keys | Operator |
-| SQLite DB | Observed state: last seen, facts collected, command history, sync schedule | mchd |
+| `config.yaml` | Daemon runtime + bootstrap: `gateway`, `scheduler`, `messenger`, `api`, paths (`db_path`/`socket_path`/`secrets_file`), `profiles_*` | Operator |
+| `secrets.yaml` | Passwords, private keys (0600) | Operator |
+| SQLite DB | Mesh/CMDB: inventory, desired state (settings, directives, facts, operations), observed state, history, schedule | mch / mchd |
 
-This matches the Ansible model: declare intent in files (version-controllable, reviewable); let
-the tool record what it observed. Wiping the DB loses history but not configuration — mchd
-rebuilds from config.yaml on the next startup.
+Two consequences fall out of the line:
+- **Bootstrap can't live in the DB.** The daemon reaches the DB-managed fleet *through* the gateway,
+  and it must know where the DB and socket are before opening them — so gateway connection config and
+  file paths are irreducibly `config.yaml`.
+- **`scheduler` is the one judgement call.** Pacing ("how hard to work the mesh") is policy-ish and
+  could be imagined as a DB global, but it is daemon-global behaviour, not node intent, so it stays in
+  `config.yaml` to keep the line clean. (`sync_interval_days` should also become hours — see BACKLOG.)
 
-mchd watches `config.yaml` and `secrets.yaml` and reloads them shortly after a file save. Reloading
-keeps the existing daemon process and gateway connection alive, updates the in-memory desired
-state, refreshes gateway contacts, and reseeds DB labels/groups from config. Invalid YAML is logged
-and ignored; the last valid in-memory config remains active.
+The desired-state keys `nodes:`/`groups:`/`global:`/`facts:` are still *accepted* by the parser only
+as the `mch import` on-ramp; the daemon strict-loads and errors if any is present (empty is tolerated),
+pointing at `mch import`. Dropping them from the parser entirely is a later cleanup, once no legacy
+configs remain to import.
 
-Future direction: keep this YAML-first model until there is a clear reason to migrate desired
-state into SQLite. If that changes, add explicit import/export/backup commands rather than
-silently making the DB the only copy. Secrets and private keys need a separate security decision
-before they are included in any ordinary backup/export workflow.
+### Historical: the earlier YAML-first model (superseded 2026-06-17)
 
-> **Update (2026-06-17): this is now superseded — the sunset is complete.** Desired state and
-> inventory live in the SQLite DB, edited by `mch` commands (and, later, an HTTP API / web frontend).
-> **config.yaml no longer carries desired state**: the daemon loads strict and errors on any leftover
-> `nodes:`/`groups:`/`global:` block, pointing at `mch import`. config.yaml keeps only daemon settings
-> (gateway, scheduler, messenger, api, paths, facts, profiles); secrets.yaml stays a file. The
-> YAML-first description above is retained for historical context only.
+mch originally made `config.yaml` the source of truth for *desired* state, with the DB holding only
+observed state — the Ansible model (declare intent in version-controlled files; let the tool record
+what it observed). The sunset (see below) moved inventory and desired state into the DB so they can be
+edited by `mch`/API/UI rather than round-tripped through YAML. The reload machinery still applies to
+the daemon settings that remain: mchd watches `config.yaml`/`secrets.yaml`, reloads shortly after a
+save without dropping the gateway connection, and ignores invalid YAML (keeping the last valid config).
 
 ## Desired state in the DB (sunset complete 2026-06-17, started 2026-06-11)
 
