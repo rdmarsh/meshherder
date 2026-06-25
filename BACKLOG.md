@@ -179,6 +179,37 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   traffic — `mch sync` (force) always re-reads regardless. Also keep cadence expressed in **hours**
   end-to-end (the schema is already `poll_hours`; audit any "days" surfaced in config/CLI/output and
   normalise to hours). Ties into the convergence/backoff signals already noted elsewhere in BACKLOG.
+- **Scoped node scheduling: availability windows + cadence + drift/jitter (design agreed 2026-06-25,
+  not built).** Move per-node scheduling into the DB, scoped global/group/node like settings/facts,
+  so a daemon swap never forgets a node's rhythm. This *strengthens* the daemon-vs-mesh bright line
+  (DESIGN.md "Source of truth"): a node's schedule is a property of the node (CMDB → DB), while
+  `inter_node_delay_seconds` is radio politeness for *this* gateway (per-daemon → stays config.yaml).
+  Keep two **separate** concepts — do not conflate them into one cron field:
+  - **Availability window** — *when a node CAN be reached.* Cron-ish fits here (e.g. `0 9-16 * * *`)
+    or a simpler `hours: 9-16`; the scheduler just won't schedule outside it. Killer case: daytime-only
+    solar nodes. Later: derive the window from the node's stored lat/lon (local sunrise/sunset) instead
+    of hand-set hours.
+  - **Cadence** — *how often to converge.* Keep this an **interval** (`every: 7h`), NOT a cron time,
+    because fixed wall-clock times (`0 9 * * *`) make every node hammer the same slot — the opposite
+    of rolling updates.
+  - **Drift + jitter** for rolling/coverage. Proposed knobs: `drift` (deterministic walk, e.g. shift
+    the contact time ~1h/day) and `jitter` (random ±%, e.g. 10). An interval **coprime with 24h**
+    (7/11/13/23h) naturally walks the time-of-day around the clock; that is not just load-spreading but
+    a **coverage strategy for intermittent nodes** — you eventually try every time-of-day and stop
+    systematically missing a node that is only up at one hour. Jitter is the standard anti-sync trick
+    (stops two nodes locking into the same slot). mch already serialises nodes via `inter_node_delay`,
+    so the win is intermittent-node coverage, not cross-fleet herd avoidance.
+  - **Measure cadence from the last *successful contact*, not the first attempt.** `next_sync_at`
+    should count from `last_connected` (when we actually reached the node), so a node we keep failing
+    to reach doesn't have its "every N hours" clock advanced by failed attempts. Failures keep their
+    own retry rhythm (existing unreachable handling); the regular cadence interval starts from real
+    contact.
+  - **Storage: keep ISO-8601 TEXT timestamps** (`last_connected`/`next_sync_at`, schema-wide).
+    Epoch INTEGER is marginally more efficient (8 bytes, integer compare, no parse for interval math)
+    but the difference is noise at this scale, and ISO is human-readable in raw `sqlite3` dumps; do not
+    migrate just for efficiency. Revisit only if scheduler arithmetic ever gets heavy.
+  Supersedes/extends the per-item cadence item above (they share the `poll_hours`→hours normalisation
+  and the convergence/backoff signals).
 - Extend `mch adopt` beyond the initial DB/contact seed: retain the discovery evidence used for
   adoption, expose adopted-radio/path caveats in status, and make follow-up path/radio repair
   steps explicit. (Partially done, Unreleased: adopt now installs a direct zero-hop route and runs
