@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.11.0 - 2026-06-25
+
 - **Facts are now a policy, not a separate `facts:` list.** `SettingPolicy` gains a fourth value,
   `fact`: read and record the observed value with no desired value and no write-back (the others
   stay `enforce`/`audit`/`skip`). A fact is just an observation mch has no opinion about, so facts

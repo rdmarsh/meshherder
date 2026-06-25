@@ -187,8 +187,11 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   Keep two **separate** concepts — do not conflate them into one cron field:
   - **Availability window** — *when a node CAN be reached.* Cron-ish fits here (e.g. `0 9-16 * * *`)
     or a simpler `hours: 9-16`; the scheduler just won't schedule outside it. Killer case: daytime-only
-    solar nodes. Later: derive the window from the node's stored lat/lon (local sunrise/sunset) instead
-    of hand-set hours.
+    solar nodes. Offer **named windows** so the operator picks intent rather than raw hours, e.g.
+    `DAY` (≈1h after sunrise to 1h before sunset), `NIGHT`, `GRAVEYARD` (e.g. 00:00–05:00). Give the
+    operator the choice both ways: solar nodes want `DAY` (power), but RF often propagates better at
+    night, so a mains node might prefer `NIGHT`. Later: derive `DAY`/`NIGHT` from the node's stored
+    lat/lon (local sunrise/sunset) instead of hand-set hours.
   - **Cadence** — *how often to converge.* Keep this an **interval** (`every: 7h`), NOT a cron time,
     because fixed wall-clock times (`0 9 * * *`) make every node hammer the same slot — the opposite
     of rolling updates.
