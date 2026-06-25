@@ -12,11 +12,17 @@ migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit st
 bench-testing, via INSTALL's "Testing a feature branch" procedure). See the `use-branches-not-main`
 auto-memory.
 
-**Status (2026-06-24): FACTS-AS-POLICY F1–F4 MERGED to `main` (`--no-ff` merge `5b4ec61`, branch
-deleted local + remote). 888 tests pass, ruff clean, mypy 7 (pre-existing).** Base context: SLICE 8
-+ 0.10.0 already on `main` (DB is the single source of truth; config.yaml carries only daemon
-settings). The operator plans a fresh luna reinstall with no data migration, so the facts breaking
-change is fine.
+**Status (2026-06-25): FACTS-AS-POLICY F1–F4 MERGED to `main` (`5b4ec61`) and RELEASED as 0.11.0
+(`8793829`, version-bump + CHANGELOG). 888 tests pass, ruff clean, mypy 7 (pre-existing).** Base
+context: SLICE 8 + 0.10.0 already on `main` (DB is the single source of truth; config.yaml carries
+only daemon settings). The operator plans a fresh luna reinstall with no data migration, so the facts
+breaking change is fine.
+
+**Tagging convention changed at 0.11.0:** earlier releases were not git-tagged; from 0.11.0 on,
+releases are tagged. `v0.11.0` annotated tag is pushed. The GitHub *Release object* could not be
+created from the sandbox (gh needs API auth the proxy doesn't inject — it only does git-over-HTTPS),
+so the operator creates it on the host: `gh release create v0.11.0 --notes-from-tag` (the tag
+annotation carries the notes), or via the Releases UI from the existing tag.
 
 **Facts are now a fourth `SettingPolicy` (`enforce`/`audit`/`fact`/`skip`), superseding the earlier
 "scoped union" plan.** A fact is an audit-style observation with no desired value; resolution is the
@@ -33,10 +39,10 @@ normal Node > Group > Global. See DESIGN.md "Facts vs settings" for the full des
 - **F4 (`6b9f89b`)**: new `mch show NODE KEY` — per-scope rows, resolved policy/desired (+ source),
   observed value; read-only.
 
-**NEXT: (a) cut the next release** — the `facts:` retirement is breaking, so a minor bump (0.11.0)
-+ CHANGELOG move from Unreleased. **(b) F5** — bench-test free/batched/incidental facts on luna
-(gated on the luna reinstall), record in JOURNAL before any rule. See BACKLOG "Free / batched /
-incidental facts". The `facts` Unreleased CHANGELOG block is ready to become the release entry.
+**NEXT: (a)** operator publishes the GitHub Release object for `v0.11.0` on the host (see tagging note
+above). **(b) F5** — bench-test free/batched/incidental facts on luna (gated on the luna reinstall),
+record in JOURNAL before any rule. See BACKLOG "Free / batched / incidental facts". Also queued:
+scoped node scheduling (windows/cadence/drift/jitter) in BACKLOG, design agreed, not built.
 
 _Slice-8 detail (kept for context):_
 
