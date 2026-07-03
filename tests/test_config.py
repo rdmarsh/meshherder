@@ -927,9 +927,12 @@ def test_global_operations_are_parsed(tmp_path):
     assert cfg.global_settings.operations[0].every_hours == 6
 
 
+_EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+
+
 def test_example_config_omits_legacy_region_allowf():
-    """The shipped example should match v1.15+ region command requirements."""
-    example = Path(__file__).resolve().parents[1] / "examples" / "config.example.yaml"
+    """The shipped desired-state example should match v1.15+ region command requirements."""
+    example = _EXAMPLES_DIR / "desired.example.yaml"
     raw = yaml.safe_load(example.read_text())
     commands = [
         op.get("command", "")
@@ -940,8 +943,8 @@ def test_example_config_omits_legacy_region_allowf():
 
 
 def test_example_config_includes_region_hierarchy_examples():
-    """The shipped example should show the common AU region naming pattern."""
-    example = Path(__file__).resolve().parents[1] / "examples" / "config.example.yaml"
+    """The shipped desired-state example should show the common AU region naming pattern."""
+    example = _EXAMPLES_DIR / "desired.example.yaml"
     raw = yaml.safe_load(example.read_text())
     commands = [
         op.get("command", "")
@@ -952,6 +955,32 @@ def test_example_config_includes_region_hierarchy_examples():
     assert "region put au-nsw" in commands
     assert "region put au-nsw-syd" in commands
     assert "region put au-vic" in commands
+
+
+def test_shipped_config_example_loads_strict():
+    """The daemon loads config.yaml with strict=True and refuses desired-state blocks.
+
+    The shipped config.example.yaml is what INSTALL.md/README tell operators to copy to
+    /etc/meshherder/config.yaml, so it MUST load strict or a fresh install can't start mchd
+    (see RECOMMENDATIONS B1). This test is the regression guard against re-adding a
+    nodes:/groups:/global:/facts: block to the daemon example.
+    """
+    example = _EXAMPLES_DIR / "config.example.yaml"
+    cfg = load(example, load_secrets=False, strict=True)
+    # Sanity: it still carries the daemon settings it is supposed to.
+    assert cfg.gateway.device
+    assert cfg.scheduler is not None
+
+
+def test_shipped_desired_example_is_importable():
+    """desired.example.yaml is `mch config import` input: parsed leniently, carries inventory."""
+    example = _EXAMPLES_DIR / "desired.example.yaml"
+    cfg = load(example, load_secrets=False)  # lenient, as the importer loads it
+    assert cfg.nodes, "desired example should define managed nodes"
+    assert cfg.groups, "desired example should define groups"
+    # And it must NOT be installable as a daemon config.
+    with pytest.raises(ValueError, match="desired state"):
+        load(example, load_secrets=False, strict=True)
 
 
 # ------------------------------------------------------------------

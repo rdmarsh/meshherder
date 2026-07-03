@@ -5,6 +5,16 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Docs/examples: finish the config.yaml → DB sunset.** Split the shipped example into
+  `examples/config.example.yaml` (daemon settings only — now loads with the strict daemon, so a
+  fresh install can start) and `examples/desired.example.yaml` (nodes/groups/global/facts,
+  documented as `mch config import` input). Rewrote the README Configuration and workflow sections,
+  INSTALL notes, and CLI help around the DB-primary model: no more "paste into config.yaml" flows or
+  "config.yaml is the source of truth" wording. `mch config suggest` now prints runnable
+  `mch config set` commands instead of a config.yaml block. Reworded the stale fleet-status issue
+  headings that still named config.yaml. Added a regression test that strict-loads the shipped
+  daemon example so this can't regress.
+
 ## 0.20.1 - 2026-07-03
 
 - **New `mch daemon status` and `mch daemon logs`.** Thin read-only wrappers over

@@ -73,17 +73,17 @@ Think Ansible for your nodes, running continuously in the background.
   in the run). Each node is visited at most once per `sync_interval_days`, spread randomly across
   the window.
 - **Open-node detection** — mchd warns when a node syncs with no ACL protection (no password
-  configured, no login cached). Flagged in the daemon log and in `mch issues` so you know which
-  nodes anyone on the mesh can freely command.
+  configured, no login cached). Flagged in the daemon log and in `mch fleet status` so you know
+  which nodes anyone on the mesh can freely command.
 - **`mch node exec`** — run one-off MeshCore CLI commands against any managed node without adding them
   to config. Destructive commands (reboot, clkreboot) require confirmation; irreversible commands
   (erase, set prv.key) are blocked.
 - **`mch node new`** — guided wizard to add a fresh or replacement MeshCore node. Pauses
   the sync queue, switches to the factory default frequency, discovers the node, generates or restores
   a managed private key, pushes name/password/radio config, verifies the expected public key after
-  reboot, then prints ready-to-paste snippets for `config.yaml` and `secrets.yaml`. No need to
-  stop mchd.
-- **`mch` CLI** — check daemon status, list nodes, force a sync, see nodes not yet in config.
+  reboot, then prints an importable `nodes:` doc (apply with `mch config import`) and the
+  `secrets.yaml` snippet. No need to stop mchd.
+- **`mch` CLI** — check daemon status, list nodes, force a sync, see gateway contacts not yet managed.
 - **Read-only fleet API** — optional loopback HTTP JSON API with normalized node health, settings
   actions, facts, issues, plan data, and logs, ready for a later dashboard/map UI.
 
@@ -100,17 +100,24 @@ recommended udev rule, and upgrades.
 
 ## Configuration
 
-Copy `examples/config.example.yaml` to `/etc/meshherder/config.yaml` and edit it. The example file
-documents every available option with comments.
+There are two kinds of state, and they live in two different places:
 
-`config.yaml` and `secrets.yaml` are the source of truth for desired state. The SQLite database is
-observed state: last seen times, facts, command history, and sync schedule. `mchd` watches both YAML
-files and reloads them automatically shortly after they change. You can also send `SIGHUP` to the
-daemon to force a reload. Invalid YAML is rejected and the previous in-memory config stays active.
-`mchd` never edits `config.yaml` or `secrets.yaml`; commands such as `mch node contacts` and
-`mch node new` print snippets for the operator to review and paste.
+- **Daemon settings** — the gateway device, scheduler, messenger, HTTP API, and file paths — live in
+  `config.yaml`. Copy `examples/config.example.yaml` to `/etc/meshherder/config.yaml` and edit it;
+  the example documents every option with comments. `mchd` watches `config.yaml` and `secrets.yaml`
+  and reloads them shortly after they change (or on `SIGHUP`). Invalid YAML is rejected and the
+  previous in-memory config stays active.
+- **Desired state and inventory** — which nodes are managed, their groups and labels, the global and
+  per-group defaults, the facts collected, and every desired setting — live in the **SQLite
+  database**. You edit them with `mch config set` / `mch config unset` (see *Editing desired state in
+  the database* below), and back them up with `mch config export`.
 
-A minimal working config:
+The daemon **refuses to start** if `config.yaml` still carries a `nodes:`, `groups:`, `global:`, or
+`facts:` desired-state block — those moved to the DB. If you have an older config, migrate it once
+with `mch config import` (see *Migrating an existing `config.yaml`* below), then strip those blocks.
+`mchd` never edits `config.yaml` or `secrets.yaml`.
+
+A minimal working `config.yaml` (daemon settings only):
 
 ```yaml
 gateway:
@@ -125,28 +132,19 @@ gateway:
 scheduler:
   sync_interval_days: 1
   inter_node_delay_seconds: 120
-
-global:
-  settings:
-    owner.info: "Managed with Mesh Herder"
-
-nodes:
-  - pubkey_prefix: aabbccdd
-    label: MyRepeater
-    settings:
-      name:
-        desired: "My Repeater"
-        policy: enforce
 ```
 
-Run `mch node contacts` to list repeater nodes visible to the gateway that are not yet in your config,
-with pubkey prefixes ready to paste in.
+With the daemon running, bring nodes under management and set their desired state in the DB — see
+*Editing desired state in the database* and *Commissioning a new node* below. In short:
+`mch node adopt` / `mch node new` add a node to the inventory, then `mch config set` records desired
+settings. Run `mch node contacts` to list repeater nodes visible to the gateway that are not yet
+managed.
 
 Settings default to `audit`: mchd reads and reports drift, but does not write to a node unless the
-setting, node, group, or top-level `global:` block explicitly says `policy: enforce` or
-`default_policy: enforce`. Desired values resolve from `global:` to group to node, with the most
-specific value winning. Prefer per-setting `policy: enforce` while bringing a node under management;
-use `default_policy: enforce` only where most declared settings should be written.
+setting, node, group, or global scope explicitly has `policy: enforce` (or `default_policy: enforce`).
+Desired values resolve from global to group to node, with the most specific value winning. Prefer
+per-setting `--policy enforce` while bringing a node under management; use `default_policy enforce`
+only where most declared settings should be written.
 
 **Passwords:** nodes that require a login go in `secrets.yaml` (owned by `mch:mch`, mode 0600):
 
@@ -190,9 +188,9 @@ Avoid relying only on `nodes.default.password` during a rotation. A per-node pas
 you an explicit record of the credential that node should accept and avoids accidentally applying a
 fleet-wide password assumption to hardware that has drifted.
 
-As a rule of thumb: `config.yaml` is for ordinary desired state that mchd may audit or enforce;
-`secrets.yaml` is for credentials and identity material mchd can use to authenticate or replace
-hardware. Secrets are not treated as normal drift-corrected settings. The exception is
+As a rule of thumb: desired state (audited or enforced by mchd) lives in the DB, edited with
+`mch config set`; `secrets.yaml` is for credentials and identity material mchd can use to
+authenticate or replace hardware. Secrets are not treated as normal drift-corrected settings. The exception is
 commissioning/replacement, where mchd intentionally sends the stored password or `prv_key` to
 blank hardware as mesh commands as part of taking ownership of that node. It still does not edit
 the YAML files.
@@ -242,26 +240,24 @@ nodes:
 ### First run — discover and add nodes
 
 1. Plug in the gateway node and start mchd.
-2. Run `mch node contacts` to list repeater nodes the gateway can already see but that aren't in your
-   config yet. Each entry prints ready-to-paste snippets:
+2. Run `mch node contacts` to list repeater nodes the gateway can already see but that aren't yet
+   managed in the DB. Each entry shows the full pubkey and the ready-to-run `mch node adopt`
+   command.
+3. Bring a node under management directly (no file editing):
 
 ```
-# ── MySite-East ─────────────────────────────────────────────────
-# full pubkey: aabbccdd1122...
-
-# config.yaml — append to the 'nodes:' section:
-  - pubkey_prefix: aabbccdd
-    label: "MySite-East"
-    group:           # assign to a group, or remove this line
-
-# secrets.yaml — append to the 'nodes:' section:
-  aabbccdd: ""     # add password if required, or leave blank
+mch node adopt aabbccdd1122... --radio 915.075,125,9,5 --label MySite-East
 ```
 
-3. Copy the snippets you want into your config files and fill in any passwords. mchd hot-reloads
-   the files shortly after save; you can also send `SIGHUP` or restart mchd to force a reload.
-4. Run `mch fleet status` to confirm the node is now known, then `mch fleet sync <prefix>` to sync it
+   `adopt` adds the node to the DB inventory, installs a direct route, and confirms it answers.
+   If the node needs a login password, add it to `secrets.yaml` keyed by its pubkey prefix.
+4. Record any desired settings with `mch config set` (see *Editing desired state in the database*),
+   for example `mch config set MySite-East name "My Repeater" --policy enforce`.
+5. Run `mch fleet status` to confirm the node is now known, then `mch fleet sync <prefix>` to sync it
    immediately without waiting for the scheduler.
+
+   To onboard many nodes at once, write them into an `examples/desired.example.yaml`-style file and
+   seed the DB with `mch config import <file> --yes` instead of adopting each one.
 
 ### Commissioning a new node
 
@@ -275,12 +271,13 @@ stopping mchd. The wizard supports two modes:
 3. Enter the label, group, mesh-visible name, target frequency, and admin password.
 4. The daemon discovers the node, generates and sets a new private key, sets the name, password,
    and radio, then reboots the node.
-5. `mch node new` prints ready-to-paste snippets for both `config.yaml` and `secrets.yaml`.
-   Copy them into your config files.
+5. `mch node new` prints an importable `nodes:`/`groups:` YAML doc (save it to a file) and the
+   `secrets.yaml` snippet.
 6. Commissioning verifies that the generated public key is visible on the target frequency before
    returning success.
-7. Commit the config/secrets edits, restart mchd, then run `mch fleet sync <prefix>` if you want to sync
-   immediately.
+7. Add the password to `secrets.yaml`, reload mchd so it seeds the new node into the DB from gateway
+   favourites, then `mch config import <file> --yes` to record the desired state. Run
+   `mch fleet sync <prefix>` if you want to sync immediately.
 
 **Replacement node** — restoring a known identity onto new hardware:
 
@@ -302,19 +299,19 @@ nodes commissioned by mch, this was printed in the original `secrets.yaml` snipp
 ### Building a node on the bench
 
 Power the node on near the gateway. MeshCore nodes broadcast advertisements on startup; within a
-minute or two the gateway will have stored the contact. Run `mch node contacts` again to see it, copy the
-snippet, add it to config, and restart mchd. If the node needs a login password, add it to
-`secrets.yaml` before syncing.
+minute or two the gateway will have stored the contact. Run `mch node contacts` again to see it,
+then bring it under management with the printed `mch node adopt` command. If the node needs a login
+password, add it to `secrets.yaml` before syncing.
 
 ### Day-to-day checks
 
 ```
 mch fleet status                  # fleet view: state, label, group, firmware, neighbours, last seen
 mch fleet status <label|prefix>   # one match → detail view; multiple matches → filtered table
-mch config validate                # validate /etc/meshherder/config.yaml
+mch config validate                # validate the daemon's /etc/meshherder/config.yaml
 mch config suggest                    # suggested txdelay for every node based on neighbour count
-mch config suggest <label|prefix>     # full suggestions + paste-ready config block
-mch node contacts                # nodes visible to the gateway but not yet in config
+mch config suggest <label|prefix>     # full suggestions + the `mch config set` commands to apply them
+mch node contacts                # gateway contacts not yet managed in the DB
 mch node discover --radio F,B,S,C  # active bounded scan on a temporary gateway radio
 ```
 
@@ -325,8 +322,8 @@ so newly added firmware reads can be evaluated before mch metadata catches up.
 ### Editing desired state in the database
 
 Desired state and inventory live in the SQLite database; `config.yaml` carries only daemon settings
-(gateway, scheduler, messenger, api, paths, facts, profiles). **The daemon refuses to start if
-`config.yaml` still contains a `nodes:`, `groups:`, or `global:` desired-state block** — it points
+(gateway, scheduler, messenger, api, paths, profiles). **The daemon refuses to start if
+`config.yaml` still contains a `nodes:`, `groups:`, `global:`, or `facts:` desired-state block** — it points
 you at `mch config import`. The DB is edited directly by `mch` (and, later, an HTTP API and web UI). Writes
 are synchronous, so `mch fleet status <node>` shows the new intent immediately; convergence still waits for
 the next sync (or `mch fleet sync <node>`).
@@ -613,8 +610,10 @@ future green/red map dashboard should consume; the API never contacts nodes or m
 
 ### Changing a setting fleet-wide
 
-Add the setting to a group in `config.yaml`, assign nodes to the group, restart mchd, then run
-`mch fleet sync` to push the change to all nodes without waiting for the scheduler.
+Set the value at group or global scope in the DB — `mch config set --group repeaters powersaving on
+--policy enforce`, or `mch config set --global …` for the whole fleet — then run `mch fleet sync` to
+push the change to all nodes without waiting for the scheduler. (Assign a node to a group with
+`mch config import` or during commissioning.)
 
 ## CLI reference
 
@@ -645,7 +644,7 @@ mch node discover --radio R --unknown-only  Hide fully managed discovery results
 mch node adopt PUBKEY --radio R    Add a discovered running node to DB + gateway contact (direct route)
 mch node probe <node> --radio R [--login] [--advert]  Read-only reachability check on a given radio
 mch config suggest                      Suggested txdelay for all nodes based on neighbour count
-mch config suggest <label|prefix>       Full suggestions + paste-ready config block for one node
+mch config suggest <label|prefix>       Full suggestions + the `mch config set` commands for one node
 mch fleet logs                      Recent per-node activity across all nodes
 mch fleet logs <prefix>             Activity for one node
 mch node contacts                  Repeater nodes visible to the gateway not yet managed in the DB
@@ -656,7 +655,7 @@ mch node retire <label|prefix>     Stop managing a node: skip sync + unfavourite
 mch node unretire <label|prefix>   Return a retired node to management (re-favourite + reconverge)
 mch node prune                     List retired nodes (hard-delete candidates)
 mch node prune --yes               Hard-delete retired nodes' local DB state
-mch node clean facts --all         List cached facts no longer present in facts:
+mch node clean facts --all         List cached facts no longer configured as fact-policy keys
 mch node clean facts NODE --fact K Delete one stale fact key with --yes
 mch node remove <label|prefix>     Delete one node's local DB state (prefer mch node retire)
 mch fleet sync                      Trigger an immediate sync cycle (respects rate limiting)

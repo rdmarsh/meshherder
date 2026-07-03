@@ -1114,7 +1114,7 @@ def test_status_shows_unseen_config_nodes_section():
     result = _run(["fleet", "status"], _status_resp(unseen_nodes=[
         {"pubkey_prefix": "deadbeef", "label": "wrong"}
     ]))
-    assert "unseen config nodes" in result.output
+    assert "unseen nodes" in result.output
     assert "deadbeef" in result.output
     assert "wrong" in result.output
 
@@ -2043,7 +2043,9 @@ def test_suggest_detail_single_node():
     assert result.exit_code == 0
     assert "neighbours:" in result.output
     assert "rooftop" in result.output
-    assert "config.yaml" in result.output
+    # Suggest emits runnable `mch config set` commands (desired state lives in the DB now).
+    assert "mch config set site-a" in result.output
+    assert "--policy enforce" in result.output
 
 
 def test_suggest_no_neighbour_data():

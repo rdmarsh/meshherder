@@ -59,6 +59,10 @@ sudo usermod -aG dialout mch
 sudo install -d -o root -g mch -m 750 /etc/meshherder
 
 # Config and secrets
+# config.example.yaml holds daemon settings only (gateway, scheduler, messenger, api, paths).
+# Desired state (managed nodes, groups, global defaults, facts) lives in the DB, not this file —
+# the daemon refuses to start if config.yaml carries nodes:/groups:/global:/facts: blocks. Seed
+# desired state after first start with `mch config import` (see examples/desired.example.yaml).
 sudo install -o root -g mch -m 640 examples/config.example.yaml /etc/meshherder/config.yaml
 sudo install -o mch -g mch -m 600 examples/secrets.example.yaml /etc/meshherder/secrets.yaml
 

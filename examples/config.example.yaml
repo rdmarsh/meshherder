@@ -1,10 +1,17 @@
 # mch - Mesh Herder
-# Configuration reference — copy to /etc/meshherder/config.yaml and trim to what you need.
+# Daemon configuration reference — copy to /etc/meshherder/config.yaml and trim to what you need.
 #
 # mch is a daemon (mchd) that manages fleets of MeshCore repeater nodes.
 # It connects via a locally attached gateway node (USB serial), sends remote CLI
 # commands across the mesh, and keeps each managed node in its declared desired state.
 # Think Ansible for your nodes — without needing SSH or IP connectivity to any of them.
+#
+# This file holds DAEMON SETTINGS ONLY: the gateway, scheduler, messenger, HTTP API,
+# and file paths. Desired state — the inventory of managed nodes, their groups, the
+# global defaults, and the facts to collect — lives in the SQLite database, not here.
+# The daemon refuses to start if this file still carries `nodes:`, `groups:`, `global:`,
+# or `facts:` blocks. See examples/desired.example.yaml for that material and import it
+# with `mch config import`.
 #
 # Project: https://github.com/rdmarsh/meshherder
 # Docs:    https://github.com/rdmarsh/meshherder#readme
@@ -74,21 +81,6 @@ secrets_file: /etc/meshherder/secrets.yaml   # optional; defaults to secrets.yam
 # profiles_file: /etc/meshherder/profiles.yaml
 # profiles_url:  https://raw.githubusercontent.com/rdmarsh/meshherder/main/src/mch/data/profiles.yaml
 
-# Facts collected from every node each sync cycle (read-only CMDB data).
-# All fact commands run within a single node session; inter_node_delay_seconds
-# sits between nodes, not between individual fact commands. 'ver' and 'board'
-# use the bare command; most other keys use 'get <key>'. `mch config validate` warns
-# about unregistered fact keys and suggests close known names, but permits them
-# so newly introduced firmware reads can still be investigated deliberately.
-facts:
-  - ver          # firmware version, e.g. "v1.14.1-467959c (Build: 20-Mar-2026)"
-  - board        # hardware name, e.g. "T-Beam Supreme"
-  - role         # node role: "repeater", "room server", etc.
-  - owner.name   # operator name set on the node
-  - lat          # latitude - stored per-node for network planning and mapping tools
-  - lon          # longitude
-  - neighbors    # neighbour count - used by 'mch config suggest' to suggest txdelay settings
-
 # Messenger: incoming DM commands and cycle announcements.
 messenger:
   # Only nodes whose public key starts with one of these prefixes can issue DM
@@ -114,201 +106,3 @@ messenger:
 #   enabled: true
 #   host: 127.0.0.1
 #   port: 8743
-
-# Setting policies control what mchd does when it checks a setting on a node.
-# Checks happen at each scheduled sync cycle for the node - not continuously.
-# When a node's turn comes up in the scheduler, mchd reads the current value
-# and acts according to the policy:
-#
-#   enforce - if the current value differs from 'desired', write the desired
-#             value. The node will be corrected at its next sync cycle.
-#   audit   - read the current value and compare to 'desired'; log drift but
-#             never write. Use this to track settings you manage manually.
-#   skip    - do not read or write this key at all. Use for settings you want
-#             to leave completely alone.
-#
-# The hardcoded fallback is audit. mchd only writes when a setting, node, group,
-# or global block explicitly says policy: enforce or default_policy: enforce.
-#
-# The 'default_policy' on global, group, or node config applies to every key
-# that does not have its own explicit policy. Individual keys can override the
-# default. Prefer per-setting policy while introducing a node or mixed group.
-# Use default_policy: enforce only where most declared settings should be written.
-
-# Global: shared defaults for every configured node, including nodes that do not
-# belong to a group. Settings and reachability resolve Node > Group > Global;
-# using groups is optional. This block supports the same shared setting and
-# policy fields as a group, except for a group name.
-global:
-  default_policy: audit
-  # Optional fleet-wide reachability radio. Use only when most managed nodes are contacted
-  # on this channel; group and node via_radio values override it. Coding rate is printed
-  # as part of a complete radio config, but CR differences alone do not prevent reception.
-  # via_radio: "916.575,62.5,7,8"
-  settings:
-    # Visible to guest logins and remote operators. Keep it operator-friendly.
-    # URLs are clickable when someone logs in as guest. If you want a clickable
-    # project attribution, use:
-    #   owner.info: "Managed with https://meshherder.com"
-    owner.info: "Managed with Mesh Herder"
-    radio: "915.075,125,9,5"
-  # Optional fleet-wide policy overrides, identical to group setting_overrides:
-  # setting_overrides:
-  #   powersaving:
-  #     policy: skip
-
-# Groups: shared settings and policies applied to all nodes in the group.
-# A node inherits global settings, then its group settings, then applies its
-# own per-node overrides on top. Groups are optional - ungrouped nodes still
-# inherit global settings and can apply per-node overrides.
-groups:
-  - name: default
-    default_policy: audit
-    settings:
-      flood.advert.interval: "47"  # hours
-      advert.interval: "238"       # minutes
-      multi.acks: "1"
-      path.hash.mode: "1"
-
-  - name: repeaters
-    default_policy: enforce
-    # Optional reachability radio inherited by group members unless overridden on a node.
-    # This is not the desired `settings.radio` value and not a MeshCore routing path.
-    # A different freq, bw, or sf selects another channel; CR alone does not.
-    # via_radio: "916.575,62.5,7,8"
-    #
-    # Optional name prefix prepended to each member's desired name (settings.name),
-    # usually an emoji marking the group on the map. Resolves Node > Group > Global.
-    # No space is added - put one in the prefix if you want it (e.g. "REP "). A node
-    # with no desired name gets nothing prefixed. The combined prefix+name must fit the
-    # 31-byte UTF-8 firmware name cap (emoji are 3-4 bytes each); mchd refuses to start
-    # if it would overflow, because the node would silently truncate and never converge.
-    # name_prefix: "📡"   # satellite-antenna emoji
-    settings:
-      # Two ways to configure a setting key:
-      #
-      # Short form - just the desired value; policy comes from the group/node default:
-      #   owner.info: "Managed with Mesh Herder"
-      #
-      # Long form - desired value plus an explicit policy and/or check frequency:
-      #   owner.info:
-      #     desired: "Managed with Mesh Herder"
-      #     policy: enforce
-      #     poll_hours: 12
-      #
-      # Use the short form when you are happy with the group's default policy.
-      owner.info: "Managed with Mesh Herder"
-      powersaving: "on"
-
-  - name: solar-nodes
-    default_policy: audit   # read and compare, never write
-    settings:
-      owner.info:
-        desired: "Solar - managed with Mesh Herder"
-        policy: enforce     # enforce this key even though the group default is audit
-    setting_overrides:
-      # setting_overrides let you apply a policy to a key for the whole group
-      # without specifying a desired value. Useful when nodes in the group may
-      # have different values for a key, but you want the same handling for all
-      # of them - e.g. "leave this key alone on every node in this group".
-      powersaving:
-        policy: skip        # never read or write powersaving on solar nodes
-
-# Nodes: one entry per managed node.
-# pubkey_prefix: at least 8 hex characters of the node's public key.
-# Run 'mch node contacts' to see nodes visible to the gateway with their public keys.
-nodes:
-
-  # Minimal entry: group and label, inherits all group settings and policy.
-  - pubkey_prefix: aabbccdd
-    label: SiteA-Rooftop
-    group: repeaters
-
-  # Minimal ungrouped entry: inherits global settings and policy directly.
-  - pubkey_prefix: bbccddee
-    label: SiteA-Ungrouped
-
-  # Per-node setting overrides layered on top of group settings.
-  # Settings defined here are merged with the group settings; the node entry
-  # wins on any key that appears in both.
-  - pubkey_prefix: eeff0011
-    label: SiteB-Tower
-    group: repeaters
-    settings:
-      owner.info: "SiteB - managed with Mesh Herder"
-      tx:
-        desired: "high"
-        policy: enforce
-        # poll_hours: how often mchd reads this key to check compliance,
-        # independently of the main sync cycle. Default: every sync cycle.
-        poll_hours: 12
-
-  # Node on a non-default frequency.
-  # 'via_radio:' tells mchd to temporarily switch the gateway to this radio tuple to reach
-  # the node, run the full sync, then restore the gateway's home frequency.
-  # The node is otherwise managed identically to any other node.
-  # CR is included in the transmitted tuple but a CR-only difference does not trigger a switch.
-  #
-  # Short form (comma-separated: freq,bw,sf,cr) - same format as settings.radio.desired:
-  - pubkey_prefix: 2fd9c7bb
-    label: SiteC-Valley
-    group: repeaters
-    via_radio: "916.575,62.5,7,8"   # freq MHz, bw kHz, sf, cr
-  #
-  # Long form (explicit keys) - useful when you want to annotate each value:
-  # - pubkey_prefix: 2fd9c7bb
-  #   label: SiteC-Valley
-  #   group: repeaters
-  #   via_radio:
-  #     freq: 916.575   # MHz
-  #     bw: 62.5        # kHz
-  #     sf: 7
-  #     cr: 8
-
-  # Node with recurring operations.
-  # Operations are one-shot commands run on a schedule - distinct from settings,
-  # which enforce a desired state. An operation just fires a command and records
-  # whether it succeeded. 'every_hours' sets the minimum gap between runs; mchd
-  # will run the command if it has not run successfully within that window.
-  #
-  # Do not use recurring operations for admin password rotation. mchd stores one
-  # current admin password per node in secrets.yaml; change passwords as an
-  # operator action, edit secrets.yaml immediately, reload mchd, and confirm
-  # with `mch fleet sync <prefix>`. mchd never edits config.yaml or secrets.yaml.
-  - pubkey_prefix: 11223344
-    label: SiteD-Remote
-    group: solar-nodes
-    operations:
-      # Region commands are raw CLI operations, not normal `set <key> <value>`
-      # settings. Use a long interval if these are one-time commissioning
-      # commands that should not be repeated in normal operation.
-      # MeshCore v1.15.0 and newer do not need matching `region allowf`
-      # commands; `region put` plus `region save` is enough.
-      # The default scope can be managed separately as a normal setting named
-      # `region.default` once verified on your firmware.
-      - command: region put au
-        every_hours: 87600   # 10 years
-      - command: region put au-nsw
-        every_hours: 87600
-      - command: region put au-nsw-syd
-        every_hours: 87600
-      - command: region put au-vic
-        every_hours: 87600
-      - command: region save
-        every_hours: 87600
-      - command: clock sync
-        every_hours: 6       # run if not run in the last 6 hours
-      - command: reboot
-        every_hours: 168     # run weekly (168 hours = 7 days)
-        fire_and_forget: true  # node reboots before it can reply; treat no-response as success
-
-  # Fully standalone node with no group.
-  - pubkey_prefix: 55667788
-    label: SiteE-Standalone
-    default_policy: enforce
-    settings:
-      owner.info:
-        desired: "Standalone - mch"
-        policy: enforce
-      powersaving:
-        policy: skip

@@ -302,6 +302,12 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 - Persist "configured node not visible to gateway" warnings in `mch logs`, not only the journal.
 - Make `mch suggest <node>` show differences from current configuration and consider geographic
   separation when suggesting settings for nearby nodes.
+- Remove the dead `ghosts`/`unseen_nodes` issue categories. Post-sunset `report.py` always sets
+  `configured=True` and `unseen=[]`, so these two issue sections can never populate; the CLI render
+  paths (`_render_issue_sections`, `_filter_ghosts`, `_filter_unseen_nodes`), the `legacy_status`
+  spread, the `_issues_report`/`_summary` fields, and their tests are all dead weight. Phase-1 doc
+  pass (2026-07-03) only reworded the never-printed strings off config.yaml; the schema/render
+  removal is the real cleanup. Fold into the issue-assembly dedup work (SUGGEST #15).
 
 ## Later
 

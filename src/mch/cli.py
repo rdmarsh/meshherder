@@ -1120,7 +1120,7 @@ def _render_issue_sections(
         click.echo("")
 
     if ghosts:
-        click.echo("ghost nodes (in local DB but not config.yaml):")
+        click.echo("ghost nodes (in the local DB but no longer managed):")
         label_w = max(
             _wlen("LABEL"),
             max((_wlen(g.get("label") or "-") for g in ghosts), default=0),
@@ -1152,7 +1152,7 @@ def _render_issue_sections(
         click.echo("")
 
     if unseen_nodes:
-        click.echo("unseen config nodes (in config.yaml but not known to gateway/DB):")
+        click.echo("unseen nodes (in desired state but not known to the gateway/DB):")
         label_w = max(
             _wlen("LABEL"),
             max((_wlen(n.get("label") or "-") for n in unseen_nodes), default=0),
@@ -1773,11 +1773,11 @@ def suggest(ctx: click.Context, query: str | None) -> None:
     QUERY: pubkey prefix, label substring, or name substring. Omit to show all nodes.
 
     Prints the matching profile (e.g. rooftop, tower), suggested txdelay
-    and universal settings with one-line explanations, and a ready-to-paste
-    config.yaml settings: block.
+    and universal settings with one-line explanations, and the ready-to-run
+    `mch config set` commands to apply them.
 
-    Requires 'neighbors' in the facts: list in config.yaml and at least
-    one completed sync cycle to populate the neighbour count.
+    Requires a `neighbors` fact-policy key (mch config set --global neighbors
+    --policy fact) and at least one completed sync cycle to populate the count.
     """
     _show_suggestions(ctx, query)
 
@@ -1829,7 +1829,8 @@ def _suggest_detail(n: dict[str, Any]) -> None:
 
     if count is None:
         click.echo(
-            "(no neighbour data - add 'neighbors' to facts: in config.yaml"
+            "(no neighbour data - collect it with"
+            " `mch config set --global neighbors --policy fact`"
             " and run mch fleet sync to start collecting it)"
         )
         click.echo("")
@@ -1864,12 +1865,14 @@ def _suggest_detail(n: dict[str, Any]) -> None:
     for key, val, desc in settings:
         click.echo(f"  {key:<{key_w}}  {val:<{val_w}}  {desc}")
 
+    # Desired state lives in the DB now (sunset), so emit runnable `mch config set` commands
+    # instead of a config.yaml block. Prefer the local label as the selector; fall back to the
+    # pubkey prefix when the node has no label.
+    selector = n.get("label") or (n.get("pubkey") or "")[:12]
     click.echo("")
-    click.echo("To apply, paste into this node's settings: block in config.yaml:")
+    click.echo("To apply, run:")
     for key, val, _ in settings:
-        click.echo(f"      {key}:")
-        click.echo(f'        desired: "{val}"')
-        click.echo("        policy: enforce")
+        click.echo(f'  mch config set {selector} {key} "{val}" --policy enforce')
 
 
 # ---------------------------------------------------------------------------
