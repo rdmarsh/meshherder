@@ -109,7 +109,7 @@ def test_strict_load_rejects_nodes_block(tmp_path):
             settings:
               txdelay: "14"
         """)
-    with pytest.raises(ValueError, match="mch import"):
+    with pytest.raises(ValueError, match="mch config import"):
         load(p, strict=True)
 
 
@@ -120,7 +120,7 @@ def test_strict_load_rejects_groups_block(tmp_path):
             settings:
               advert.interval: "240"
         """)
-    with pytest.raises(ValueError, match="mch import"):
+    with pytest.raises(ValueError, match="mch config import"):
         load(p, strict=True)
 
 
@@ -130,7 +130,7 @@ def test_strict_load_rejects_global_desired_block(tmp_path):
           settings:
             powersaving: "on"
         """)
-    with pytest.raises(ValueError, match="mch import"):
+    with pytest.raises(ValueError, match="mch config import"):
         load(p, strict=True)
 
 
@@ -141,7 +141,7 @@ def test_strict_load_rejects_facts_block(tmp_path):
           - ver
           - neighbors
         """)
-    with pytest.raises(ValueError, match="mch import"):
+    with pytest.raises(ValueError, match="mch config import"):
         load(p, strict=True)
 
 
@@ -1288,7 +1288,7 @@ def test_overlay_via_radio_strips_surrounding_space():
 
 
 # ------------------------------------------------------------------
-# config_to_desired_rows: flatten loaded config -> desired_settings rows (mch import)
+# config_to_desired_rows: flatten loaded config -> desired_settings rows (mch config import)
 # ------------------------------------------------------------------
 
 _PK = "aabbccdd" + "0" * 56  # a full 64-hex pubkey for prefix aabbccdd
@@ -1305,7 +1305,7 @@ def test_import_node_settings_to_node_scope_rows():
     )])
     rows, warnings = config_to_desired_rows(cfg, _resolver())
     assert warnings == []
-    # default poll_hours (24) stores as None (inherit), matching `mch set`
+    # default poll_hours (24) stores as None (inherit), matching `mch config set`
     assert rows == [
         DesiredSetting(Scope.NODE, _PK, "txdelay", desired="14",
                        policy=SettingPolicy.ENFORCE, poll_hours=None),
@@ -1408,7 +1408,7 @@ def test_import_via_radio_row_round_trips_through_parser():
 
 
 # ------------------------------------------------------------------
-# desired_rows_to_config_dict: rows -> config.yaml structure (mch export, inverse of import)
+# desired_rows_to_config_dict: rows -> config.yaml structure (mch config export, inverse of import)
 # ------------------------------------------------------------------
 
 def test_export_empty_rows_is_empty_dict():

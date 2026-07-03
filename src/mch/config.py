@@ -212,8 +212,8 @@ class NodeConfig:
     via_radio: RadioConfig | None = None
     # Prepended to the desired name (no auto-space); overrides group/global when set.
     name_prefix: str | None = None
-    # Inventory lifecycle, not desired config: carried only so `mch export`/`mch import` can
-    # round-trip a retired node (excluded from sync, unfavourited). True == the node is retired.
+    # Inventory lifecycle, not desired config: carried only so `mch config export`/`mch config
+    # import` can round-trip a retired node (excluded from sync, unfavourited). True == retired.
     retired: bool = False
 
 
@@ -315,7 +315,7 @@ def normalize_directive_value(key: str, value: str) -> str:
     """Public hook so the daemon stores the canonical directive value (clean DB/display).
 
     Read-time parsers normalise too, so this is belt-and-suspenders, but storing the
-    normalised form keeps `mch status`/export tidy and matches what the operator meant.
+    normalised form keeps `mch fleet status`/export tidy and matches what the operator meant.
     """
     return _normalize_directive_text(key, value)
 
@@ -362,7 +362,7 @@ DIRECTIVE_KEYS = frozenset(_DIRECTIVE_PARSERS)
 
 
 def settable_keys() -> frozenset[str]:
-    """Keys an operator may write via ``mch set``: node CLI settings plus directives.
+    """Keys an operator may write via ``mch config set``: node CLI settings plus directives.
 
     Directives (name_prefix, default_policy, via_radio) are not node CLI ``set``
     commands but are operator-authored desired state stored as desired_settings rows.
@@ -592,7 +592,7 @@ def _scope_rows(
 ) -> list[DesiredSetting]:
     """All desired_settings rows for one scope object (settings + directives).
 
-    A default poll_hours (24) stores as None (inherit) to match `mch set` and keep rows
+    A default poll_hours (24) stores as None (inherit) to match `mch config set` and keep rows
     tidy; a non-default value is preserved. Policy-only group/global ``setting_overrides``
     become desired=None rows. The three directives serialise to their reserved keys.
     """
@@ -623,7 +623,7 @@ def config_to_desired_rows(
     cfg: Config,
     resolve_pubkey: Callable[[str], str | None],
 ) -> tuple[list[DesiredSetting], list[str]]:
-    """Flatten a loaded Config's desired state into desired_settings rows (for `mch import`).
+    """Flatten a loaded Config's desired state into desired_settings rows (for `mch config import`).
 
     Emits one row per setting and per set directive at each scope: global (scope_id ``""``),
     each group (scope_id = group name), and each node (scope_id = full pubkey, resolved from
@@ -666,7 +666,7 @@ def config_to_desired_operations(
     cfg: Config,
     resolve_pubkey: Callable[[str], str | None],
 ) -> tuple[list[DesiredOperation], list[str]]:
-    """Flatten a loaded Config's operations into desired_operations rows (for `mch import`).
+    """Flatten a loaded Config's operations into desired_operations rows (for `mch config import`).
 
     The operations analogue of config_to_desired_rows: one row per operation at each scope -
     global (scope_id ``""``), each group (scope_id = group name), and each node (scope_id =
@@ -730,7 +730,7 @@ def desired_rows_to_config_dict(
     listed node's ``label``/``group`` is emitted, every listed node appears even with no desired
     settings, and any group a node belongs to is emitted under ``groups:`` so the result
     re-imports cleanly (load() rejects a node referencing an undefined group). This is what lets
-    ``mch export`` -> ``mch import`` rebuild the fleet after a server/gateway loss.
+    ``mch config export`` -> ``mch config import`` rebuild the fleet after a server/gateway loss.
     """
     by_scope: dict[tuple[Scope, str], list[DesiredSetting]] = {}
     for row in rows:
@@ -885,18 +885,19 @@ def load(
     # Sunset: desired state now lives in the DB, not config.yaml. The daemon loads strict and
     # refuses to start if any desired-state block is still present, so an edited-but-not-imported
     # config can never silently diverge from the DB. Empty blocks (e.g. a leftover `nodes: []`)
-    # are tolerated so stripping is forgiving. The lenient default keeps the `mch import` on-ramp
-    # and the config-parser unit tests working.
+    # are tolerated so stripping is forgiving. The lenient default keeps the `mch config import`
+    # on-ramp and the config-parser unit tests working.
     if strict:
         offenders = [key for key in ("nodes", "groups", "global", "facts") if raw.get(key)]
         if offenders:
             raise ValueError(
                 f"config.yaml still carries desired state ({', '.join(offenders)}); "
                 "desired state now lives in the DB. Migrate it with "
-                "`mch import <this-file>`, verify with `mch export`, then delete these "
-                "blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md slice 8. "
-                "Facts are now a policy (`mch set <node> <key> --policy fact`); import folds a "
-                "legacy `facts:` list into global fact rows."
+                "`mch config import <this-file>`, verify with `mch config export`, then delete "
+                "these blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md "
+                "slice 8. Facts are now a policy (`mch config set <node> <key> --policy fact`); "
+                "import "
+                "folds a legacy `facts:` list into global fact rows."
             )
 
     gw_raw = _mapping(raw.get("gateway", {}), "gateway")

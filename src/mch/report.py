@@ -36,8 +36,8 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
     for node in nodes:
         # Desired state is resolved entirely from the DB (DESIGN.md "Desired state in the
         # DB" / sunset): node, group, and global configs are all rebuilt from DB rows, so
-        # `mch node`/`mch plan` show DB-authored intent immediately after `mch set` and a
-        # node never listed in config.yaml still resolves fully.
+        # `mch fleet status`/`mch fleet plan` show DB-authored intent immediately after
+        # `mch config set` and a node never listed in config.yaml still resolves fully.
         node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
         # Sunset: the DB is the inventory, so every node it holds is a managed node.
         # The old config-vs-DB "ghost" distinction is gone.

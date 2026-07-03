@@ -284,7 +284,7 @@ def resolved_fact_keys(
 
     A fact is now a policy (Node > Group > Global), not a separate config.facts list
     (sunset). This is the per-node "configured facts" set used by the report and by
-    `mch clean facts`. See DESIGN.md "Facts vs settings".
+    `mch node clean facts`. See DESIGN.md "Facts vs settings".
     """
     return {
         key
@@ -1357,7 +1357,7 @@ class WorkQueue:
     async def run_cycle(self) -> list[NodeResult]:
         """
         One full pass through all managed nodes in config order.
-        Used for testing and for mch sync (no-arg full sweep).
+        Used for testing and for mch fleet sync (no-arg full sweep).
         """
         async with self.operation("sync cycle", wait=False):
             return await self._run_cycle_body()
@@ -1466,7 +1466,7 @@ class WorkQueue:
 
         # Resolve desired state entirely from the DB (DESIGN.md "Desired state in the DB"
         # / sunset): the node, its group, and global configs are rebuilt from DB rows, so
-        # a value set with `mch set` (any scope) reconciles without any config.yaml entry.
+        # a value set with `mch config set` (any scope) reconciles without any config.yaml entry.
         # Warnings flag malformed/duplicate DB rows; they are rare once config.yaml no
         # longer carries desired state.
         node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(
@@ -2433,14 +2433,14 @@ class WorkQueue:
 
 
 # ---------------------------------------------------------------------------
-# unfiled contacts — for mch contacts
+# unfiled contacts — for mch node contacts
 # ---------------------------------------------------------------------------
 
 async def get_unfiled_contacts(config: Config, gateway: Gateway) -> list[dict[str, Any]]:
     """
     Return gateway contacts that are REP nodes but not yet in config.
 
-    Used by 'mch contacts' to show operators what they can add to config.yaml.
+    Used by 'mch node contacts' to show operators what they can add to config.yaml.
     """
     contacts = await gateway.get_contacts(managed_only=False)
     managed_prefixes = [nc.pubkey_prefix for nc in config.nodes]

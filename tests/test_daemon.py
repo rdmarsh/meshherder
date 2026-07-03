@@ -2129,7 +2129,7 @@ async def test_unset_setting_leaves_other_keys(db, wq, config):
     assert [r.key for r in rows] == ["name"]
 
 
-# --- F4: mch show — explain one key's resolution for one node ---------------
+# --- F4: mch config show — explain one key's resolution for one node ---------------
 
 async def test_show_setting_resolves_node_over_global_with_observed(db, wq, config):
     node = await _seed_plain_node(db)
@@ -2230,7 +2230,7 @@ async def test_clean_settings_lists_orphan_not_in_desired(db, wq):
 
 
 async def test_clean_settings_keeps_db_set_key(db, wq, config):
-    """A key set via `mch set` (DB overlay) must never be treated as an orphan."""
+    """A key set via `mch config set` (DB overlay) must never be treated as an orphan."""
     node = await _seed_plain_node(db)
     await _seed_observed_setting(db, node, "txdelay", observed="14")
     await db.set_desired_setting(DesiredSetting(
@@ -2391,7 +2391,7 @@ async def test_import_warns_unresolvable_node(db, wq):
 
 
 async def test_import_from_explicit_path_overrides_live_config(db, wq, tmp_path):
-    """`mch import <file>` flattens that file, not the daemon's (now-stripped) live config."""
+    """`mch config import <file>` flattens that file, not the daemon's (now-stripped) config."""
     node = await _seed_plain_node(db)  # pubkey aabbccdd*8
     legacy = tmp_path / "legacy.yaml"
     legacy.write_text(

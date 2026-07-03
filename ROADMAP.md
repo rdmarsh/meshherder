@@ -40,13 +40,13 @@ hammers a weak link to force a result, is working against the medium. This is th
 
 | # | Capability | State |
 |---|---|---|
-| 1 | Factory-fresh node into management | Done - `mch new` (new mode) |
-| 2 | Restore a known node onto fresh hardware | Done-ish - `mch new` replace mode (needs live retest) |
+| 1 | Factory-fresh node into management | Done - `mch node new` (new mode) |
+| 2 | Restore a known node onto fresh hardware | Done-ish - `mch node new` replace mode (needs live retest) |
 | 3 | Known node into management (e.g. faulkland) | **Diagnosed** - blocker was auth, not routing; needs proactive-login fix (BACKLOG). Manual login + bare `ver` confirmed working 2026-06-03 |
-| 3a | Adopt a node already out on the mesh | `mch adopt` seeds DB + installs a direct route + confirm probe; `mch probe --radio [--advert] [--login]` for investigation. Config + sync manages it once auth/login lands |
+| 3a | Adopt a node already out on the mesh | `mch node adopt` seeds DB + installs a direct route + confirm probe; `mch node probe --radio [--advert] [--login]` for investigation. Config + sync manages it once auth/login lands |
 | 4 | Retrieve facts | Done |
 | 5 | Configure node | Done (enforce / audit / drift) |
-| 6 | Remove / decommission | Done - `mch remove` |
+| 6 | Remove / decommission | Done - `mch node remove` |
 | 7 | Don't hammer the mesh | Done, strong - rate limit, reachability probe, randomized reads, bounded recovery |
 | 8 | Be as simple as possible | Ongoing - see "simple yet powerful" tension above |
 | 9 | CLI + API | Done - CLI over Unix socket; read-only HTTP API |
@@ -72,7 +72,7 @@ The only part that differs is the identity step at the front:
   identity is *reused* on the new hardware.
 - **#3 / #3a known node** - identity already exists; skip straight to converge.
 
-Today these are separate bespoke flows (`mch new` new mode, `mch new` replace mode, `mch adopt`,
+Today these are separate bespoke flows (`mch node new` new mode, `mch node new` replace mode, `mch node adopt`,
 and nothing for #3), which is why #3 (faulkland) falls through the cracks and `adopt` doesn't
 actually make a node manageable.
 
@@ -105,9 +105,9 @@ The corrected onboarding sequence for a known node:
   silently-dropping node never sends, so mch never logs in and the node looks permanently
   unreachable.
 - **Then routing, only if needed:** if directed commands still fail *after* a successful login, it
-  is a genuine routing problem - repair the path (`mch path`), and on the bench install a direct
+  is a genuine routing problem - repair the path (`mch node path`), and on the bench install a direct
   route on the node's radio. The route tooling built for the (mis-aimed) keystone -
-  `mch adopt`'s direct-route install, `mch probe --radio [--advert] [--login]` - remains useful
+  `mch node adopt`'s direct-route install, `mch node probe --radio [--advert] [--login]` - remains useful
   here; it was just pointed at the wrong cause.
 - **Scope boundary unchanged:** a node unknown to the gateway and out of direct radio range stays
   out of *remote* scope (carry it to the bench). See BACKLOG Won't Do.
@@ -140,7 +140,7 @@ because the DB is treated as throwaway observed-state.
   observed radios, known routes, facts, schedule.
 - Config (whatever form) describes **desired policy/defaults** and remains exportable as a
   reviewable backup/import format - never lossy shorthand like literal `...`.
-- Add explicit `mch export config` / import / backup commands so the DB is never the *only* copy.
+- Add explicit `mch config export config` / import / backup commands so the DB is never the *only* copy.
 - Secrets/private keys need a separate security decision before they enter any ordinary
   backup/export path. (See the protected-secret-storage backlog item.)
 
@@ -191,7 +191,7 @@ all rebroadcasting the same flood is exactly where collisions happen.
 
 It is genuinely unresolved even upstream: their own simulator recommended txdelay=0 everywhere,
 yet real-world testing showed zero delay made error rates *worse*, and the thread closed asking for
-more testing. So mch must **not** hard-code a confident txdelay formula yet - `mch suggest` txdelay
+more testing. So mch must **not** hard-code a confident txdelay formula yet - `mch config suggest` txdelay
 output stays provisional, and we likely need to flip profiles.yaml after a real test. See the
 BACKLOG live-test item. Whatever the outcome, the recommendation engine's job is unchanged; only
 the formula's direction and slope are in question.
@@ -199,7 +199,7 @@ the formula's direction and slope are in question.
 The tool should:
 
 - **Recommend** sound values from observed facts (neighbour count, route length/quality, board
-  type, region), surfaced via `mch suggest` / the recommend layer - advisory and paste-ready.
+  type, region), surfaced via `mch config suggest` / the recommend layer - advisory and paste-ready.
 - Optionally **resolve them automatically** (`txdelay: auto`) at sync time using the same formula,
   so the recommendation and the enforced value never drift apart. Keep the formula in one place
   (`recommend.py`) so it is testable and consistent between display and enforcement.

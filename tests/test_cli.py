@@ -414,7 +414,7 @@ def test_daemon_connection_failure_checks_default_config(tmp_path):
     assert f"checking config: {config}" in result.output
     assert "config check failed:" in result.output
     assert "unknown config key 'typo'" in result.output
-    assert "run: mch validate" in result.output
+    assert "run: mch config validate" in result.output
 
 
 def test_daemon_connection_failure_reports_config_ok(tmp_path):
@@ -494,7 +494,7 @@ def test_path_discover_command_shows_candidate():
     assert result.exit_code == 0
     assert "discovery path candidate:" in result.output
     assert "path: e260,5f6c" in result.output
-    assert "apply with: mch path aabbccdd1122 --apply e260,5f6c:1" in result.output
+    assert "apply with: mch node path aabbccdd1122 --apply e260,5f6c:1" in result.output
 
 
 def test_path_apply_command_confirms_and_renders_updated_status():
@@ -821,7 +821,7 @@ def test_validate_permission_denied_suggests_sudo(tmp_path):
     assert "secrets: not checked" in result.output
     assert "did you mean 'powersaving'?" in result.output
     assert "cannot read secrets file" in result.output
-    assert "sudo mch validate" in result.output
+    assert "sudo mch config validate" in result.output
 
 
 def test_validate_warns_when_prv_key_does_not_match_config_prefix(tmp_path):
@@ -1362,7 +1362,7 @@ def test_prune_no_candidates():
     result = _run(["node", "prune"], _prune_resp())
     assert result.exit_code == 0
     assert "no retired nodes to prune" in result.output
-    assert "mch retire" in result.output
+    assert "mch node retire" in result.output
 
 
 def test_prune_lists_candidates_without_deleting():
@@ -1376,7 +1376,7 @@ def test_prune_lists_candidates_without_deleting():
     assert result.exit_code == 0
     assert "retired nodes" in result.output
     assert "old-site" in result.output
-    assert "run 'mch prune --yes'" in result.output
+    assert "run 'mch node prune --yes'" in result.output
 
 
 def test_prune_yes_reports_deleted_count():
@@ -2181,10 +2181,10 @@ def test_commission_new_happy_path():
         result = runner.invoke(cli, ["--socket", "/fake.sock", "node", "new"], input=inp)
     assert result.exit_code == 0, result.output
     assert "a695e2be" in result.output  # pubkey_prefix shown
-    assert "mch import" in result.output
+    assert "mch config import" in result.output
     assert "Reload mchd" in result.output
-    assert "mch status a695e2be" in result.output
-    assert "Optional: mch sync a695e2be" in result.output
+    assert "mch fleet status a695e2be" in result.output
+    assert "Optional: mch fleet sync a695e2be" in result.output
     req = mock_rpc.call_args_list[1][0][1]
     assert req["label"] == "Test-Site"
     assert req["name"] == "Test Site"
@@ -2719,7 +2719,7 @@ def test_set_sends_node_key_value_and_reports():
         "policy": None,
     }
     assert "set txdelay = '14'" in result.output
-    assert "mch sync aabbccdd" in result.output
+    assert "mch fleet sync aabbccdd" in result.output
 
 
 def test_set_passes_policy():

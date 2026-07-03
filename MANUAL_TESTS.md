@@ -11,9 +11,9 @@ test rather than relying on memory. These tests are intended for `luna` and a sa
   all other unmanaged nodes are powered off.
 - Do not paste passwords, private keys, or full `secrets.yaml` contents into this document or the
   project journal.
-- Do not run `mch sync` without a node argument during this worksheet: it may schedule field nodes
+- Do not run `mch fleet sync` without a node argument during this worksheet: it may schedule field nodes
   on `915.075`.
-- Do not use `mch exec` for a live/read command on a `via_radio` bench node until its management
+- Do not use `mch node exec` for a live/read command on a `via_radio` bench node until its management
   radio behavior is confirmed; this worksheet uses it only to verify locally blocked commands.
 
 If the build under test has been committed and pushed, update luna before beginning:
@@ -79,9 +79,9 @@ later result.
 ```bash
 mch --version
 mch --help
-mch validate --help
-mch sync --help
-mch logs --help
+mch config validate --help
+mch fleet sync --help
+mch fleet logs --help
 systemctl is-enabled mchd
 systemctl is-active mchd
 systemctl status mchd --no-pager
@@ -105,7 +105,7 @@ Result:
 Purpose: check the active desired-state files before any sync is run.
 
 ```bash
-sudo mch validate --config /etc/meshherder/config.yaml
+sudo mch config validate --config /etc/meshherder/config.yaml
 ```
 
 Expected:
@@ -126,10 +126,10 @@ Purpose: verify bad input is reported clearly without altering the live configur
 
 ```bash
 printf 'nodes:\n\t- pubkey_prefix: aabbccdd\n' > /tmp/mch-invalid-tab.yaml
-mch validate --config /tmp/mch-invalid-tab.yaml
+mch config validate --config /tmp/mch-invalid-tab.yaml
 
 printf 'databaes_path: /tmp/not-real.db\n' > /tmp/mch-invalid-key.yaml
-mch validate --config /tmp/mch-invalid-key.yaml
+mch config validate --config /tmp/mch-invalid-key.yaml
 ```
 
 Expected:
@@ -146,14 +146,14 @@ Result:
 
 ## Test 4: Fleet And Node Status Views
 
-Purpose: confirm the local report view is understandable and node lookup works. `mch status` reads
+Purpose: confirm the local report view is understandable and node lookup works. `mch fleet status` reads
 known daemon/database state; it does not run a node sync.
 
 ```bash
-mch status
-mch status <TEST_LABEL>
-mch status <TEST_PREFIX>
-mch status no-such-test-node
+mch fleet status
+mch fleet status <TEST_LABEL>
+mch fleet status <TEST_PREFIX>
+mch fleet status no-such-test-node
 ```
 
 Expected:
@@ -174,17 +174,17 @@ Result:
 Purpose: check desired-versus-observed reporting without sending mesh traffic or writing a node.
 
 ```bash
-mch logs <TEST_LABEL> -n 5
-mch plan
-mch plan <TEST_LABEL>
-mch logs <TEST_LABEL> -n 5
+mch fleet logs <TEST_LABEL> -n 5
+mch fleet plan
+mch fleet plan <TEST_LABEL>
+mch fleet logs <TEST_LABEL> -n 5
 ```
 
 Expected:
 
 - The plan renders writes, audit drift, and/or unknown observations clearly, or says no planned
   writes.
-- Running `mch plan` alone does not create sync boundary entries, setting changes, or command
+- Running `mch fleet plan` alone does not create sync boundary entries, setting changes, or command
   failures in activity logs.
 
 Result:
@@ -198,9 +198,9 @@ Result:
 Purpose: verify activity is usable as an investigation history.
 
 ```bash
-mch logs -n 10
-mch logs <TEST_LABEL> -n 10
-mch logs <TEST_PREFIX> -n 10
+mch fleet logs -n 10
+mch fleet logs <TEST_LABEL> -n 10
+mch fleet logs <TEST_PREFIX> -n 10
 ```
 
 Expected:
@@ -220,8 +220,8 @@ Result:
 Purpose: verify recommendation display from cached neighbour facts. This does not trigger a sync.
 
 ```bash
-mch suggest
-mch suggest <TEST_LABEL>
+mch config suggest
+mch config suggest <TEST_LABEL>
 ```
 
 Expected:
@@ -242,8 +242,8 @@ Purpose: inspect gateway-held unmanaged contacts and its paste-ready output with
 node or changing configuration.
 
 ```bash
-mch contacts
-mch contacts <PARTIAL_NAME_OR_PREFIX>
+mch node contacts
+mch node contacts <PARTIAL_NAME_OR_PREFIX>
 ```
 
 Expected:
@@ -261,21 +261,21 @@ Result:
 ## Test 9: Destructive-Action Guardrails
 
 Purpose: confirm inspection commands do not silently delete state or send irreversible commands.
-Do not run `mch prune --yes`, `mch remove --yes`, or `mch remove --force` in this test.
+Do not run `mch node prune --yes`, `mch node remove --yes`, or `mch node remove --force` in this test.
 
 ```bash
-mch prune
-mch remove <TEST_LABEL> --yes
-mch exec <TEST_LABEL> erase
-mch exec <TEST_LABEL> set prv.key 00000000
+mch node prune
+mch node remove <TEST_LABEL> --yes
+mch node exec <TEST_LABEL> erase
+mch node exec <TEST_LABEL> set prv.key 00000000
 ```
 
 Expected:
 
-- `mch prune` lists candidates only, or reports none; it does not delete without `--yes`.
-- `mch remove <TEST_LABEL> --yes` refuses because the node is still configured and `--force`
+- `mch node prune` lists candidates only, or reports none; it does not delete without `--yes`.
+- `mch node remove <TEST_LABEL> --yes` refuses because the node is still configured and `--force`
   was not supplied.
-- Both `mch exec` attempts are blocked locally as unsafe and do not reach the node.
+- Both `mch node exec` attempts are blocked locally as unsafe and do not reach the node.
 
 Result:
 
@@ -300,7 +300,7 @@ curl -i http://127.0.0.1:8743/not-a-route
 Expected:
 
 - `/health` responds successfully; status/plan/logs return JSON local report data.
-- Node status corresponds to `mch status <TEST_LABEL>`.
+- Node status corresponds to `mch fleet status <TEST_LABEL>`.
 - An unknown path returns `404` rather than exposing an unexpected action.
 - No API request initiates sync, exec, or commissioning work.
 
@@ -319,14 +319,14 @@ Use a temporary config rather than editing the live configuration:
 
 ```bash
 printf '\nfacts:\n  - powersavings\n' > /tmp/mch-fact-typo.yaml
-mch validate --config /tmp/mch-fact-typo.yaml
+mch config validate --config /tmp/mch-fact-typo.yaml
 ```
 
 If testing the real configuration after editing its existing `facts:` list, do not add a second
 `facts:` YAML block; run:
 
 ```bash
-sudo mch validate --config /etc/meshherder/config.yaml
+sudo mch config validate --config /etc/meshherder/config.yaml
 ```
 
 Expected once the validation change is installed:
@@ -355,17 +355,17 @@ Preparation:
 ```bash
 sudo cp -p /etc/meshherder/config.yaml /tmp/mch-config.before-reload.yaml
 sudoedit /etc/meshherder/config.yaml
-sudo mch validate --config /etc/meshherder/config.yaml
+sudo mch config validate --config /etc/meshherder/config.yaml
 sudo systemctl kill -s HUP mchd
 sleep 2
-mch status <TEMP_LABEL>
+mch fleet status <TEMP_LABEL>
 journalctl -u mchd --since '-5 minutes' --no-pager
 
 sudo cp -p /tmp/mch-config.before-reload.yaml /etc/meshherder/config.yaml
-sudo mch validate --config /etc/meshherder/config.yaml
+sudo mch config validate --config /etc/meshherder/config.yaml
 sudo systemctl kill -s HUP mchd
 sleep 2
-mch status <TEST_LABEL>
+mch fleet status <TEST_LABEL>
 ```
 
 Expected:
@@ -391,22 +391,22 @@ Purpose: confirm a deliberate stop completes cleanly and CLI commands do not pre
 is still available.
 
 ```bash
-mch stop
+mch daemon stop
 systemctl is-active mchd
 systemctl status mchd --no-pager
 pgrep -af '[m]chd'
-mch status
-mch start
+mch fleet status
+mch daemon start
 systemctl is-active mchd
-mch status
+mch fleet status
 ```
 
 Expected:
 
-- `mch stop` prints `stopping current sync, this may take some time...` then `mchd stopped`.
-- After stopping, `systemctl is-active mchd` reports `inactive` and `mch status` fails because
+- `mch daemon stop` prints `stopping current sync, this may take some time...` then `mchd stopped`.
+- After stopping, `systemctl is-active mchd` reports `inactive` and `mch fleet status` fails because
   there is no daemon socket/service available. `pgrep -af '[m]chd'` prints no daemon process.
-- After `mch start`, `systemctl is-active mchd` reports `active` and `mch status` works again.
+- After `mch daemon start`, `systemctl is-active mchd` reports `active` and `mch fleet status` works again.
 
 Result:
 
@@ -420,8 +420,8 @@ Purpose: verify the new diagnostic context and manual-sync activity markers on a
 Replace `<TEST_LABEL>` with a node explicitly configured for `915.800`.
 
 ```bash
-mch sync <TEST_LABEL>
-mch logs <TEST_LABEL> -n 30
+mch fleet sync <TEST_LABEL>
+mch fleet logs <TEST_LABEL> -n 30
 journalctl -u mchd --since '-10 minutes' --no-pager
 ```
 
@@ -432,7 +432,7 @@ Expected once `0.8.5` is installed:
 - Progress includes `cached management path: direct`, `flood`, or `stored (...)`.
 - If the gateway must move to the test radio, the journal shows a switch to `915.800`, followed
   by restoration after sync. Do not proceed if it switches to `915.075` for a test node.
-- `mch logs` contains `manual sync started` and a terminal completion, partial-result, failure,
+- `mch fleet logs` contains `manual sync started` and a terminal completion, partial-result, failure,
   or abort marker.
 
 Result:
@@ -449,10 +449,10 @@ the first command. This is deliberate bench traffic on `915.800`.
 Run three separate foreground syncs, leaving the output intact:
 
 ```bash
-mch sync <TEST_LABEL>
-mch sync <TEST_LABEL>
-mch sync <TEST_LABEL>
-mch logs <TEST_LABEL> -n 100
+mch fleet sync <TEST_LABEL>
+mch fleet sync <TEST_LABEL>
+mch fleet sync <TEST_LABEL>
+mch fleet logs <TEST_LABEL> -n 100
 ```
 
 Record for each run:
@@ -488,9 +488,9 @@ Purpose: confirm cancellation is visible and the gateway returns from any tempor
 switch.
 
 ```bash
-mch sync <TEST_LABEL>
+mch fleet sync <TEST_LABEL>
 # Press Ctrl-C while a read is waiting.
-mch logs <TEST_LABEL> -n 30
+mch fleet logs <TEST_LABEL> -n 30
 journalctl -u mchd --since '-10 minutes' --no-pager
 ```
 
@@ -516,21 +516,21 @@ a temporary move to the test frequency.
 In terminal A:
 
 ```bash
-mch sync <TEST_LABEL>
+mch fleet sync <TEST_LABEL>
 ```
 
 While it is waiting for a slow reply, in terminal B:
 
 ```bash
-mch stop
+mch daemon stop
 systemctl is-active mchd
 journalctl -u mchd --since '-10 minutes' --no-pager
-mch start
+mch daemon start
 ```
 
 Expected:
 
-- `mch stop` warns that stopping current sync may take time, then completes.
+- `mch daemon stop` warns that stopping current sync may take time, then completes.
 - `systemctl is-active mchd` reports `inactive` before it is restarted.
 - The journal shows cancellation/cleanup and restoration from `915.800` if a temporary switch was
   in effect; it must not leave the gateway on the bench channel unintentionally.
@@ -554,14 +554,14 @@ node because it deliberately sends one invalid fact read.
 
 ```bash
 sudoedit /etc/meshherder/config.yaml
-sudo mch validate --config /etc/meshherder/config.yaml
-mch restart
-mch sync <TEST_LABEL>
-mch status <TEST_LABEL>
+sudo mch config validate --config /etc/meshherder/config.yaml
+mch daemon restart
+mch fleet sync <TEST_LABEL>
+mch fleet status <TEST_LABEL>
 sudoedit /etc/meshherder/config.yaml
-sudo mch validate --config /etc/meshherder/config.yaml
-mch restart
-mch status <TEST_LABEL>
+sudo mch config validate --config /etc/meshherder/config.yaml
+mch daemon restart
+mch fleet status <TEST_LABEL>
 ```
 
 Expected with current behavior:
@@ -589,17 +589,17 @@ Preparation:
 - Keep the target radio choice on `915.800,...`, never `915.075`.
 
 ```bash
-mch new
+mch node new
 # Select new-node mode.
 # Choose or paste target radio: 915.800,250,10,5
 # After success, add the printed node and secret snippets to the appropriate config files.
 sudoedit /etc/meshherder/config.yaml
 sudoedit /etc/meshherder/secrets.yaml
-sudo mch validate --config /etc/meshherder/config.yaml
-mch restart
-mch status <NEW_PREFIX>
-mch sync <NEW_PREFIX>
-mch logs <NEW_PREFIX> -n 30
+sudo mch config validate --config /etc/meshherder/config.yaml
+mch daemon restart
+mch fleet status <NEW_PREFIX>
+mch fleet sync <NEW_PREFIX>
+mch fleet logs <NEW_PREFIX> -n 30
 ```
 
 Expected:

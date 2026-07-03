@@ -37,8 +37,8 @@ Two consequences fall out of the line:
   `config.yaml` to keep the line clean. (`sync_interval_days` should also become hours — see BACKLOG.)
 
 The desired-state keys `nodes:`/`groups:`/`global:`/`facts:` are still *accepted* by the parser only
-as the `mch import` on-ramp; the daemon strict-loads and errors if any is present (empty is tolerated),
-pointing at `mch import`. Dropping them from the parser entirely is a later cleanup, once no legacy
+as the `mch config import` on-ramp; the daemon strict-loads and errors if any is present (empty is tolerated),
+pointing at `mch config import`. Dropping them from the parser entirely is a later cleanup, once no legacy
 configs remain to import.
 
 ### Historical: the earlier YAML-first model (superseded 2026-06-17)
@@ -61,7 +61,7 @@ the practice of keeping old config.yaml copies.
 **The problem this solves.** There were three stores that drift: config.yaml (desired), the DB
 (observed + a cache of desired), and the gateway's favourited contacts. Editing YAML then waiting
 to see whether the daemon read it is opaque, because the slow mesh hides whether *intent* even
-landed. With desired state in the DB, `mch set` writes synchronously, so `mch node` shows the new
+landed. With desired state in the DB, `mch config set` writes synchronously, so `mch node` shows the new
 desired value immediately - "intent recorded" stops being conflated with the slow "node converged".
 
 **Stores collapse from three to two:**
@@ -103,12 +103,12 @@ cascade are untouched. During the transition, when a key exists both in the DB a
 config.yaml, **the DB wins and the daemon warns** so the now-ignored YAML value can be cleaned up.
 
 **Retire, don't delete.** *(Implemented 8g.)* A node has a `NodeState.RETIRED` lifecycle state,
-replacing kept copies of config.yaml as the historical record. `mch retire <node>` sets it,
+replacing kept copies of config.yaml as the historical record. `mch node retire <node>` sets it,
 unfavourites the contact (eviction-pin removal, not contact deletion), and writes a log line;
-`mch unretire <node>` reverses it (re-favourite, reset state so it reconverges). A retired node is
+`mch node unretire <node>` reverses it (re-favourite, reset state so it reconverges). A retired node is
 excluded from sync everywhere (`get_due_node`, the cycle sweep, reschedule, and the favourite-pin
-step). Permanent delete stays separate and explicit: `mch prune` hard-deletes retired nodes (history
-and all); `mch remove` deletes one node and guards a still-managed node behind `--force`. Auto-purge
+step). Permanent delete stays separate and explicit: `mch node prune` hard-deletes retired nodes (history
+and all); `mch node remove` deletes one node and guards a still-managed node behind `--force`. Auto-purge
 is **not** triggered by a node dropping off the contact list - eviction is the normal state on a
 dense mesh, so contact-list absence is a poor signal. (A dedicated `retired_at`/`retired_reason`
 column pair was considered but not built; the state + log line suffice for a single-operator box and
@@ -116,7 +116,7 @@ can be added later if time-based auto-cleanup is wanted.)
 
 **Cleanup.** `observed_settings` should only hold keys that are currently wanted, i.e.
 `key in (resolved desired set + facts)`. Orphans (a key you unset, or dropped from a group) are
-removed by `mch clean settings`, the mirror of the existing `mch clean facts`. Observed rows are
+removed by `mch node clean settings`, the mirror of the existing `mch node clean facts`. Observed rows are
 never authoritative, so deleting them is always safe - they are re-observed next cycle if still
 wanted.
 
@@ -125,11 +125,11 @@ wanted.
 2. [done 2026-06-11] `overlay_db_settings()` merges DB node-scope rows onto `NodeConfig` before
    resolution (DB wins + warn); wired into `WorkQueue._process_node`, so reconcile and
    `all_setting_keys` pick up DB keys with no change to `resolve_*`.
-3. [done 2026-06-11] `mch set <node> <key> <value> [--policy ...]` and `mch unset <node> <key>`
+3. [done 2026-06-11] `mch config set <node> <key> <value> [--policy ...]` and `mch config unset <node> <key>`
    write/delete a node-scope `desired_settings` row (full pubkey as `scope_id`), validating the
    key (writable settings only), value, and policy. The write is synchronous so intent is recorded
    immediately; convergence is **deliberately decoupled** - `set`/`unset` do not auto-sync (that
-   would block on the mesh and conflict with traffic-minimisation), they print a `mch sync <node>`
+   would block on the mesh and conflict with traffic-minimisation), they print a `mch fleet sync <node>`
    hint instead. The slice-2 overlay reads exactly these `(NODE, pubkey)` rows, so a `set` is
    honoured on the next cycle with no resolver change.
 4. [done 2026-06-11] `mch node` shows the source (`db`/`config`) per setting (a SOURCE column).
@@ -137,17 +137,17 @@ wanted.
    now, so it always read `db`. The report still carries a constant `source="db"` field for schema
    stability.)_
    This also closed a gap: the **report** path (`build_fleet_report`, feeding `mch node`/`mch
-   status`/`mch plan`/the HTTP API) did not previously apply `overlay_db_settings` - only the sync
-   path did - so it would not have reflected a `mch set` until the next sync wrote an observed row.
-   The overlay now runs in reporting too, so DB-authored desired values (and the `mch plan`
+   status`/`mch fleet plan`/the HTTP API) did not previously apply `overlay_db_settings` - only the sync
+   path did - so it would not have reflected a `mch config set` until the next sync wrote an observed row.
+   The overlay now runs in reporting too, so DB-authored desired values (and the `mch fleet plan`
    preview) are visible immediately. Observed-only history rows have `source = None` (rendered `-`).
    Scope note: a DB desired row on a node *not* in config.yaml is not surfaced yet (the report still
    needs a config-derived `NodeConfig` to resolve against); that arrives with the config-import /
    group-global-scope slices.
-5. [done 2026-06-11] `mch clean settings` removes orphaned observed rows - the mirror of
-   `mch clean facts`. A `settings` row is orphaned when its key is not in the node's resolved
+5. [done 2026-06-11] `mch node clean settings` removes orphaned observed rows - the mirror of
+   `mch node clean facts`. A `settings` row is orphaned when its key is not in the node's resolved
    desired set (config + DB overlay). The DB overlay is applied when computing the wanted set, and
-   db-set keys are seeded directly, so a key set only via `mch set` is never deleted (even on a node
+   db-set keys are seeded directly, so a key set only via `mch config set` is never deleted (even on a node
    absent from config.yaml). Dry-run by default; `--yes` deletes; `--group`/`--all`/`--setting`
    filters mirror `clean facts`. Deletes are safe because observed rows are a re-derivable cache.
 6. [done 2026-06-11] Group and global desired scopes. The schema and resolver already supported
@@ -155,7 +155,7 @@ wanted.
    group/global analogue of `overlay_db_settings` (all DB rows land in `GroupConfig.settings`; a
    policy-only row is skipped by `resolve_desired` but drives `resolve_policy`/`all_setting_keys`).
    It is applied in `_process_node` (reconcile) and `_wanted_setting_keys` (clean) at a single
-   chokepoint per path. `mch set`/`unset` gained `--group NAME` and `--global`; node-scope wire
+   chokepoint per path. `mch config set`/`unset` gained `--group NAME` and `--global`; node-scope wire
    format is unchanged (daemon defaults `scope` to node) so older clients keep working. `set`
    validates the group exists in config (catches typos); `unset` does not, so a row for a removed
    group can still be cleared. Group conflict warnings are config-level and go to the app log only,
@@ -166,7 +166,7 @@ wanted.
    `resolve_policy`), not to a node `set <key> <value>` CLI command. They are stored as ordinary
    `desired_settings` rows; the overlay routes a directive key to its field instead of the settings
    dict via `_DIRECTIVE_PARSERS` (key -> field + parser) and `_split_directive_rows`. `settable_keys()`
-   = `writable_setting_keys()` | `DIRECTIVE_KEYS` gates `mch set`/the daemon. DB wins over a YAML
+   = `writable_setting_keys()` | `DIRECTIVE_KEYS` gates `mch config set`/the daemon. DB wins over a YAML
    field value with a conflict warning, exactly like a setting row.
    - [done 2026-06-12] 7a: `name_prefix` (plain string via `_coerce_name_prefix`; empty clears).
      Proven end-to-end - a DB `name_prefix` row flows through the overlay into
@@ -177,57 +177,57 @@ wanted.
      rather than wedging the sync cycle (set-time validation prevents bad writes; this guards
      hand-edited/legacy rows).
    - [done 2026-06-12] 7c: `via_radio` (radio tuple via `_parse_radio`; empty clears). A bad tuple is
-     rejected at `mch set` and defensively skipped on read, via the same validate/parse path.
+     rejected at `mch config set` and defensively skipped on read, via the same validate/parse path.
    - [done 2026-06-12] 7d: directive whitespace normalisation (`_normalize_directive_text`). Leading
      whitespace is always dropped and an all-whitespace value collapses to `""` (read as cleared/
      inherit). `name_prefix` is prepended with no separator, so a *trailing* space is meaningful
      (`" 🌞 "` -> `"🌞 "`) and kept; `default_policy`/`via_radio` strip both ends. Applied in the
      parsers (read) and at write time in the daemon (`normalize_directive_value`) so the DB stores
-     the canonical value and `mch status`/export stay tidy.
+     the canonical value and `mch fleet status`/export stay tidy.
 8. config.yaml import/export and sunset (also closes the group-attribution-needs-config limitation
    from slice 6, since import gives every desired node a resolvable identity).
-   - [done 2026-06-13] 8a: `mch import` - the migration on-ramp. Pure `config_to_desired_rows(cfg,
+   - [done 2026-06-13] 8a: `mch config import` - the migration on-ramp. Pure `config_to_desired_rows(cfg,
      resolve_pubkey)` flattens config desired state (settings + the three directives, all scopes)
      into `desired_settings` rows: global `scope_id ""`, group = group name, node = full pubkey
      resolved from `pubkey_prefix` against nodes the DB already knows. A node not yet seen is
      skipped with a warning (its full pubkey is unknowable from a prefix alone). Directives
      serialise back to their reserved-key string form (`_radio_to_str` round-trips through
-     `_parse_radio`; default poll_hours 24 stores as None to match `mch set`). Operations are *not*
+     `_parse_radio`; default poll_hours 24 stores as None to match `mch config set`). Operations are *not*
      imported (not part of desired_settings). Daemon `_handle_import` builds the DB-backed resolver;
      dry-run by default, `--yes` upserts (idempotent). After import every key lives in both YAML and
      DB, so the overlay's "DB wins + warn" nudges cleanup - export + sunset (8b+) finish the job.
-   - [done 2026-06-13] 8b: `mch export` - the inverse of import. `desired_rows_to_config_dict` rebuilds
+   - [done 2026-06-13] 8b: `mch config export` - the inverse of import. `desired_rows_to_config_dict` rebuilds
      the config.yaml structure from all `desired_settings` rows (shorthand `key: value` when only a
      desired value, mapping form with policy/poll_hours otherwise; policy-only -> group/global
      `setting_overrides` or node `settings.<key>.policy`; directives -> top-level fields; node
      scope_id -> `pubkey_prefix`). `config_dict_to_yaml` serialises it; new DB `get_all_desired_settings`
-     fetches every row. Daemon `_handle_export` returns the YAML; CLI `mch export` prints to stdout
-     (`mch export > desired.yaml`). A round-trip test proves config -> rows -> YAML -> load -> rows is
+     fetches every row. Daemon `_handle_export` returns the YAML; CLI `mch config export` prints to stdout
+     (`mch config export > desired.yaml`). A round-trip test proves config -> rows -> YAML -> load -> rows is
      stable. Observed state and operations are not exported.
    - [done 2026-06-17] 8c-8i (sunset): the DB is now authoritative for inventory + desired state;
      config.yaml carries only daemon settings. **Resolved open call: config.yaml errors, it is not a
      readable seed** - the daemon loads strict and refuses to start if any `nodes:`/`groups:`/`global:`
      desired-state block is still present (empty blocks tolerated), pointing the operator at
-     `mch import`. Pieces:
+     `mch config import`. Pieces:
      - 8c: `resolve_desired_configs(db, node)` rebuilds `(NodeConfig, GroupConfig|None, global)` from
        DB rows via the empty-base overlay, closing the slice-6 group-attribution limitation.
      - 8d: every desired-state *read* path resolves from the DB resolver (clean path, fleet report,
        sync engine).
      - 8i: operations migrated to a `desired_operations` table; import/export carry them.
      - 8e: `config.load(strict=True)` for the daemon (main + reload) hard-errors on leftover desired
-       state; the parser stays lenient by default for the import on-ramp. `mch import [CONFIG_FILE]`
+       state; the parser stays lenient by default for the import on-ramp. `mch config import [CONFIG_FILE]`
        takes an explicit YAML path (parsed leniently) so the on-ramp survives a strict daemon, and
        import now carries node **label/group** inventory, not just desired settings.
      - 8f: startup/reload `_reconcile_favourites` replaces config-driven seeding - seed a favourited
        repeater the DB doesn't know, pin (favourite) every managed DB node. Favourites and the managed
        set stay in step by adding in both directions; the config-vs-DB ghost/unseen concept is gone
-       (every DB node is managed). `mch set --group` validates against DB group membership.
-     - 8g: `NodeState.RETIRED` + `mch retire`/`mch unretire` (below). `prune` hard-deletes retired
+       (every DB node is managed). `mch config set --group` validates against DB group membership.
+     - 8g: `NodeState.RETIRED` + `mch node retire`/`mch node unretire` (below). `prune` hard-deletes retired
        nodes; `remove` guards a still-managed node behind `--force`.
-     - 8h: `mch commission` prints an importable `nodes:` doc + `mch import` guidance instead of a
+     - 8h: `mch commission` prints an importable `nodes:` doc + `mch config import` guidance instead of a
        config.yaml snippet; secrets.yaml snippet unchanged.
    - [done 2026-06-19, post-review] **Complete backup/restore + a cleaner status table** (PR #3):
-     - The DB is now the only copy of intent, so `mch export`/`mch import` became a full fleet
+     - The DB is now the only copy of intent, so `mch config export`/`mch config import` became a full fleet
        backup, not just a desired-settings dump. Export emits every node's full pubkey, label, group,
        desired settings, and operations (even a node with no desired settings), and each node's group
        under `groups:` so the dump re-imports cleanly. Import recreates a node from its full pubkey
@@ -238,7 +238,7 @@ wanted.
        the file; observed `NodeState` values are transient and deliberately not exported). Import
        makes the operator choose `--retired keep` (restore as retired) or `--retired skip`; a write
        touching retired nodes is refused until one is chosen.
-     - The per-setting SOURCE column was dropped from `mch status <node>` (always `db` now).
+     - The per-setting SOURCE column was dropped from `mch fleet status <node>` (always `db` now).
    - Follow-up (not done): the commission **replace** and **scan/list** flows still read config
      inventory (`config.nodes`/`config.groups`) and need a DB-driven rework; tracked in BACKLOG,
      along with making `facts` a scoped union, a scheduled-backup unit, and the `0.10.0` release cut.
@@ -264,15 +264,15 @@ available. It is not designed around datacenter-style immediate reachability.
 ## API-ready internal model
 
 `mch` should move toward a single daemon-side report/action model that can be rendered by the CLI,
-a future HTTP/OpenAPI interface, and compact mesh DM/channel summaries. `mch status` and `mch plan`
+a future HTTP/OpenAPI interface, and compact mesh DM/channel summaries. `mch fleet status` and `mch fleet plan`
 should not separately reconstruct desired-vs-observed meaning from raw DB records.
 
 Intended split:
-- `mch status [LABEL_OR_PREFIX]`: current state and evidence.
-- `mch plan [LABEL_OR_PREFIX]`: what mchd would do next.
-- `mch logs [LABEL_OR_PREFIX]`: history.
-- `mch suggest [LABEL_OR_PREFIX]`: recommendations.
-- `mch sync [LABEL_OR_PREFIX]`: do work now.
+- `mch fleet status [LABEL_OR_PREFIX]`: current state and evidence.
+- `mch fleet plan [LABEL_OR_PREFIX]`: what mchd would do next.
+- `mch fleet logs [LABEL_OR_PREFIX]`: history.
+- `mch config suggest [LABEL_OR_PREFIX]`: recommendations.
+- `mch fleet sync [LABEL_OR_PREFIX]`: do work now.
 
 The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`, `ignored`, or
 `blocked`, and classify next action as `none`, `read`, `write`, `report`, `ignore`, or `blocked`.
@@ -302,8 +302,8 @@ applying it; it must not turn an unauthenticated local status API into a configu
 
 Keep service diagnostics distinct from node activity. The systemd journal owns daemon startup,
 process failures, and detailed transport/radio debugging. The database-backed `/logs` and
-`mch logs` views retain operator-relevant node history, including writes, operations, drift, and
-read failures that explain a partial sync. `mch status` reports mesh state; it is not a
+`mch fleet logs` views retain operator-relevant node history, including writes, operations, drift, and
+read failures that explain a partial sync. `mch fleet status` reports mesh state; it is not a
 replacement for `systemctl status mchd`.
 
 ## Command metadata
@@ -317,7 +317,7 @@ flags, reboot requirements, optional staged-write/apply commands, firmware/versi
 per-command timeouts. This is the foundation for safer config validation, clearer `status`/`plan`
 output, and future API metadata.
 
-`mch plan` command strings are display/copy-paste helpers that intentionally mirror raw MeshCore
+`mch fleet plan` command strings are display/copy-paste helpers that intentionally mirror raw MeshCore
 CLI syntax, for example `set owner.info 🦷 rdm`. Do not shell-quote values in this display unless
 the underlying MeshCore tools start requiring it. Live testing with `meshcore-cli` and the phone app
 showed that `owner.info` values with spaces do not need quotes; firmware settings such as
@@ -358,12 +358,12 @@ Once found, the full pubkey is written to the DB and used from there on.
    prefix, never advertised).
 
 2. That is the only path into the DB. Nodes do not enter the DB by appearing in the gateway's
-   contact store unless they are also in config.yaml. Discovery via `mch contacts` (which shows
+   contact store unless they are also in config.yaml. Discovery via `mch node contacts` (which shows
    gateway contacts not in config) is purely informational — it does not write to the DB.
 
 A node in the DB but not in config.yaml is called a **ghost**. Ghosts appear in `mch issues`.
 They accumulate if you remove a node from config.yaml without purging the DB, or if a node was
-previously added via an older seeding path. Use `mch prune` or `mch remove <node>` to clean up
+previously added via an older seeding path. Use `mch node prune` or `mch node remove <node>` to clean up
 local DB state for retired nodes.
 
 A node in config.yaml that has no matching DB record is an **unseen config node**. This usually
@@ -371,15 +371,15 @@ means the gateway has never seen the configured prefix, or the prefix does not m
 node. Unseen config nodes appear separately in `mch issues` because the fix is different: correct
 the config prefix, bring the node into gateway range, or wait for it to advertise.
 
-## `mch contacts` vs the DB
+## `mch node contacts` vs the DB
 
-`mch contacts` reads **live from the gateway**, not from the DB. It shows REP nodes the gateway
+`mch node contacts` reads **live from the gateway**, not from the DB. It shows REP nodes the gateway
 knows about that are not yet in config.yaml. Use it to discover what is visible on the mesh and
 decide what to add to config. It is a read-only informational command.
 
 ## config.yaml is operator-managed
 
-mchd reads config.yaml at startup and on hot reload. It does not modify it. When `mch new`
+mchd reads config.yaml at startup and on hot reload. It does not modify it. When `mch node new`
 provisions a new node, it prints ready-to-paste YAML snippets for both config.yaml and
 secrets.yaml — the operator copies them in, puts them in git, then waits for hot reload or sends
 SIGHUP to mchd.
@@ -401,13 +401,13 @@ Between nodes, mchd waits `inter_node_delay_seconds` (configurable; default 30s)
 is visited at most once per `sync_interval_days`, scheduled at a random offset within the window
 so daemon restarts never cause a sync storm.
 
-The `mch sync <prefix>` command bypasses the schedule for an immediate operator-triggered sync
+The `mch fleet sync <prefix>` command bypasses the schedule for an immediate operator-triggered sync
 and always streams progress because slow mesh replies are a normal operating condition. If its
-client disconnects, the daemon cancels that forced sync and unwinds gateway state. `mch sync`
+client disconnects, the daemon cancels that forced sync and unwinds gateway state. `mch fleet sync`
 (no arg) runs a full pass through all config nodes immediately.
 
 Gateway-owning operations are serialized by a high-level WorkQueue operation lock. Scheduled sync,
-manual full sync, forced node sync, raw `mch exec`, and commissioning cannot overlap; manual CLI
+manual full sync, forced node sync, raw `mch node exec`, and commissioning cannot overlap; manual CLI
 operations return `busy: <operation>` if another workflow owns the gateway/radio.
 Shutdown cancels and awaits active gateway-owning operations before disconnecting the gateway, so
 a temporary management-radio switch can be restored during cancellation cleanup.
@@ -448,8 +448,8 @@ stored path. It does not repeat every failed read, and it does not retry writes 
 If a stored path fails the initial reachability probes, mchd may send one cheap flood-routed `ver`
 probe to distinguish "node unavailable" from "stored path stale." A flood hit is a path-recovery
 signal, not permission to run the rest of the sync over flood. The operator can then use
-`mch path <node> --discover` or `--advert` to inspect candidate paths and
-`mch path <node> --apply <path[:mode]>` to persist a confirmed replacement path on the gateway
+`mch node path <node> --discover` or `--advert` to inspect candidate paths and
+`mch node path <node> --apply <path[:mode]>` to persist a confirmed replacement path on the gateway
 contact. This preserves the primary traffic rule: normal management should use learned paths and
 avoid hammering the mesh with flood.
 
@@ -542,9 +542,9 @@ The union plan in BACKLOG is retired in favour of this.
 
 **Read-only constraint:** registry `kind="fact"` keys (`ver`, `board`, `role`, `neighbors`) have no
 write command, so only `fact` or `skip` are legal for them; `enforce`/`audit` require a writable
-key with a desired value. This is validated at the `mch set` gate. `mch set NODE KEY --policy fact`
-(no value) declares a fact via the existing policy-only path; `mch unset` clears it; a read-side
-`mch show KEY` (name TBD) prints a key's resolved policy/desired/observed across scopes.
+key with a desired value. This is validated at the `mch config set` gate. `mch config set NODE KEY --policy fact`
+(no value) declares a fact via the existing policy-only path; `mch config unset` clears it; a read-side
+`mch config show KEY` (name TBD) prints a key's resolved policy/desired/observed across scopes.
 
 ### One read pass — never poll a key twice
 
@@ -579,22 +579,22 @@ by a hidden default. A readable key with no scoped row is simply not read — fa
 `default_policy` directive keeps its `enforce`/`audit`/`skip` range; a global "everything is a fact"
 default is meaningless.
 
-Configured fact keys remain checked by `mch validate` against the command registry's readable keys;
+Configured fact keys remain checked by `mch config validate` against the command registry's readable keys;
 unknown keys stay legal with the `get <key>` fallback but warn and suggest close names to prevent a
 typo causing silent repeated reads. Status presentation can still hide cached observation rows whose
 key is no longer configured, retaining the historical row until an explicit cleanup discards it.
 
 ### Slice plan (on branch `facts-as-policy`)
 
-- **F1 (done)** — `SettingPolicy.FACT` + validation + `mch set --policy fact` gate widening.
+- **F1 (done)** — `SettingPolicy.FACT` + validation + `mch config set --policy fact` gate widening.
 - **F2 (done)** — unify the read pass: deleted `_collect_facts`/`_process_settings` into one
   `_process_observations`, routing by resolved policy, one read per key.
-- **F3 (done)** — migrated `config.facts` → global `policy: fact` rows (`mch import`); strict-error
+- **F3 (done)** — migrated `config.facts` → global `policy: fact` rows (`mch config import`); strict-error
   on a leftover `facts:` block; the daemon read pass, the report's "configured facts", and
-  `mch clean facts` all follow each node's resolved fact set (`resolved_fact_keys`) instead of one
+  `mch node clean facts` all follow each node's resolved fact set (`resolved_fact_keys`) instead of one
   global list. Added the single-observation invariant test (no key in both tables). The report/clean
   switch was folded in here (originally F4) to avoid a broken intermediate state.
-- **F4 (done)** — added `mch show NODE KEY`: prints a key's per-scope desired/policy rows, the
+- **F4 (done)** — added `mch config show NODE KEY`: prints a key's per-scope desired/policy rows, the
   resolved policy/desired (with the source scope), and the observed value. Read-only. (The report/
   clean rework moved into F3.)
 - **F5 (separate, bench on luna)** — investigate free/batched/incidental facts; record in JOURNAL
@@ -633,7 +633,7 @@ every packet, so the firmware on the receiving node can use that timestamp to se
 it processes `clock sync`. The correct time comes from the Mac's NTP clock, not from the gateway
 node's own (potentially stale) clock.
 
-`mch plan` is read-only. It compares YAML desired state with the DB's known state and shows:
+`mch fleet plan` is read-only. It compares YAML desired state with the DB's known state and shows:
 planned writes for enforced drift, audit drift that will not write, and values that must be
 observed by a sync before a write can be predicted. It does not send mesh commands.
 
@@ -676,7 +676,7 @@ authorization used when mchd logs into a managed repeater.
 
 ## Two-layer commissioning
 
-`mch new` is a wizard, not an automated flow. It:
+`mch node new` is a wizard, not an automated flow. It:
 
 1. Pauses the work queue so commissioning and normal sync don't contend on the gateway.
 2. Hops to the factory default frequency (869.618 MHz) and discovers unmanaged nodes.
@@ -730,12 +730,12 @@ radio, but a *non-factory* admin password. Recovery cannot rely on the factory p
 
 The commissioning code therefore tries two passwords, in order:
 
-- **`mch new` new-node mode**: factory `password` first, then the user-supplied admin password from the
+- **`mch node new` new-node mode**: factory `password` first, then the user-supplied admin password from the
   wizard form. The CLI generates the private key once before the retry loop, so successive
   attempts use the same key. All mutation commands (`set name`, `set guest.password`, `password`,
   `set prv.key`, `set radio`) are idempotent under re-send with identical params, so the whole
   sequence is replayed each retry without stage tracking.
-- **`mch new` replacement mode**: factory `password` first, then the managed password from
+- **`mch node new` replacement mode**: factory `password` first, then the managed password from
   `secrets.yaml`. The managed identity is operator-owned and pre-existing for this mode, so the
   fallback target is always available when the prefix is in secrets.
 
@@ -758,10 +758,10 @@ restores the factory admin password without auth, after which normal commissioni
 For the current prioritized todo list, wishlist, and explicit non-goals, see `BACKLOG.md`. This
 section only records stable design gaps that affect the architecture.
 
-- **Ghost resolution is one-directional**: `mch issues` shows DB-only ghosts, while `mch prune`
-  and `mch remove` delete their local DB state. Re-adopting a ghost still requires adding it back
+- **Ghost resolution is one-directional**: `mch issues` shows DB-only ghosts, while `mch node prune`
+  and `mch node remove` delete their local DB state. Re-adopting a ghost still requires adding it back
   to config.yaml manually.
-- **Commission idempotency**: running `mch new` on a node already in config/DB has
+- **Commission idempotency**: running `mch node new` on a node already in config/DB has
   undefined behaviour. Should detect and reject.
 - **Commission new ignores group defaults**: the wizard pre-fills radio settings from the gateway
   node's home radio, but does not yet inherit from the matching `config.yaml` group (or a
@@ -777,5 +777,5 @@ section only records stable design gaps that affect the architecture.
   `esptool` erase/write commands is enough for now. This should stay outside normal sync and
   commissioning automation.
 - **Command naming**: the detail view should continue moving toward
-  `mch status <label-or-prefix>` as the primary interface. Older `mch node` wording should be
+  `mch fleet status <label-or-prefix>` as the primary interface. Older `mch node` wording should be
   treated as legacy documentation.

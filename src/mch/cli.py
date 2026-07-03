@@ -255,7 +255,7 @@ def _check_default_config_when_daemon_unavailable() -> None:
         cfg = load_config(config_path, load_secrets=False)
     except (PermissionError, ValueError, OSError) as exc:
         click.echo(f"  config check failed: {exc}", err=True)
-        click.echo("  run: mch validate", err=True)
+        click.echo("  run: mch config validate", err=True)
         return
     click.echo(f"  config ok: {cfg.config_path}", err=True)
 
@@ -486,7 +486,7 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
             f"warning: cannot read secrets file: {exc.filename or cfg.secrets_path or exc}",
             err=True,
         )
-        click.echo("  try: sudo mch validate", err=True)
+        click.echo("  try: sudo mch config validate", err=True)
         raise SystemExit(1) from None
     except (ValueError, OSError) as exc:
         click.echo(f"error: config validation failed: {exc}", err=True)
@@ -965,7 +965,9 @@ def _render_path_candidate(data: dict[str, Any]) -> None:
     click.echo(f"  path_len: {data.get('path_len') if data.get('path_len') is not None else '-'}")
     click.echo(f"  path_hash_mode: {data.get('path_hash_mode')}")
     if data.get("apply_value"):
-        click.echo(f"  apply with: mch path {data['pubkey'][:12]} --apply {data['apply_value']}")
+        click.echo(
+            f"  apply with: mch node path {data['pubkey'][:12]} --apply {data['apply_value']}"
+        )
 
 
 def _render_discovery(data: dict[str, Any]) -> None:
@@ -1047,7 +1049,7 @@ def _render_adopt_result(data: dict[str, Any]) -> None:
             click.echo(f"  confirm probe: FAILED - {confirm.get('response') or 'no response'}")
             click.echo("    (direct route did not carry a directed command on this radio)")
     click.echo("")
-    click.echo(f"next: mch status {(data.get('label') or data.get('pubkey') or '')[:12]}")
+    click.echo(f"next: mch fleet status {(data.get('label') or data.get('pubkey') or '')[:12]}")
 
 
 def _render_issue_sections(
@@ -1264,8 +1266,8 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
     Optionally filter by pubkey prefix or name substring:
 
-      mch contacts 4e       # pubkeys starting with 4e
-      mch contacts mill     # names containing "mill"
+      mch node contacts 4e       # pubkeys starting with 4e
+      mch node contacts mill     # names containing "mill"
 
     Prints ready-to-paste YAML snippets. Review and append to the nodes:
     section of your config.yaml for any nodes you want mch to manage.
@@ -1483,14 +1485,16 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed local DB state.")
 @click.pass_context
 def prune(ctx: click.Context, yes: bool) -> None:
-    """List or hard-delete retired nodes (the purge step after `mch retire`)."""
+    """List or hard-delete retired nodes (the purge step after `mch node retire`)."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
     candidates = data.get("candidates", [])
 
     if not candidates:
         click.echo("no retired nodes to prune")
-        click.echo("retire a node first with `mch retire <node>`; secrets.yaml is left unchanged")
+        click.echo(
+            "retire a node first with `mch node retire <node>`; secrets.yaml is left unchanged"
+        )
         return
 
     label_w = max(
@@ -1531,7 +1535,7 @@ def prune(ctx: click.Context, yes: bool) -> None:
         click.echo(f"deleted {data.get('deleted', 0)} retired node(s) from local DB state")
     else:
         click.echo("")
-        click.echo("run 'mch prune --yes' to delete these local DB rows")
+        click.echo("run 'mch node prune --yes' to delete these local DB rows")
     click.echo("secrets.yaml entries are left unchanged")
 
 
@@ -1664,7 +1668,7 @@ def clean_settings(
 
     Orphans appear when a key is unset, dropped from a group/global, or the node
     leaves config. Observed rows are a cache, so deleting them is safe - they are
-    re-observed next sync if still wanted. Desired state (mch set) is untouched.
+    re-observed next sync if still wanted. Desired state (mch config set) is untouched.
     """
     scopes = sum(1 for value in (node, group_name, all_nodes) if value)
     if scopes != 1:
@@ -1697,7 +1701,7 @@ def clean_settings(
 )
 @click.pass_context
 def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
-    """Delete one node's local DB state (prefer `mch retire` to stop managing a node)."""
+    """Delete one node's local DB state (prefer `mch node retire` to stop managing a node)."""
     resp = _rpc(
         ctx.obj["socket"],
         {"cmd": "remove", "query": node, "dry_run": True, "force": force},
@@ -1736,13 +1740,13 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
 def retire_node(ctx: click.Context, node: str) -> None:
     """Stop managing a node: exclude it from sync and unfavourite it, keeping its history.
 
-    Retire-don't-delete. Re-manage later with `mch unretire`, or purge the history with
-    `mch prune`.
+    Retire-don't-delete. Re-manage later with `mch node unretire`, or purge the history with
+    `mch node prune`.
     """
     data = _check(_rpc(ctx.obj["socket"], {"cmd": "retire", "query": node}))
     ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
     click.echo(f"retired {ident} ({_pk(data.get('pubkey'))}) — state now {data.get('state')}")
-    click.echo("excluded from sync and unfavourited; history kept. `mch unretire` to undo.")
+    click.echo("excluded from sync and unfavourited; history kept. `mch node unretire` to undo.")
 
 
 @node_group.command("unretire")
@@ -1826,7 +1830,7 @@ def _suggest_detail(n: dict[str, Any]) -> None:
     if count is None:
         click.echo(
             "(no neighbour data - add 'neighbors' to facts: in config.yaml"
-            " and run mch sync to start collecting it)"
+            " and run mch fleet sync to start collecting it)"
         )
         click.echo("")
     else:
@@ -1891,7 +1895,7 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
 
     if blocked:
         click.echo(
-            f"error: '{blocked}' is blocked in mch exec - use config operations instead",
+            f"error: '{blocked}' is blocked in mch node exec - use config operations instead",
             err=True,
         )
         raise SystemExit(1)
@@ -1971,9 +1975,9 @@ def set_setting(
     """Record a desired setting in the DB (the source of truth).
 
     \b
-    Node scope:   mch set NODE KEY [VALUE]
-    Group scope:  mch set --group NAME KEY [VALUE]
-    Global scope: mch set --global KEY [VALUE]
+    Node scope:   mch config set NODE KEY [VALUE]
+    Group scope:  mch config set --group NAME KEY [VALUE]
+    Global scope: mch config set --global KEY [VALUE]
 
     NODE: pubkey prefix, label substring, or name substring.
     KEY:  a writable setting (e.g. name, txdelay), or a read-only fact key
@@ -1982,19 +1986,19 @@ def set_setting(
            --policy fact/skip take no value).
     Node wins over group wins over global at resolution time.
 
-    Writing is synchronous, so `mch status` shows the new intent immediately. Nodes
-    converge on the next sync cycle, or run `mch sync` to converge now.
+    Writing is synchronous, so `mch fleet status` shows the new intent immediately. Nodes
+    converge on the next sync cycle, or run `mch fleet sync` to converge now.
     """
     scope = _scope_from_flags(group_name, global_scope)
     # With nargs the positionals shift: group/global drop the NODE arg, so KEY is first.
     if scope == "node":
         if not 2 <= len(args) <= 3:
-            raise click.UsageError("usage: mch set NODE KEY [VALUE]")
+            raise click.UsageError("usage: mch config set NODE KEY [VALUE]")
         node, key, value = args[0], args[1], (args[2] if len(args) == 3 else None)
     else:
         if not 1 <= len(args) <= 2:
             raise click.UsageError(
-                "usage: mch set --group NAME KEY [VALUE]  (or --global KEY [VALUE])"
+                "usage: mch config set --group NAME KEY [VALUE]  (or --global KEY [VALUE])"
             )
         node, key, value = None, args[0], (args[1] if len(args) == 2 else None)
 
@@ -2024,9 +2028,9 @@ def set_setting(
     detail = " ".join(parts) or "(no change)"
     _scoped_target_echo("set", key, detail, data)
     if data.get("scope", "node") == "node":
-        click.echo(f"run: mch sync {data['pubkey'][:8]}  to converge now")
+        click.echo(f"run: mch fleet sync {data['pubkey'][:8]}  to converge now")
     else:
-        click.echo("run: mch sync  to converge the fleet now")
+        click.echo("run: mch fleet sync  to converge the fleet now")
 
 
 @config_group.command("unset")
@@ -2045,19 +2049,19 @@ def unset_setting(
     """Remove a DB-set desired setting (leaves observed state alone).
 
     \b
-    Node scope:   mch unset NODE KEY
-    Group scope:  mch unset --group NAME KEY
-    Global scope: mch unset --global KEY
+    Node scope:   mch config unset NODE KEY
+    Group scope:  mch config unset --group NAME KEY
+    Global scope: mch config unset --global KEY
     """
     scope = _scope_from_flags(group_name, global_scope)
     if scope == "node":
         if len(args) != 2:
-            raise click.UsageError("usage: mch unset NODE KEY")
+            raise click.UsageError("usage: mch config unset NODE KEY")
         node, key = args[0], args[1]
     else:
         if len(args) != 1:
             raise click.UsageError(
-                "usage: mch unset --group NAME KEY  (or --global KEY)"
+                "usage: mch config unset --group NAME KEY  (or --global KEY)"
             )
         node, key = None, args[0]
 
@@ -2081,7 +2085,7 @@ def show_setting(ctx: click.Context, node: str, key: str) -> None:
     """Explain one KEY for one NODE: per-scope config, what resolves, what's observed.
 
     \b
-    mch show NODE KEY
+    mch config show NODE KEY
 
     Shows the desired/policy row at each scope (global, the node's group, the node),
     the resolved policy and desired value (Node > Group > Global), and the value mch
@@ -2254,11 +2258,11 @@ def import_config(
     Idempotent - re-running upserts the same rows. A node not yet seen by the gateway is
     skipped with a warning until it appears in the DB.
 
-    Pass an explicit CONFIG_FILE (a legacy or `mch export`-ed file) to import from it instead
+    Pass an explicit CONFIG_FILE (a legacy or `mch config export`-ed file) to import from it instead
     of the daemon's loaded config. This is the migration path once config.yaml no longer holds
-    desired state — the daemon process must be able to read the file. A full `mch export` backup
-    also restores nodes the gateway has not seen yet; use --retired to choose what happens to any
-    retired nodes it carries.
+    desired state — the daemon process must be able to read the file. A full `mch config export`
+    backup also restores nodes the gateway has not seen yet; use --retired to choose what
+    happens to any retired nodes it carries.
     """
     cmd: dict[str, Any] = {"cmd": "import", "dry_run": not yes}
     if config_file is not None:
@@ -2314,8 +2318,8 @@ def import_config(
 def export_config(ctx: click.Context) -> None:
     """Dump the DB's desired state as config.yaml-shaped YAML (the inverse of import).
 
-    Prints to stdout - redirect to save (`mch export > desired.yaml`). Round-trips with
-    `mch import`. Observed state and operations are not included.
+    Prints to stdout - redirect to save (`mch config export > desired.yaml`). Round-trips with
+    `mch config import`. Observed state and operations are not included.
     """
     data = _check(_rpc(ctx.obj["socket"], {"cmd": "export"}))
     if not data.get("total"):
@@ -2774,7 +2778,7 @@ def _commission_new_wizard(
     click.echo("")
     click.echo("Node commissioned successfully.")
     click.echo("")
-    click.echo("Save this to a file (e.g. new-node.yaml) and apply it with `mch import`:")
+    click.echo("Save this to a file (e.g. new-node.yaml) and apply it with `mch config import`:")
     click.echo("")
     click.echo(d.get("import_yaml", ""))
     click.echo("")
@@ -2785,9 +2789,9 @@ def _commission_new_wizard(
     click.echo("Next steps:")
     click.echo("  1. Add the secrets entry to secrets.yaml")
     click.echo("  2. Reload mchd so it seeds the new node from gateway favourites")
-    click.echo("  3. Run: mch import new-node.yaml   (then again with --yes to write)")
-    click.echo(f"  4. Run: mch status {pubkey_prefix}")
-    click.echo(f"  5. Optional: mch sync {pubkey_prefix}")
+    click.echo("  3. Run: mch config import new-node.yaml   (then again with --yes to write)")
+    click.echo(f"  4. Run: mch fleet status {pubkey_prefix}")
+    click.echo(f"  5. Optional: mch fleet sync {pubkey_prefix}")
 
 
 def _commission_replace_wizard(socket: str) -> None:
@@ -2859,7 +2863,7 @@ def _commission_replace_wizard(socket: str) -> None:
     click.echo(
         f"Replacement complete. '{label}' ({prefix}) is rebooting with its restored identity."
     )
-    click.echo(f"Once it comes back up, run: mch sync {prefix}")
+    click.echo(f"Once it comes back up, run: mch fleet sync {prefix}")
 
 
 # ---------------------------------------------------------------------------

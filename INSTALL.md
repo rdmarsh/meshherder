@@ -89,11 +89,11 @@ Check it started:
 
 ```bash
 sudo systemctl status mchd
-mch status
+mch fleet status
 ```
 
 > **Note:** the systemd unit is named `mchd` - always use `systemctl ... mchd`, not `mch`.
-> The `mch start`, `mch stop`, and `mch restart` CLI commands are shortcuts to the same thing.
+> The `mch daemon start`, `mch daemon stop`, and `mch daemon restart` CLI commands are shortcuts to the same thing.
 
 ## udev rule
 
@@ -204,7 +204,7 @@ the current directory, so an old copied tree can downgrade the daemon even when 
 systemd unit are otherwise correct.
 
 If `mchd` exits because `config.yaml` is invalid, the service stops instead of restart-looping.
-Fix the config with `mch validate`, then restart `mchd`.
+Fix the config with `mch config validate`, then restart `mchd`.
 
 ## Testing a feature branch on the bench
 
@@ -238,8 +238,8 @@ systemctl status mchd --no-pager
 ```
 
 **Test safely first.** Prefer read-only and dry-run commands before anything that writes. Commands
-that only read the DB or mesh (`mch status`, `mch export`, `mch plan`) are safe; `mch import`
-defaults to a dry-run preview and only writes with `--yes`. `mch import`/`mch export` are local DB
+that only read the DB or mesh (`mch fleet status`, `mch config export`, `mch fleet plan`) are safe; `mch config import`
+defaults to a dry-run preview and only writes with `--yes`. `mch config import`/`mch config export` are local DB
 operations with no mesh traffic, so they cannot strand or disturb field nodes.
 
 **Return to `main` when done:**

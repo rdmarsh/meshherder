@@ -63,7 +63,7 @@ db_path: /var/lib/meshherder/mch.db
 socket_path: /run/meshherder/mchd.sock
 secrets_file: /etc/meshherder/secrets.yaml   # optional; defaults to secrets.yaml in the same directory as config.yaml
 
-# Profiles file for 'mch suggest'. Three options (in priority order):
+# Profiles file for 'mch config suggest'. Three options (in priority order):
 #
 #   profiles_file: /etc/meshherder/profiles.yaml   # use a local override file
 #   profiles_url:  https://example.com/profiles.yaml  # fetch on startup, cached 24h
@@ -77,7 +77,7 @@ secrets_file: /etc/meshherder/secrets.yaml   # optional; defaults to secrets.yam
 # Facts collected from every node each sync cycle (read-only CMDB data).
 # All fact commands run within a single node session; inter_node_delay_seconds
 # sits between nodes, not between individual fact commands. 'ver' and 'board'
-# use the bare command; most other keys use 'get <key>'. `mch validate` warns
+# use the bare command; most other keys use 'get <key>'. `mch config validate` warns
 # about unregistered fact keys and suggests close known names, but permits them
 # so newly introduced firmware reads can still be investigated deliberately.
 facts:
@@ -87,12 +87,12 @@ facts:
   - owner.name   # operator name set on the node
   - lat          # latitude - stored per-node for network planning and mapping tools
   - lon          # longitude
-  - neighbors    # neighbour count - used by 'mch suggest' to suggest txdelay settings
+  - neighbors    # neighbour count - used by 'mch config suggest' to suggest txdelay settings
 
 # Messenger: incoming DM commands and cycle announcements.
 messenger:
   # Only nodes whose public key starts with one of these prefixes can issue DM
-  # commands to mchd. Get the public key from 'mch contacts' or 'meshcli list'.
+  # commands to mchd. Get the public key from 'mch node contacts' or 'meshcli list'.
   # The mesh protocol only includes the first 12 characters of a public key in
   # messages, so only those 12 characters are actually checked - 12 characters is
   # sufficient. Using the full key is fine too and makes the intent unambiguous.
@@ -216,7 +216,7 @@ groups:
 
 # Nodes: one entry per managed node.
 # pubkey_prefix: at least 8 hex characters of the node's public key.
-# Run 'mch contacts' to see nodes visible to the gateway with their public keys.
+# Run 'mch node contacts' to see nodes visible to the gateway with their public keys.
 nodes:
 
   # Minimal entry: group and label, inherits all group settings and policy.
@@ -274,7 +274,7 @@ nodes:
   # Do not use recurring operations for admin password rotation. mchd stores one
   # current admin password per node in secrets.yaml; change passwords as an
   # operator action, edit secrets.yaml immediately, reload mchd, and confirm
-  # with `mch sync <prefix>`. mchd never edits config.yaml or secrets.yaml.
+  # with `mch fleet sync <prefix>`. mchd never edits config.yaml or secrets.yaml.
   - pubkey_prefix: 11223344
     label: SiteD-Remote
     group: solar-nodes

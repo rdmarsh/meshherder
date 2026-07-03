@@ -1,10 +1,10 @@
-.TH MCH 1 "2026-05-31" "meshherder 0.9.1" "User Commands"
+.TH MCH 1 "2026-07-03" "meshherder 0.11.0" "User Commands"
 .SH NAME
 mch \- manage MeshCore repeater nodes through the mchd daemon
 .SH SYNOPSIS
 .B mch
 [\fB--socket\fR \fIPATH\fR]
-\fICOMMAND\fR
+\fIGROUP\fR \fICOMMAND\fR
 [\fIARGS\fR]
 .SH DESCRIPTION
 .B mch
@@ -14,11 +14,24 @@ over a Unix socket and shows fleet status, validates configuration,
 triggers syncs, runs carefully checked one-off commands, and guides node
 commissioning.
 .PP
-Mesh Herder treats
-.I config.yaml
-as desired state and the SQLite database as observed state. The daemon applies
-only the settings that are explicitly configured for enforcement; the default
-setting policy is audit.
+Commands are organised under four noun groups so the top-level menu stays
+shallow:
+.B daemon
+(process lifecycle),
+.B fleet
+(whole-fleet status, sync, plan, logs),
+.B node
+(per-node inventory, lifecycle, and diagnostics), and
+.B config
+(desired state plus backup and validation). Run
+.B "mch \-\-help"
+to list the groups and, for example,
+.B "mch node \-\-help"
+to list a group's commands.
+.PP
+Mesh Herder treats the SQLite database as the authoritative source of desired
+state and observed state alike. The daemon applies only the settings that are
+explicitly configured for enforcement; the default setting policy is audit.
 .SH OPTIONS
 .TP
 .B \-\-version
@@ -33,131 +46,123 @@ Unix socket. Defaults to
 .B \-\-help
 Show command help.
 .SH COMMANDS
+.SS daemon \(em process lifecycle
 .TP
-.B status
+.B daemon start
+Start
+.B mchd
+through systemd.
+.TP
+.B daemon stop
+Stop
+.B mchd
+through systemd.
+.TP
+.B daemon restart
+Restart
+.B mchd
+through systemd.
+.TP
+.B daemon admin \fR[\fICLI ARGS...\fR]
+Stop
+.BR mchd ,
+run
+.B meshcore-cli
+against the configured gateway serial device, then restart
+.B mchd
+after the admin session.
+.SS fleet \(em whole-fleet views
+.TP
+.B fleet status
 Show the fleet table, including state, label, group, firmware, neighbour count,
 and last seen time.
 .TP
-.B status \fILABEL_OR_PREFIX\fR
+.B fleet status \fILABEL_OR_PREFIX\fR
 Show one matching node in detail, or a filtered table if more than one node
 matches. The detail view shows facts, settings (desired vs observed, including
 settings from config not yet synced), last seen timestamp with relative time,
 and recent activity logs.
 .TP
-.B validate
-Validate
-.IR /etc/meshherder/config.yaml .
-This command does not contact
-.BR mchd .
-If the secrets file is not readable, the readable config is still checked and
-secrets are reported as not checked.
-Unrecognised names in the configured facts list are reported as warnings with
-close registered-name suggestions where possible; they remain permitted for
-new firmware reads that are not yet represented in mch metadata.
+.B fleet sync
+Start an immediate full sync cycle in the background. Rate limiting still
+applies.
 .TP
-.B validate \-\-config \fIPATH\fR
-Validate an explicit config file.
+.B fleet sync \fILABEL_OR_PREFIX\fR
+Sync one node immediately while streaming fact reads, setting checks, enforcement
+actions, operations, and timeout failures as they occur.
 .TP
-.B plan
+.B fleet plan
 Show desired-versus-known changes without sending mesh commands or writing to
 nodes.
 .TP
-.B plan \fILABEL_OR_PREFIX\fR
+.B fleet plan \fILABEL_OR_PREFIX\fR
 Filter planned writes, audit drift, and unknown values.
 .TP
-.B set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]
-Record a desired setting in the database, the authoritative source of desired
-state. \fIKEY\fR is a writable setting (for example \fBname\fR or \fBtxdelay\fR) or
-a directive (\fBname_prefix\fR, \fBdefault_policy\fR, \fBvia_radio\fR). The write is
-synchronous and does not trigger a sync; run
-.B sync
-.I NODE
-to converge. Use
-.B \-\-group
-.I NAME
-or
-.B \-\-global
-to set the value at group or global scope instead of one node.
-.TP
-.B unset \fINODE KEY\fR
-Remove a database-set desired setting; observed state is left intact. Accepts
-.B \-\-group
-.I NAME
-and
-.B \-\-global
-like
-.BR set .
-.TP
-.B import [\fIFILE\fR] [\-\-yes]
-Seed the database's desired state and node label/group inventory from
-.IR config.yaml ,
-or from an explicit
-.I FILE
-(a legacy or exported config), flattening settings and directives at node, group,
-and global scope into desired rows. The explicit-file form lets the migration
-on-ramp work against a daemon that no longer keeps desired state in its own
-.IR config.yaml .
-Without
-.B \-\-yes
-this is a dry-run preview. Re-running is idempotent. A node identified by a full
-64-hex public key (as
-.B export
-emits) is created even if the gateway has not seen it yet \(em the restore path; a
-node given only a short prefix needs to be known already and is otherwise skipped
-with a warning. If the file contains retired nodes (tagged
-.BR "retired: true" ),
-choose
-.B \-\-retired keep
-to restore them as retired or
-.B \-\-retired skip
-to omit them; a write is refused until one is chosen.
-.TP
-.B export
-Print the whole fleet as config.yaml-shaped YAML on standard output \(em a complete
-backup and the inverse of
-.BR import .
-Includes every node's full public key, label, group, desired settings, and
-operations (even a node with no desired settings); retired nodes are tagged
-.BR "retired: true" .
-Redirect to save, for example
-.BR "mch export > backup.yaml" ,
-and rebuild after a server or gateway loss with
-.BR "mch import backup.yaml \-\-yes" .
-.TP
-.B suggest
-Show suggested settings for all nodes based on neighbour count.
-.TP
-.B suggest \fILABEL_OR_PREFIX\fR
-Show detailed suggestions and a paste-ready config block for one node.
-.TP
-.B logs
+.B fleet logs
 Show recent per-node activity across all nodes.
 .TP
-.B logs \fIPREFIX\fR
+.B fleet logs \fIPREFIX\fR
 Show recent activity for one node.
+.SS node \(em per-node inventory, lifecycle, and diagnostics
 .TP
-.B contacts
+.B node new
+Interactively add a fresh or replacement MeshCore node.
+.TP
+.B node contacts
 Show repeater contacts visible to the gateway that are not yet in config.
 .TP
-.B retire \fILABEL_OR_PREFIX\fR
+.B node discover \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-dwell \fISECONDS\fR] [\-\-unknown\-only]
+Temporarily switch the gateway radio, send an active MeshCore discovery request,
+collect responses for a bounded dwell period, then restore the gateway radio.
+This prints discovered public keys, type, SNR, status, and matching label. It
+does not add DB nodes, gateway contacts, secrets, or config entries. With
+.B \-\-unknown\-only ,
+fully managed nodes are hidden while config-only, DB-only, and unmanaged nodes
+remain visible.
+.TP
+.B node adopt \fIPUBKEY\fR \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-label \fILABEL\fR]
+Adopt an already-running discovered repeater by full 64-character public key.
+This adds/updates the local DB node, adds and favourites a gateway contact,
+installs a direct (zero-hop) route on it, then sends one directed
+.B ver
+on the discovered radio to confirm the route carries a command (restoring the
+gateway radio afterwards). It does not edit
+.IR config.yaml ,
+.IR secrets.yaml ,
+or hardware settings.
+.TP
+.B node retire \fILABEL_OR_PREFIX\fR
 Stop managing a node: set its state to
 .BR retired ,
 unfavourite its gateway contact (clearing the eviction pin; the contact itself is
 kept), and exclude it from sync, while keeping its history. Retire-don't-delete is
 the normal way to decommission a node.
 .TP
-.B unretire \fILABEL_OR_PREFIX\fR
+.B node unretire \fILABEL_OR_PREFIX\fR
 Return a retired node to management: re-favourite it and queue it to reconverge.
 .TP
-.B prune
+.B node prune
 List retired nodes \(em the candidates for a hard delete.
 .TP
-.B prune \-\-yes
+.B node prune \-\-yes
 Hard-delete retired nodes' local database state (facts, settings, operations, logs,
 and the node row). This does not edit
 .IR secrets.yaml .
 .TP
-.B clean facts \fINODE\fR [\-\-fact \fIKEY\fR] [\-\-yes]
+.B node remove \fILABEL_OR_PREFIX\fR
+Delete one node's local database state after confirmation. This deletes local
+facts, settings, operations, logs, and the database node row. It refuses a
+still-managed (non-retired) node unless
+.B \-\-force
+is supplied, because an un-retired node is re-seeded from gateway favourites on the
+next restart \(em prefer
+.B "node retire"
+for active nodes.
+.TP
+.B node remove \fILABEL_OR_PREFIX\fR \-\-yes
+Delete without prompting.
+.TP
+.B node clean facts \fINODE\fR [\-\-fact \fIKEY\fR] [\-\-yes]
 List or delete cached fact rows that are no longer present in the configured
 .B facts:
 list. Scope may be one node,
@@ -169,7 +174,7 @@ Without
 .B \-\-yes
 this is a dry run.
 .TP
-.B clean settings \fINODE\fR [\-\-setting \fIKEY\fR] [\-\-yes]
+.B node clean settings \fINODE\fR [\-\-setting \fIKEY\fR] [\-\-yes]
 List or delete observed setting rows whose key is no longer in the node's resolved
 desired set (config plus database). Scope may be one node,
 .B \-\-group
@@ -181,28 +186,7 @@ Without
 this is a dry run. Observed rows are a cache and are re-read on the next sync if
 still wanted.
 .TP
-.B remove \fILABEL_OR_PREFIX\fR
-Delete one node's local database state after confirmation. This deletes local
-facts, settings, operations, logs, and the database node row. It refuses a
-still-managed (non-retired) node unless
-.B \-\-force
-is supplied, because an un-retired node is re-seeded from gateway favourites on the
-next restart \(em prefer
-.B retire
-for active nodes.
-.TP
-.B remove \fILABEL_OR_PREFIX\fR \-\-yes
-Delete without prompting.
-.TP
-.B sync
-Start an immediate full sync cycle in the background. Rate limiting still
-applies.
-.TP
-.B sync \fILABEL_OR_PREFIX\fR
-Sync one node immediately while streaming fact reads, setting checks, enforcement
-actions, operations, and timeout failures as they occur.
-.TP
-.B path \fILABEL_OR_PREFIX\fR
+.B node path \fILABEL_OR_PREFIX\fR
 Show the gateway's cached management route metadata for one node without probing
 the mesh. Routes may be
 .BR direct ,
@@ -217,40 +201,20 @@ are marked
 .B "path repair needed"
 because full management syncs avoid flood-routed contacts.
 .TP
-.B path \fILABEL_OR_PREFIX\fR \-\-discover
+.B node path \fILABEL_OR_PREFIX\fR \-\-discover
 Ask MeshCore for a fresh path-discovery candidate and print the value to review.
 The gateway contact is not changed.
 .TP
-.B path \fILABEL_OR_PREFIX\fR \-\-advert
+.B node path \fILABEL_OR_PREFIX\fR \-\-advert
 Print the gateway's cached advert path candidate without changing the contact.
 .TP
-.B path \fILABEL_OR_PREFIX\fR \-\-apply \fIPATH[:MODE]\fR
+.B node path \fILABEL_OR_PREFIX\fR \-\-apply \fIPATH[:MODE]\fR
 Apply an operator-approved replacement path to the gateway contact. Re-run
-.B sync
+.B "fleet sync"
 for the node after applying. A wrong path can make management less reachable
 until repaired again.
 .TP
-.B discover \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-dwell \fISECONDS\fR] [\-\-unknown\-only]
-Temporarily switch the gateway radio, send an active MeshCore discovery request,
-collect responses for a bounded dwell period, then restore the gateway radio.
-This prints discovered public keys, type, SNR, status, and matching label. It
-does not add DB nodes, gateway contacts, secrets, or config entries. With
-.B \-\-unknown\-only ,
-fully managed nodes are hidden while config-only, DB-only, and unmanaged nodes
-remain visible.
-.TP
-.B adopt \fIPUBKEY\fR \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-label \fILABEL\fR]
-Adopt an already-running discovered repeater by full 64-character public key.
-This adds/updates the local DB node, adds and favourites a gateway contact,
-installs a direct (zero-hop) route on it, then sends one directed
-.B ver
-on the discovered radio to confirm the route carries a command (restoring the
-gateway radio afterwards). It does not edit
-.IR config.yaml ,
-.IR secrets.yaml ,
-or hardware settings.
-.TP
-.B probe \fILABEL_OR_PREFIX\fR \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-login] [\-\-advert]
+.B node probe \fILABEL_OR_PREFIX\fR \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-login] [\-\-advert]
 Read-only reachability check: temporarily switch the gateway radio, send one
 directed
 .B ver
@@ -267,57 +231,123 @@ back. Changes nothing on the node, the contact route,
 or
 .IR secrets.yaml .
 .TP
-.B exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
+.B node exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
 Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked
 or require confirmation.
+.SS config \(em desired state, backup, and validation
 .TP
-.B new
-Interactively add a fresh or replacement MeshCore node.
+.B config set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]
+Record a desired setting in the database, the authoritative source of desired
+state. \fIKEY\fR is a writable setting (for example \fBname\fR or \fBtxdelay\fR) or
+a directive (\fBname_prefix\fR, \fBdefault_policy\fR, \fBvia_radio\fR). The write is
+synchronous and does not trigger a sync; run
+.B "fleet sync"
+.I NODE
+to converge. Use
+.B \-\-group
+.I NAME
+or
+.B \-\-global
+to set the value at group or global scope instead of one node.
 .TP
-.B start
-Start
-.B mchd
-through systemd.
+.B config unset \fINODE KEY\fR
+Remove a database-set desired setting; observed state is left intact. Accepts
+.B \-\-group
+.I NAME
+and
+.B \-\-global
+like
+.BR "config set" .
 .TP
-.B stop
-Stop
-.B mchd
-through systemd.
+.B config show \fINODE KEY\fR
+Explain one key for one node: how each scope sets it, what resolves, and what is
+observed.
 .TP
-.B restart
-Restart
-.B mchd
-through systemd.
+.B config suggest
+Show suggested settings for all nodes based on neighbour count.
+.TP
+.B config suggest \fILABEL_OR_PREFIX\fR
+Show detailed suggestions and a paste-ready config block for one node.
+.TP
+.B config import [\fIFILE\fR] [\-\-yes]
+Seed the database's desired state and node label/group inventory from
+.IR config.yaml ,
+or from an explicit
+.I FILE
+(a legacy or exported config), flattening settings and directives at node, group,
+and global scope into desired rows. The explicit-file form lets the migration
+on-ramp work against a daemon that no longer keeps desired state in its own
+.IR config.yaml .
+Without
+.B \-\-yes
+this is a dry-run preview. Re-running is idempotent. A node identified by a full
+64-hex public key (as
+.B "config export"
+emits) is created even if the gateway has not seen it yet \(em the restore path; a
+node given only a short prefix needs to be known already and is otherwise skipped
+with a warning. If the file contains retired nodes (tagged
+.BR "retired: true" ),
+choose
+.B \-\-retired keep
+to restore them as retired or
+.B \-\-retired skip
+to omit them; a write is refused until one is chosen.
+.TP
+.B config export
+Print the whole fleet as config.yaml-shaped YAML on standard output \(em a complete
+backup and the inverse of
+.BR "config import" .
+Includes every node's full public key, label, group, desired settings, and
+operations (even a node with no desired settings); retired nodes are tagged
+.BR "retired: true" .
+Redirect to save, for example
+.BR "mch config export > backup.yaml" ,
+and rebuild after a server or gateway loss with
+.BR "mch config import backup.yaml \-\-yes" .
+.TP
+.B config validate
+Validate
+.IR /etc/meshherder/config.yaml .
+This command does not contact
+.BR mchd .
+If the secrets file is not readable, the readable config is still checked and
+secrets are reported as not checked.
+Unrecognised names in the configured facts list are reported as warnings with
+close registered-name suggestions where possible; they remain permitted for
+new firmware reads that are not yet represented in mch metadata.
+.TP
+.B config validate \-\-config \fIPATH\fR
+Validate an explicit config file.
 .SH FILES
 .TP
 .I /etc/meshherder/config.yaml
-Desired fleet state.
+Daemon and gateway settings (desired state now lives in the database).
 .TP
 .I /etc/meshherder/secrets.yaml
 Node passwords and private keys. Usually mode 600 and readable only by the
 service account.
 .TP
 .I /var/lib/meshherder/mch.db
-Observed state, command history, facts, and sync schedule.
+Desired and observed state, command history, facts, and sync schedule.
 .TP
 .I /run/meshherder/mchd.sock
 Default daemon socket.
 .SH EXAMPLES
 .TP
-.B mch validate
+.B mch config validate
 Validate the active config file, and validate secrets too if they are readable.
 .TP
-.B sudo mch validate
+.B sudo mch config validate
 Validate both production config and mode-600 secrets.
 .TP
-.B mch status qh
+.B mch fleet status qh
 Show nodes matching
 .IR qh .
 .TP
-.B mch sync qh-wold
+.B mch fleet sync qh-wold
 Sync one node immediately and show live progress while waiting for mesh replies.
 .TP
-.B mch remove old-site --yes
+.B mch node remove old-site --yes
 Delete local DB state for a retired node.
 .SH SEE ALSO
 .BR mchd (8),

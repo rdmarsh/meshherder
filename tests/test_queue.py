@@ -287,7 +287,7 @@ async def _seed_desired(db: Database, cfg: Config, contacts: list[dict]) -> None
     """Seed the DB with the desired state a test expresses via its Config (sunset bridge).
 
     The sync engine now resolves desired state and node group from the DB, not config.yaml.
-    This mirrors `mch import`: it upserts a DB node (with its group) for each config node it
+    This mirrors `mch config import`: it upserts a DB node (with its group) for each config node it
     can match to a contact, then writes every desired setting/directive as a desired_settings
     row via the production config_to_desired_rows. Tests keep declaring intent as a Config; this
     bridges it into the DB so run_cycle/sync paths see it.
@@ -2517,7 +2517,7 @@ async def test_reschedule_overdue_leaves_future_nodes_alone(db):
 
 
 # ------------------------------------------------------------------
-# unfiled contacts (mch contacts)
+# unfiled contacts (mch node contacts)
 # ------------------------------------------------------------------
 
 async def test_unfiled_contacts_excludes_managed_nodes(db):
@@ -3429,7 +3429,7 @@ async def test_open_node_warning_logged_when_no_acl(db, caplog):
 
 
 async def test_open_node_warning_written_to_db_logs(db):
-    """Open-node warning is written to the DB logs table (visible in mch logs / mch node)."""
+    """Open-node warning is written to the DB logs table (visible in mch fleet logs / mch node)."""
     node_cfg = _node(pubkey="aabbcc", label="Open Node")
     cfg = _make_config(node_cfgs=[node_cfg])
     cfg.facts = []

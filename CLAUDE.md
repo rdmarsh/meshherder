@@ -44,12 +44,12 @@ mypy src/
 # Run daemon (dev)
 mchd --config config.yaml
 
-# Control CLI
-mch status
-mch start
-mch stop
-mch sync          # trigger immediate sync cycle
-mch node <name>   # show detail for one node
+# Control CLI — commands are grouped under nouns: daemon, fleet, node, config
+mch fleet status          # fleet overview
+mch daemon start
+mch daemon stop
+mch fleet sync            # trigger immediate sync cycle
+mch fleet status <name>   # show detail for one node
 ```
 
 ## Testing
@@ -82,9 +82,12 @@ Managed repeater nodes
 
 **`mch` CLI**
 - Thin client: sends commands to `mchd` over the Unix socket and prints the response.
-- `mch status` — fleet overview: 8-column table (STATE, LABEL, GROUP, NAME, NBRS, VER, LAST SEEN, PUBKEY) + issue count; footer when issues > 0.
-- `mch start` / `mch stop` — lifecycle (for use outside systemd; systemd uses `systemctl`).
-- `mch node <name-or-pubkey-prefix>` — per-node detail with command history.
+- Commands are grouped under four nouns — `daemon` (lifecycle), `fleet` (status/sync/plan/logs),
+  `node` (inventory + per-node ops), `config` (desired state + backup). The top-level menu lists
+  only the groups; e.g. `mch --help` then `mch node --help`.
+- `mch fleet status` — fleet overview: 8-column table (STATE, LABEL, GROUP, NAME, NBRS, VER, LAST SEEN, PUBKEY) + issue count; footer when issues > 0.
+- `mch daemon start` / `mch daemon stop` — lifecycle (for use outside systemd; systemd uses `systemctl`).
+- `mch fleet status <name-or-pubkey-prefix>` — per-node detail with command history.
 
 **Work queue**
 - Each managed node has a queue of *desired commands* (from config). The daemon works through nodes sequentially, applying pending commands and recording results.
@@ -124,7 +127,7 @@ nodes:
 
 ### Initialisation from gateway favourites
 
-On first run (or `mch discover`), mchd calls `get_contacts()` on the gateway node, filters for favourited repeaters, and inserts any unknown pubkeys into the `nodes` table. This bootstraps the inventory without manual entry.
+On first run (or `mch node discover`), mchd calls `get_contacts()` on the gateway node, filters for favourited repeaters, and inserts any unknown pubkeys into the `nodes` table. This bootstraps the inventory without manual entry.
 
 ### meshcore_py patterns
 
@@ -177,7 +180,7 @@ Full reference: https://docs.meshcore.io/cli_commands
 
 ## systemd
 
-Install the service unit to `/etc/systemd/system/mchd.service`. The `mch start/stop` commands are aliases for `systemctl start/stop mchd` when running under systemd; the daemon detects this from the environment.
+Install the service unit to `/etc/systemd/system/mchd.service`. The `mch daemon start/stop` commands are aliases for `systemctl start/stop mchd` when running under systemd; the daemon detects this from the environment.
 
 ## Future scope (not in current design)
 

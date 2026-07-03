@@ -431,7 +431,7 @@ async def _commission_new(
 
     # Sunset: groups are defined by DB membership now, and a freshly commissioned node may be
     # the first in its group — so any group name is accepted here. The node (and its group) land
-    # in the DB when the operator runs the printed `mch import`.
+    # in the DB when the operator runs the printed `mch config import`.
     group = req.get("group")
 
     # Always set an admin password; fall back to 'password' if not provided.
@@ -492,10 +492,10 @@ async def _commission_new(
         return {"ok": False, "error": verify_error}
 
     # Desired state goes into the DB now (sunset): emit an importable nodes: doc the operator
-    # saves and applies with `mch import <file>`, plus the secrets.yaml snippet (secrets stay
+    # saves and applies with `mch config import <file>`, plus the secrets.yaml snippet (secrets stay
     # a file). The node first needs a DB identity — it gets one when mchd reconciles gateway
     # favourites after the reboot, so the operator reloads mchd before importing.
-    # Self-contained doc: define the group too, since the loader `mch import` uses rejects a
+    # Self-contained doc: define the group too, since the loader `mch config import` uses rejects a
     # node that references an undefined group.
     import_parts = []
     if group:

@@ -5,6 +5,15 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Breaking: `mch` commands are now grouped under four noun subcommands.** The flat top-level menu
+  had grown to 26 commands; they are now organised as `mch daemon …` (start/stop/restart/admin),
+  `mch fleet …` (status/sync/plan/logs), `mch node …` (new/adopt/discover/contacts/retire/unretire/
+  remove/prune/clean/probe/path/exec), and `mch config …` (set/unset/show/suggest/import/export/
+  validate). Every command keeps its behaviour, options, and output — only the invocation path
+  changes, e.g. `mch status` → `mch fleet status`, `mch set` → `mch config set`, `mch retire` →
+  `mch node retire`, `mch start` → `mch daemon start`. `mch --help` now lists the four groups; run
+  e.g. `mch node --help` for a group's commands. Update any scripts or aliases accordingly.
+
 ## 0.11.0 - 2026-06-25
 
 - **Facts are now a policy, not a separate `facts:` list.** `SettingPolicy` gains a fourth value,
