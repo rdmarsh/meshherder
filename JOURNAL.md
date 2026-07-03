@@ -176,6 +176,17 @@ the dated entry just below. Until fixed, treat `radio` as audit-only / bench-cha
 BACKLOG: hunt redesign (SF+-1 & BW+-1 + fleet-in-use radios), anonymous presence probe, and the
 startup-wedge-on-`get_contacts` robustness fix.
 
+## 2026-07-03 - Released 0.20.0 (noun-grouped CLI)
+
+Pushed `main` (`68e9cad`, 4 commits: CLI restructure `e416be8`, doc updates `77111b3`, version bump
+`2149d0e`, merge of `cli-noun-groups`) and the annotated `v0.20.0` tag to origin. GitHub *Release
+object* published at https://github.com/rdmarsh/meshherder/releases/tag/v0.20.0, created with
+`gh release create v0.20.0 --title v0.20.0 --notes ...` (notes lifted from the CHANGELOG 0.20.0
+section, since this tag's annotation did not carry release notes - unlike v0.11.0 which used
+`--notes-from-tag`). `mch` commands are now grouped under four noun subcommands (`daemon`/`fleet`/
+`node`/`config`); see CHANGELOG for the full breaking-change note. The 0.11 -> 0.20 jump marks the
+end of the config.yaml -> DB source-of-truth chapter plus the CLI restructure.
+
 ## 2026-06-11 - Started moving desired state from config.yaml into the DB
 
 Began the redesign that makes the SQLite DB the source of truth for desired state (was: config.yaml),
