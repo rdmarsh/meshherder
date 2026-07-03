@@ -662,7 +662,7 @@ mch node remove <label|prefix>     Delete one node's local DB state (prefer mch 
 mch fleet sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch fleet sync <prefix>             Sync one node; stream progress while waiting for the result
 mch node exec <label|prefix> <command>  Run one raw remote command through mchd over the mesh
-mch daemon admin                     Stop mchd, open local serial meshcore-cli, then restart mchd
+mch node admin                     Stop mchd, open local serial meshcore-cli, then restart mchd
 mch node new                       Add a fresh or replacement MeshCore node (interactive wizard)
 mch daemon start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch daemon stop                      Stop mchd via systemd
@@ -673,7 +673,7 @@ mch daemon restart                   Restart mchd via systemd
 can validate the group-readable config file but may need `sudo mch config validate` to validate the
 mode-600 secrets file as well.
 
-`mch daemon admin` may need privilege to stop/start `mchd`. When run through `sudo`, it drops the
+`mch node admin` may need privilege to stop/start `mchd`. When run through `sudo`, it drops the
 `meshcore-cli` process back to the invoking user so the interactive serial session is not run as
 root.
 

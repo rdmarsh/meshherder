@@ -1,4 +1,4 @@
-.TH MCH 1 "2026-07-03" "meshherder 0.11.0" "User Commands"
+.TH MCH 1 "2026-07-03" "meshherder 0.20.0" "User Commands"
 .SH NAME
 mch \- manage MeshCore repeater nodes through the mchd daemon
 .SH SYNOPSIS
@@ -62,15 +62,6 @@ through systemd.
 Restart
 .B mchd
 through systemd.
-.TP
-.B daemon admin \fR[\fICLI ARGS...\fR]
-Stop
-.BR mchd ,
-run
-.B meshcore-cli
-against the configured gateway serial device, then restart
-.B mchd
-after the admin session.
 .SS fleet \(em whole-fleet views
 .TP
 .B fleet status
@@ -234,6 +225,15 @@ or
 .B node exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
 Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked
 or require confirmation.
+.TP
+.B node admin \fR[\fICLI ARGS...\fR]
+Stop
+.BR mchd ,
+run
+.B meshcore-cli
+against the configured gateway serial device, then restart
+.B mchd
+after the admin session.
 .SS config \(em desired state, backup, and validation
 .TP
 .B config set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]

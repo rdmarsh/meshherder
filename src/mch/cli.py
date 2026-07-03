@@ -414,7 +414,7 @@ def cli(ctx: click.Context, socket: str, color: bool | None) -> None:
 
 @cli.group("daemon")
 def daemon_group() -> None:
-    """Control the mchd daemon process and gateway session."""
+    """Control the mchd daemon process (start, stop, restart)."""
 
 
 @cli.group("fleet")
@@ -2902,7 +2902,7 @@ def restart() -> None:
     click.echo("mchd restarted")
 
 
-@daemon_group.command("admin", context_settings={"ignore_unknown_options": True})
+@node_group.command("admin", context_settings={"ignore_unknown_options": True})
 @click.option(
     "--config",
     "config_path",

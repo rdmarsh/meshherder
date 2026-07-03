@@ -344,8 +344,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_11_0():
-    assert __version__ == "0.11.0"
+def test_current_release_version_is_0_20_0():
+    assert __version__ == "0.20.0"
 
 
 def _run(args, rpc_response):
@@ -1844,7 +1844,7 @@ nodes: []
     with patch("mch.cli.subprocess.run", return_value=ok) as run:
         result = runner.invoke(
             cli,
-            ["daemon", "admin", "--config", str(config), "--", "-r", "ver"],
+            ["node", "admin", "--config", str(config), "--", "-r", "ver"],
         )
 
     assert result.exit_code == 0
@@ -1878,7 +1878,7 @@ nodes: []
     with patch("mch.cli.subprocess.run", return_value=ok) as run:
         result = runner.invoke(
             cli,
-            ["daemon", "admin", "--config", str(config), "--no-restart"],
+            ["node", "admin", "--config", str(config), "--no-restart"],
         )
 
     assert result.exit_code == 0
@@ -1911,7 +1911,7 @@ nodes: []
          ), \
          patch("mch.cli.pwd.getpwuid", return_value=pwent), \
          patch("mch.cli.grp.getgrall", return_value=[dialout]):
-        result = runner.invoke(cli, ["daemon", "admin", "--config", str(config)])
+        result = runner.invoke(cli, ["node", "admin", "--config", str(config)])
 
     assert result.exit_code == 0
     assert run.call_args_list[1].args[0] == [
