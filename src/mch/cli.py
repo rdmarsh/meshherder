@@ -405,10 +405,38 @@ def cli(ctx: click.Context, socket: str, color: bool | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Command groups (noun-nesting). Commands attach to one of these instead of
+# the top-level `cli`, so the menu stays shallow as the tool grows. ctx.obj
+# (socket) and ctx.color propagate down the parent chain automatically, so the
+# group callbacks stay empty. Function names are suffixed `_group` to avoid
+# shadowing the many local `config`/`node` variables used below.
+# ---------------------------------------------------------------------------
+
+@cli.group("daemon")
+def daemon_group() -> None:
+    """Control the mchd daemon process and gateway session."""
+
+
+@cli.group("fleet")
+def fleet_group() -> None:
+    """Observe the whole fleet: status, sync, plan, logs."""
+
+
+@cli.group("node")
+def node_group() -> None:
+    """Manage individual nodes: inventory, lifecycle, diagnostics."""
+
+
+@cli.group("config")
+def config_group() -> None:
+    """Edit and back up desired state (the DB source of truth)."""
+
+
+# ---------------------------------------------------------------------------
 # validate
 # ---------------------------------------------------------------------------
 
-@cli.command("validate")
+@config_group.command("validate")
 @click.option(
     "--config", "-c",
     "config_path",
@@ -548,7 +576,7 @@ def _plan_view(fleet: dict[str, Any]) -> dict[str, Any]:
     return fleet["plan"] if "plan" in fleet else fleet
 
 
-@cli.command()
+@fleet_group.command("status")
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def status(ctx: click.Context, query: str | None) -> None:
@@ -634,7 +662,7 @@ def status(ctx: click.Context, query: str | None) -> None:
     _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
 
 
-@cli.command()
+@node_group.command("path")
 @click.argument("node")
 @click.option(
     "--discover",
@@ -712,7 +740,7 @@ def path(
 # sync
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@fleet_group.command("sync")
 @click.argument("node", required=False)
 @click.pass_context
 def sync(ctx: click.Context, node: str | None) -> None:
@@ -740,7 +768,7 @@ def sync(ctx: click.Context, node: str | None) -> None:
 # logs
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@fleet_group.command("logs")
 @click.argument("pubkey", required=False)
 @click.option("--limit", "-n", default=50, show_default=True, help="Max log lines")
 @click.pass_context
@@ -1228,7 +1256,7 @@ def _filter_unseen_nodes(nodes: list[dict[str, Any]], query: str | None) -> list
     ]
 
 
-@cli.command()
+@node_group.command("contacts")
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def contacts(ctx: click.Context, query: str | None) -> None:
@@ -1281,7 +1309,7 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
 
 
-@cli.command("discover")
+@node_group.command("discover")
 @click.option(
     "--radio",
     required=True,
@@ -1329,7 +1357,7 @@ def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -
     _render_discovery(data)
 
 
-@cli.command("adopt")
+@node_group.command("adopt")
 @click.argument("pubkey")
 @click.option(
     "--radio",
@@ -1400,7 +1428,7 @@ def _render_probe_result(data: dict[str, Any]) -> None:
         click.echo(f"  ver:   FAILED - {data.get('response') or 'no response'}")
 
 
-@cli.command()
+@node_group.command("probe")
 @click.argument("node")
 @click.option(
     "--radio",
@@ -1451,7 +1479,7 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
     _render_probe_result(data)
 
 
-@cli.command()
+@node_group.command("prune")
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed local DB state.")
 @click.pass_context
 def prune(ctx: click.Context, yes: bool) -> None:
@@ -1507,7 +1535,7 @@ def prune(ctx: click.Context, yes: bool) -> None:
     click.echo("secrets.yaml entries are left unchanged")
 
 
-@cli.group()
+@node_group.group("clean")
 def clean() -> None:
     """Clean reviewed stale local DB state."""
 
@@ -1659,7 +1687,7 @@ def clean_settings(
     )
 
 
-@cli.command("remove")
+@node_group.command("remove")
 @click.argument("node")
 @click.option("--yes", "-y", is_flag=True, help="Delete without prompting.")
 @click.option(
@@ -1702,7 +1730,7 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
     click.echo(f"deleted {deleted} node(s) from local DB state")
 
 
-@cli.command("retire")
+@node_group.command("retire")
 @click.argument("node")
 @click.pass_context
 def retire_node(ctx: click.Context, node: str) -> None:
@@ -1717,7 +1745,7 @@ def retire_node(ctx: click.Context, node: str) -> None:
     click.echo("excluded from sync and unfavourited; history kept. `mch unretire` to undo.")
 
 
-@cli.command("unretire")
+@node_group.command("unretire")
 @click.argument("node")
 @click.pass_context
 def unretire_node(ctx: click.Context, node: str) -> None:
@@ -1732,7 +1760,7 @@ def unretire_node(ctx: click.Context, node: str) -> None:
 # suggest
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@config_group.command("suggest")
 @click.argument("query", required=False)
 @click.pass_context
 def suggest(ctx: click.Context, query: str | None) -> None:
@@ -1844,7 +1872,7 @@ def _suggest_detail(n: dict[str, Any]) -> None:
 # exec
 # ---------------------------------------------------------------------------
 
-@cli.command(name="exec")
+@node_group.command(name="exec")
 @click.argument("node")
 @click.argument("command", nargs=-1, required=True)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt for destructive commands")
@@ -1919,7 +1947,7 @@ def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) 
         click.echo(f"{verb} {key}{suffix}  on {label} ({data['pubkey'][:8]})")
 
 
-@cli.command("set")
+@config_group.command("set")
 @click.argument("args", nargs=-1, required=True)
 @click.option("--group", "group_name", default=None,
               help="Set at group scope: applies to every node in the group.")
@@ -2001,7 +2029,7 @@ def set_setting(
         click.echo("run: mch sync  to converge the fleet now")
 
 
-@cli.command("unset")
+@config_group.command("unset")
 @click.argument("args", nargs=-1, required=True)
 @click.option("--group", "group_name", default=None,
               help="Unset at group scope.")
@@ -2045,7 +2073,7 @@ def unset_setting(
     _scoped_target_echo("unset", key, "", data)
 
 
-@cli.command("show")
+@config_group.command("show")
 @click.argument("node")
 @click.argument("key")
 @click.pass_context
@@ -2090,7 +2118,7 @@ def show_setting(ctx: click.Context, node: str, key: str) -> None:
 # plan
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@fleet_group.command("plan")
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def plan(ctx: click.Context, query: str | None) -> None:
@@ -2201,7 +2229,7 @@ def plan(ctx: click.Context, query: str | None) -> None:
 # import
 # ---------------------------------------------------------------------------
 
-@cli.command("import")
+@config_group.command("import")
 @click.argument(
     "config_file",
     required=False,
@@ -2281,7 +2309,7 @@ def import_config(
 # export
 # ---------------------------------------------------------------------------
 
-@cli.command("export")
+@config_group.command("export")
 @click.pass_context
 def export_config(ctx: click.Context) -> None:
     """Dump the DB's desired state as config.yaml-shaped YAML (the inverse of import).
@@ -2300,7 +2328,7 @@ def export_config(ctx: click.Context) -> None:
 # new
 # ---------------------------------------------------------------------------
 
-@cli.command(name="new")
+@node_group.command(name="new")
 @click.pass_context
 def new(ctx: click.Context) -> None:
     """Interactively add a fresh or replacement MeshCore node.
@@ -2838,7 +2866,7 @@ def _commission_replace_wizard(socket: str) -> None:
 # start / stop (via systemd)
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@daemon_group.command("start")
 def start() -> None:
     """Start the mchd daemon via systemd."""
     result = _systemctl("start")
@@ -2848,7 +2876,7 @@ def start() -> None:
     click.echo("mchd started")
 
 
-@cli.command()
+@daemon_group.command("stop")
 def stop() -> None:
     """Stop the mchd daemon via systemd."""
     click.echo("stopping current sync, this may take some time...")
@@ -2859,7 +2887,7 @@ def stop() -> None:
     click.echo("mchd stopped")
 
 
-@cli.command()
+@daemon_group.command("restart")
 def restart() -> None:
     """Restart the mchd daemon via systemd."""
     click.echo("stopping current sync, this may take some time...")
@@ -2870,7 +2898,7 @@ def restart() -> None:
     click.echo("mchd restarted")
 
 
-@cli.command(context_settings={"ignore_unknown_options": True})
+@daemon_group.command("admin", context_settings={"ignore_unknown_options": True})
 @click.option(
     "--config",
     "config_path",
