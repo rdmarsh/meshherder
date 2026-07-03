@@ -4,7 +4,16 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (updated 2026-06-21) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-07-03) - update or clear this block when you pick up <<<
+
+**Status (2026-07-03): 0.20.0 RELEASED.** Noun-grouped CLI (`daemon`/`fleet`/`node`/`config`)
+merged and shipped: `main` at `97d0d3e`, annotated tag `v0.20.0` pushed, GitHub Release object
+published. 888 tests pass (rebuilt `.venv` on homebrew python3.13 this session - the old venv
+pointed at `/usr/bin/python3`, which the OS moved out from under it and broke the shim). Docs/man/
+README/website updated to the noun-grouped CLI. **Known stale:** `www/index.html` "Minimal config"
+still shows the pre-0.10/0.11 `facts:`/`global:`/`nodes:` config.yaml blocks (desired state now
+lives in the DB; the daemon refuses to start with those blocks) - flagged, not yet rewritten.
+Parked work below (faulkland radio-strand, F5 facts) is unchanged.
 
 **Workflow (updated 2026-06-18): risk-based branching.** Risky/large changes (daemon startup, queue,
 migrations) go on a branch + PR; small/safe changes (docs, one-liners) commit straight to `main`.

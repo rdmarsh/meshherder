@@ -63,7 +63,7 @@ pip install -e .</code></pre>
       <li>Declare desired state in <code>config.yaml</code> — settings, facts to collect, operations to run.</li>
       <li>mchd connects to a locally-attached gateway node and reads the mesh contact list.</li>
       <li>Each sync cycle: visit due managed nodes, collect facts, enforce selected settings, and run operations.</li>
-      <li>Results, drift, and history go into a local SQLite database. <code>mch status</code> shows the fleet.</li>
+      <li>Results, drift, and history go into a local SQLite database. <code>mch fleet status</code> shows the fleet.</li>
     </ol>
   </section>
 
@@ -71,15 +71,15 @@ pip install -e .</code></pre>
     <h2>What it does</h2>
     <ul>
       <li><strong>Desired-state enforcement</strong> — declare readable/writable CLI settings; mchd enforces, audits, or skips them with Node &gt; Group &gt; Global precedence.</li>
-      <li><strong>Fact collection</strong> — firmware, hardware, role, location, neighbours, and other registered readable values are cached in SQLite. <code>mch validate</code> warns about likely misspelled fact keys.</li>
+      <li><strong>Fact collection</strong> — firmware, hardware, role, location, neighbours, and other registered readable values are cached in SQLite. <code>mch config validate</code> warns about likely misspelled fact keys.</li>
       <li><strong>Multi-frequency support</strong> — use <code>via_radio:</code> globally, per group, or per node; mchd temporarily switches the gateway when required and restores its home radio afterward.</li>
       <li><strong>Group name prefix</strong> — prepend a <code>name_prefix:</code> (usually an emoji) to each member's desired name, set globally, per group, or per node. No space is added, and mchd refuses to start if a prefix+name would overflow the 31-byte firmware name limit.</li>
       <li><strong>Staggered scheduler</strong> — nodes are spread randomly across the sync window so mchd restarts never cause a surge.</li>
       <li><strong>Rate limiting</strong> — one node at a time, configurable delay between nodes. Never hammers the mesh.</li>
       <li><strong>Operational evidence</strong> — foreground sync reports management radio, cached path mode, reads, failures, and writes; logs record manual sync start, completion, partial results, and aborts.</li>
       <li><strong>Open-node detection</strong> — warns when a node syncs with no ACL protection and surfaces the condition in fleet reporting.</li>
-      <li><strong>mch exec</strong> — run one-off MeshCore CLI commands on any managed node without touching config. Destructive commands require confirmation; irreversible ones are blocked.</li>
-      <li><strong>mch new</strong> — guided wizard to take a freshly-flashed node to fully managed: generates or restores a private key, sets name/password/radio, verifies identity after reboot.</li>
+      <li><strong>mch node exec</strong> — run one-off MeshCore CLI commands on any managed node without touching config. Destructive commands require confirmation; irreversible ones are blocked.</li>
+      <li><strong>mch node new</strong> — guided wizard to take a freshly-flashed node to fully managed: generates or restores a private key, sets name/password/radio, verifies identity after reboot.</li>
       <li><strong>Hot reload</strong> — mchd watches <code>config.yaml</code> and <code>secrets.yaml</code> and reloads on change. Invalid YAML is rejected; previous config stays active.</li>
       <li><strong>Read-only integration API</strong> — optional loopback HTTP JSON status, plan, issue, and log endpoints for reporting tools and future dashboards.</li>
     </ul>
@@ -118,27 +118,27 @@ nodes:
         desired: "Managed with Mesh Herder"
         policy: enforce</code></pre>
     <p>
-      Run <code>mch contacts</code> to list repeater nodes visible to the gateway
+      Run <code>mch node contacts</code> to list repeater nodes visible to the gateway
       that are not yet in your config, with pubkey prefixes ready to paste in.
     </p>
   </section>
 
   <section id="cli">
     <h2>CLI reference</h2>
-    <pre><code>mch validate                 # validate config/secrets and warn about unknown facts
-mch status                   # fleet overview: state, label, group, firmware, neighbours, last seen
-mch status &lt;label|prefix&gt;   # one match: node detail; multiple: filtered table
-mch plan                     # desired-vs-known diff, no mesh traffic, no writes
-mch plan &lt;label|prefix&gt;     # filter to one node
-mch sync                     # sweep all nodes in background
-mch sync &lt;prefix&gt;           # sync one node now; stream radio/path/command progress
-mch contacts                 # nodes visible to the gateway but not yet in config
-mch exec &lt;node&gt; &lt;command&gt;   # run a raw MeshCore CLI command on a managed node
-mch new                      # add a fresh or replacement node (interactive)
-mch logs                     # recent per-node activity across all nodes
-mch logs &lt;prefix&gt;           # activity for one node
-mch suggest                  # suggested txdelay per node based on neighbour count
-mch suggest &lt;label|prefix&gt;  # full suggestions + paste-ready config block</code></pre>
+    <pre><code>mch config validate                # validate config/secrets and warn about unknown facts
+mch fleet status                   # fleet overview: state, label, group, firmware, neighbours, last seen
+mch fleet status &lt;label|prefix&gt;    # one match: node detail; multiple: filtered table
+mch fleet plan                     # desired-vs-known diff, no mesh traffic, no writes
+mch fleet plan &lt;label|prefix&gt;      # filter to one node
+mch fleet sync                     # sweep all nodes in background
+mch fleet sync &lt;prefix&gt;            # sync one node now; stream radio/path/command progress
+mch node contacts                  # nodes visible to the gateway but not yet in config
+mch node exec &lt;node&gt; &lt;command&gt;      # run a raw MeshCore CLI command on a managed node
+mch node new                       # add a fresh or replacement node (interactive)
+mch fleet logs                     # recent per-node activity across all nodes
+mch fleet logs &lt;prefix&gt;            # activity for one node
+mch config suggest                 # suggested txdelay per node based on neighbour count
+mch config suggest &lt;label|prefix&gt;  # full suggestions + paste-ready config block</code></pre>
   </section>
 
   <section id="testing">
