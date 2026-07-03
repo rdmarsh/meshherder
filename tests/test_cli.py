@@ -344,8 +344,8 @@ def test_version_options_report_source_version(flag: str):
     assert result.output.endswith(f"version {__version__}\n")
 
 
-def test_current_release_version_is_0_20_0():
-    assert __version__ == "0.20.0"
+def test_current_release_version_is_0_20_1():
+    assert __version__ == "0.20.1"
 
 
 def _run(args, rpc_response):
@@ -1828,6 +1828,87 @@ def test_lifecycle_stop_paths_warn_while_current_sync_is_finishing(command: str,
     systemctl.assert_called_once_with(
         ["systemctl", command, "mchd"], capture_output=True, text=True
     )
+
+
+def test_daemon_status_shows_systemctl_status_output():
+    runner = CliRunner()
+    result_obj = SimpleNamespace(
+        returncode=0,
+        stdout="● mchd.service - Mesh Herder\n   Active: active (running)\n",
+        stderr="",
+    )
+
+    with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
+        result = runner.invoke(cli, ["daemon", "status"])
+
+    assert result.exit_code == 0
+    assert "Active: active (running)" in result.output
+    run.assert_called_once_with(
+        ["systemctl", "status", "mchd", "--no-pager"], capture_output=True, text=True
+    )
+
+
+def test_daemon_status_passes_through_nonzero_code_without_failure_message():
+    """systemctl status exits non-zero when the unit is stopped; that is not an error."""
+    runner = CliRunner()
+    result_obj = SimpleNamespace(
+        returncode=3,
+        stdout="● mchd.service - Mesh Herder\n   Active: inactive (dead)\n",
+        stderr="",
+    )
+
+    with patch("mch.cli.subprocess.run", return_value=result_obj):
+        result = runner.invoke(cli, ["daemon", "status"])
+
+    assert result.exit_code == 3
+    assert "Active: inactive (dead)" in result.output
+    assert "failed" not in result.output.lower()
+
+
+def test_daemon_logs_shows_journal_lines():
+    runner = CliRunner()
+    result_obj = SimpleNamespace(
+        returncode=0, stdout="Jul 03 23:29:54 luna mchd[123]: started\n", stderr=""
+    )
+
+    with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
+        result = runner.invoke(cli, ["daemon", "logs"])
+
+    assert result.exit_code == 0
+    assert "mchd[123]: started" in result.output
+    run.assert_called_once_with(
+        ["journalctl", "-u", "mchd", "--no-pager", "-n", "50"],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_daemon_logs_respects_line_count():
+    runner = CliRunner()
+    result_obj = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
+        result = runner.invoke(cli, ["daemon", "logs", "-n", "200"])
+
+    assert result.exit_code == 0
+    run.assert_called_once_with(
+        ["journalctl", "-u", "mchd", "--no-pager", "-n", "200"],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_daemon_logs_follow_streams_without_capture():
+    runner = CliRunner()
+    result_obj = SimpleNamespace(returncode=0)
+
+    with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
+        result = runner.invoke(cli, ["daemon", "logs", "-f"])
+
+    assert result.exit_code == 0
+    # Follow mode must inherit stdio (no capture_output) so lines stream live
+    # and Ctrl-C terminates cleanly instead of buffering indefinitely.
+    run.assert_called_once_with(["journalctl", "-u", "mchd", "--no-pager", "-n", "50", "-f"])
 
 
 def test_admin_stops_mchd_runs_meshcore_cli_and_restarts(tmp_path):

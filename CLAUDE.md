@@ -48,6 +48,8 @@ mchd --config config.yaml
 mch fleet status          # fleet overview
 mch daemon start
 mch daemon stop
+mch daemon status         # mirror of systemctl status mchd
+mch daemon logs -n 50     # daemon process journal (journalctl -u mchd), not per-node activity
 mch fleet sync            # trigger immediate sync cycle
 mch fleet status <name>   # show detail for one node
 ```

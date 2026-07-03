@@ -667,6 +667,8 @@ mch node new                       Add a fresh or replacement MeshCore node (int
 mch daemon start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch daemon stop                      Stop mchd via systemd
 mch daemon restart                   Restart mchd via systemd
+mch daemon status                    Show service status (mirror of systemctl status mchd)
+mch daemon logs [-n N] [-f]          Show the daemon process log from journald (not per-node activity)
 ```
 
 `mch config validate` checks whatever it can read. On a production install, an ordinary operator account

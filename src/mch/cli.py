@@ -414,7 +414,7 @@ def cli(ctx: click.Context, socket: str, color: bool | None) -> None:
 
 @cli.group("daemon")
 def daemon_group() -> None:
-    """Control the mchd daemon process (start, stop, restart)."""
+    """Control the mchd daemon process (start, stop, restart, status, logs)."""
 
 
 @cli.group("fleet")
@@ -2900,6 +2900,63 @@ def restart() -> None:
         click.echo(result.stderr.strip() or "systemctl restart failed", err=True)
         raise SystemExit(result.returncode)
     click.echo("mchd restarted")
+
+
+@daemon_group.command("status")
+def daemon_status() -> None:
+    """Show the mchd service status (systemctl status mchd)."""
+    # Unlike start/stop/restart, this is read-only and needs no privilege, so
+    # we do not treat a non-zero code as a failure: `systemctl status` exits
+    # non-zero when the unit is stopped/dead (code 3), which is normal status
+    # output, not an error. Mirror systemctl's own output and exit code.
+    result = subprocess.run(
+        ["systemctl", "status", "mchd", "--no-pager"], capture_output=True, text=True
+    )
+    if result.stdout:
+        click.echo(result.stdout.rstrip())
+    if result.stderr.strip():
+        click.echo(result.stderr.strip(), err=True)
+    raise SystemExit(result.returncode)
+
+
+@daemon_group.command("logs")
+@click.option(
+    "--lines",
+    "-n",
+    "lines",
+    default=50,
+    show_default=True,
+    help="Number of journal lines to show.",
+)
+@click.option(
+    "--follow",
+    "-f",
+    is_flag=True,
+    help="Follow the log, streaming new lines until Ctrl-C.",
+)
+def daemon_logs(lines: int, follow: bool) -> None:
+    """Show the mchd process log from journald (journalctl -u mchd).
+
+    This is the daemon's own process log (startup, crashes, tracebacks) — for
+    per-node sync activity use `mch fleet logs`.
+    """
+    command = ["journalctl", "-u", "mchd", "--no-pager", "-n", str(lines)]
+    if follow:
+        # Follow mode streams indefinitely, so inherit stdio instead of
+        # capturing: lines appear live and Ctrl-C terminates cleanly rather
+        # than buffering forever with no output.
+        command.append("-f")
+        try:
+            subprocess.run(command)
+        except KeyboardInterrupt:
+            pass
+        return
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.stdout:
+        click.echo(result.stdout.rstrip())
+    if result.stderr.strip():
+        click.echo(result.stderr.strip(), err=True)
+    raise SystemExit(result.returncode)
 
 
 @node_group.command("admin", context_settings={"ignore_unknown_options": True})

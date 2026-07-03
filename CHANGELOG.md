@@ -5,6 +5,16 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.20.1 - 2026-07-03
+
+- **New `mch daemon status` and `mch daemon logs`.** Thin read-only wrappers over
+  `systemctl status mchd` and `journalctl -u mchd` so operators can reach service diagnostics
+  without recalling the unit name. `daemon logs` is the daemon's *process* journal (startup,
+  crashes, tracebacks) — distinct from `mch fleet logs`, which is per-node sync activity.
+  `daemon logs` takes `-n/--lines` (default 50) and `-f/--follow`. Both need no privilege and pass
+  systemctl's own exit code through, so a stopped unit's non-zero status reads as normal output,
+  not a failure.
+
 ## 0.20.0 - 2026-07-03
 
 - **Breaking: `mch` commands are now grouped under four noun subcommands.** The flat top-level menu

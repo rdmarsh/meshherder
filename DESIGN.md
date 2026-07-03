@@ -306,6 +306,13 @@ process failures, and detailed transport/radio debugging. The database-backed `/
 read failures that explain a partial sync. `mch fleet status` reports mesh state; it is not a
 replacement for `systemctl status mchd`.
 
+`mch daemon status` and `mch daemon logs` are thin, read-only wrappers over `systemctl status mchd`
+and `journalctl -u mchd` so operators can reach service diagnostics without recalling the unit name.
+They deliberately live under the `daemon` (process) noun, not `fleet` (nodes): `daemon logs` is the
+process journal, `fleet logs` is per-node activity. Because they only read, they take no privilege
+and pass systemctl's own exit code through unchanged — a stopped unit's non-zero status is normal
+output, not a failure.
+
 ## Command metadata
 
 MeshCore command knowledge should live in a small curated registry for commands mch actually uses,
