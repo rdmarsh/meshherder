@@ -377,7 +377,7 @@ class Database:
         return [_row_to_desired_setting(r) for r in rows]
 
     async def get_all_desired_settings(self) -> list[DesiredSetting]:
-        """Return every desired setting across all scopes (for ``mch export``)."""
+        """Return every desired setting across all scopes (for ``mch config export``)."""
         db = self._db_required()
         async with db.execute(
             "SELECT * FROM desired_settings ORDER BY scope_type, scope_id, key"
@@ -388,7 +388,7 @@ class Database:
     async def delete_desired_setting(
         self, scope_type: Scope, scope_id: str, key: str
     ) -> None:
-        """Remove one desired setting (e.g. ``mch unset``); leaves observed state alone."""
+        """Remove one desired setting (e.g. ``mch config unset``); leaves observed state alone."""
         db = self._db_required()
         await db.execute(
             "DELETE FROM desired_settings WHERE scope_type = ? AND scope_id = ? AND key = ?",
@@ -436,7 +436,7 @@ class Database:
         return [_row_to_desired_operation(r) for r in rows]
 
     async def get_all_desired_operations(self) -> list[DesiredOperation]:
-        """Return every desired operation across all scopes (for ``mch export``)."""
+        """Return every desired operation across all scopes (for ``mch config export``)."""
         db = self._db_required()
         async with db.execute(
             "SELECT * FROM desired_operations ORDER BY scope_type, scope_id, command"
@@ -509,7 +509,7 @@ class Database:
         await db.commit()
 
     async def delete_setting(self, node_pubkey: str, key: str) -> None:
-        """Delete one observed setting row (e.g. ``mch clean settings``).
+        """Delete one observed setting row (e.g. ``mch node clean settings``).
 
         Observed rows are a cache, never authoritative, so removing an orphaned one
         is always safe - it is re-observed next cycle if the key is still wanted.

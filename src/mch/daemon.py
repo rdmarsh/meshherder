@@ -220,7 +220,7 @@ async def _wanted_setting_keys(db: Database, node: Any) -> set[str]:
     """Setting keys this node currently wants observed: its resolved desired keys.
 
     Desired state is resolved entirely from the DB (DESIGN.md "Desired state in the DB" /
-    sunset), so a key set only via `mch set` - or one on a node that was never in
+    sunset), so a key set only via `mch config set` - or one on a node that was never in
     config.yaml - still counts as wanted and is never treated as orphaned. The node's
     group comes from the DB row, so group-scope keys are always attributable now (the old
     config-only path could only attribute them when the node appeared in config.yaml).
@@ -330,7 +330,7 @@ async def _handle_set_setting(
 
     Validates the key (must be a writable setting), the value, and the policy before
     recording intent synchronously. Scope is node (default), group, or global.
-    Convergence is left to the next sync cycle or an explicit ``mch sync`` - recording
+    Convergence is left to the next sync cycle or an explicit ``mch fleet sync`` - recording
     intent and reaching the node are decoupled (DESIGN.md "Desired state in the DB").
     """
     key = str(req.get("key") or "")
@@ -400,7 +400,7 @@ async def _handle_set_setting(
                 "ok": False,
                 "error": (
                     f"group {scope_id!r} has no member nodes - assign a node to it first "
-                    "(via `mch import` or commissioning), or check the spelling"
+                    "(via `mch config import` or commissioning), or check the spelling"
                 ),
             }
 
@@ -436,8 +436,9 @@ async def _handle_show_setting(
 ) -> dict[str, Any]:
     """Explain one key for one node: how each scope sets it, what resolves, what's observed.
 
-    The read-side complement to `mch set`/`mch unset`. Resolution is Node > Group > Global,
-    so this shows the per-scope desired/policy rows that feed `resolve_desired`/`resolve_policy`
+    The read-side complement to `mch config set`/`mch config unset`. Resolution is
+    Node > Group > Global, so this shows the per-scope desired/policy rows that feed
+    `resolve_desired`/`resolve_policy`
     plus the value mch has actually observed (from the settings or node_facts store - a key
     lives in exactly one, per the single-observation invariant). It sends no mesh traffic.
     """
@@ -542,7 +543,7 @@ async def _handle_import(
         match = next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
         if match:
             return match
-        # Restore-from-backup: a full pubkey (as `mch export` emits) is the node identity
+        # Restore-from-backup: a full pubkey (as `mch config export` emits) is the node identity
         # itself, so accept it even when the gateway/DB has not seen the node yet. The node row
         # is created below; the favourite mirror re-pins it once its contact reappears. A short
         # prefix still needs a known node (its full pubkey is unknowable) and is skipped+warned.
@@ -643,8 +644,8 @@ async def _handle_export(db: Database) -> dict[str, Any]:
     """Dump the whole fleet as config.yaml-shaped YAML — a complete, faithful backup.
 
     Includes every node's identity, label, group, desired settings, and operations, so
-    `mch import` can rebuild the fleet after a server/gateway loss. Retired nodes are tagged
-    ``retired: true`` (the one inventory-state field carried in the file); `mch import` then
+    `mch config import` can rebuild the fleet after a server/gateway loss. Retired nodes are tagged
+    ``retired: true`` (the one inventory-state field carried in the file); `mch config import` then
     lets the operator choose whether to restore or skip them.
     """
     rows = await db.get_all_desired_settings()
@@ -948,7 +949,7 @@ async def _dispatch(
     if cmd == "prune":
         # Sunset: the DB is the inventory, so "prune" no longer means "not in config.yaml".
         # It hard-deletes retired nodes (history and all) — the deliberate purge step after
-        # `mch retire`. Active nodes are never prune candidates.
+        # `mch node retire`. Active nodes are never prune candidates.
         dry_run = bool(req.get("dry_run", True))
         nodes = await db.get_all_nodes()
         candidate_nodes = [n for n in nodes if n.state == NodeState.RETIRED]
@@ -1061,8 +1062,9 @@ async def _dispatch(
                 "ok": False,
                 "error": (
                     f"{node.label or node.name or node.pubkey[:8]!r} is still managed"
-                    " - `mch retire` it first (keeps history, unfavourites it), or use --force."
-                    " An un-retired node is re-seeded from gateway favourites on restart."
+                    " - `mch node retire` it first (keeps history, unfavourites it),"
+                    " or use --force. An un-retired node is re-seeded from gateway favourites"
+                    " on restart."
                 ),
             }
 

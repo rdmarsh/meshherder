@@ -82,7 +82,7 @@ universal:
     value: "4"
     description: "Reset radio AGC every 4 s - cures deafness from nearby interference"
 
-# Named radio options shown by `mch new`.
+# Named radio options shown by `mch node new`.
 radio_presets:
   - name: Australia Mid
     value: "915.075,125,9,5"

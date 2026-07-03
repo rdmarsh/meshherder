@@ -1,4 +1,4 @@
-.TH MCHD 8 "2026-05-26" "meshherder 0.8.6" "System Administration"
+.TH MCHD 8 "2026-07-03" "meshherder 0.20.0" "System Administration"
 .SH NAME
 mchd \- Mesh Herder daemon for managing MeshCore repeater nodes
 .SH SYNOPSIS
@@ -184,22 +184,22 @@ when the recommended udev rule is installed.
 .TP
 .B Config reload failed
 Run
-.B mch validate
+.B mch config validate
 or
-.B sudo mch validate
+.B sudo mch config validate
 to check config and secrets. The daemon keeps the last valid config after a bad
 reload.
 .TP
 .B Daemon exits on startup after a config error
 Startup config errors are permanent operator errors, so the systemd unit does
 not restart-loop on them. Run
-.B mch validate
+.B mch config validate
 to fix the config, then restart
 .B mchd.service .
 .TP
 .B Node remains partial
 Use
-.B mch logs \fILABEL_OR_PREFIX\fR
+.B mch fleet logs \fILABEL_OR_PREFIX\fR
 to inspect recent per-node activity and failed commands.
 .SH SEE ALSO
 .BR mch (1),

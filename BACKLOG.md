@@ -397,6 +397,11 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-07-03: Nested the flat 26-command `mch` menu under four noun groups — `daemon`, `fleet`,
+  `node`, `config` — so the top-level menu lists only the groups. Breaking change to invocation
+  paths only (e.g. `mch set` → `mch config set`); all behaviour, options, and output preserved.
+  Updated the in-app hints/help, README/INSTALL/MANUAL_TESTS/DESIGN/ROADMAP, the `mch.1` man page,
+  examples, and CLAUDE.md; JOURNAL/CHANGELOG history left at its point-in-time syntax.
 - 2026-06-01: Added explicit `mch path` recovery controls: `--discover` and `--advert` learn
   candidate paths without applying them, while `--apply <path[:mode]>` applies an
   operator-confirmed replacement path to the gateway contact and records the change in logs.

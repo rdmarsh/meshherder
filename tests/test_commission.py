@@ -582,7 +582,7 @@ async def test_commission_new_returns_importable_yaml(tmp_path):
     assert 'desired: "Test Node"' in import_yaml
     assert "policy: enforce" in import_yaml
 
-    # The emitted YAML round-trips through the (lenient) loader that `mch import` uses.
+    # The emitted YAML round-trips through the (lenient) loader that `mch config import` uses.
     path = tmp_path / "new-node.yaml"
     path.write_text(import_yaml + "\n")
     loaded = load(path, load_secrets=False)
