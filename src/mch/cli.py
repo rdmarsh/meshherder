@@ -22,7 +22,13 @@ from typing import Any
 import click
 
 from mch import __version__
-from mch.command_catalog import UNSUPPORTED, load_command_catalog
+from mch.command_catalog import (
+    CURRENT,
+    OUTDATED,
+    UNSUPPORTED,
+    firmware_currency,
+    load_command_catalog,
+)
 from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     parse_radio_tuple,
@@ -184,6 +190,21 @@ def _clock_drift_text(value: str | None, observed_at: str | None) -> str:
         return "within ±1m"
     direction = "fast" if drift > 0 else "slow"
     return f"{direction} by {_duration_text(drift)}"
+
+
+def _firmware_currency_text(ver: str | None) -> str:
+    """NOTE for the `ver` fact row: how the node's firmware compares to the latest known release.
+
+    Advisory only. Silent when we can't judge (unparseable/absent ver, or a version newer than the
+    vendored catalogue), so an unknown never reads as a problem.
+    """
+    cur = firmware_currency(ver)
+    if cur.status == CURRENT:
+        return "up to date"
+    if cur.status == OUTDATED:
+        releases = "release" if cur.releases_behind == 1 else "releases"
+        return f"{cur.releases_behind} {releases} behind (latest {cur.latest})"
+    return ""
 
 
 def _log_node_pubkey(entry: dict[str, Any]) -> str:
@@ -887,7 +908,12 @@ def _render_node_detail(data: dict[str, Any]) -> None:
         for k, v in sorted(facts.items()):
             observed_at = fact_times.get(k)
             observed = _ago_with_ts(observed_at) if observed_at else "-"
-            note = _clock_drift_text(v, observed_at) if k == "clock" else ""
+            if k == "clock":
+                note = _clock_drift_text(v, observed_at)
+            elif k == "ver":
+                note = _firmware_currency_text(v)
+            else:
+                note = ""
             click.echo(row.format(
                 _wpad(k, key_w),
                 _wpad(_sv(v), value_w),

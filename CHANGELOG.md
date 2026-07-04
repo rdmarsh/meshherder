@@ -5,6 +5,14 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Firmware-currency note in node detail.** `mch node show` (and the `mch fleet status` single-node
+  view) now annotates the `ver` fact with how the node's firmware compares to the latest release the
+  vendored catalogue knows — `up to date` or `N releases behind (latest vX.Y.Z)`. Read-only and
+  advisory: it's derived from the catalogue's `current_version`/`version_order`, never a node state
+  or policy, and stays silent when it can't judge (unparseable `ver`, or a build newer than the
+  snapshot — in which case refresh with `tools/refresh_meshcore_commands.py`). New
+  `command_catalog.firmware_currency()`.
+
 - **Advisory command compatibility warnings in `mch node exec`.** Before sending, mch now prints
   one-line advisory warnings (never a block — the node may have been upgraded past our snapshot, and
   the operator knows more than we do) when a command is *newer* than the node's observed `ver`, is

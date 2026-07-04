@@ -370,10 +370,12 @@ fetch). Open follow-ups:
      a command is USB/serial-only (can't run over the mesh) or only takes effect after a reboot.
      `build`/`destructive` flags are stored but not wired into behaviour (`command_safety.py` stays
      authoritative for destructive/blocked).
-  3. (Separate, needs UX design — still open) firmware-currency signal per node
-     (`up-to-date`/`needs-updating`)
-     from `CURRENT_VERSION`/newest-seen vs the node's `ver` — ties into CLAUDE.md "Future scope:
-     firmware age reporting" and a possible read-only reporting column. Not a policy state.
+  3. DONE (Unreleased): per-node firmware-currency signal. `command_catalog.firmware_currency()`
+     compares the node's `ver` to the catalogue's `current_version` (`up to date` /
+     `N releases behind`), surfaced as the NOTE on the `ver` fact row in `mch node show` / the fleet
+     detail view. Read-only, advisory, never a node state. Still open if wanted later: a
+     fleet-status VER marker and/or an "outdated firmware" issues section (operator chose
+     detail-note-only for now) — ties into CLAUDE.md "Future scope: firmware age reporting".
 
 ### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
 

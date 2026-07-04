@@ -1218,6 +1218,41 @@ def test_node_show_renders_detail():
     assert "v1.14.1" in result.output
 
 
+def test_node_show_flags_outdated_firmware():
+    """The ver fact row notes how far the node is behind the latest known release."""
+    detail = _detail(
+        facts={"ver": "v1.10.0"},
+        fact_times={"ver": "2026-06-01T23:12:00+00:00"},
+    )
+    result = _run(["node", "show", "aabb"], detail)
+    assert result.exit_code == 0
+    assert "behind" in result.output and "latest" in result.output
+
+
+def test_node_show_marks_current_firmware_up_to_date():
+    from mch.command_catalog import load_command_catalog
+
+    latest = load_command_catalog().current_version
+    detail = _detail(
+        facts={"ver": latest},
+        fact_times={"ver": "2026-06-01T23:12:00+00:00"},
+    )
+    result = _run(["node", "show", "aabb"], detail)
+    assert result.exit_code == 0
+    assert "up to date" in result.output
+
+
+def test_node_show_unknown_firmware_has_no_currency_note():
+    """A version newer than the catalogue (or unparseable) must not read as a problem."""
+    detail = _detail(
+        facts={"ver": "v9.9.9"},
+        fact_times={"ver": "2026-06-01T23:12:00+00:00"},
+    )
+    result = _run(["node", "show", "aabb"], detail)
+    assert result.exit_code == 0
+    assert "behind" not in result.output and "up to date" not in result.output
+
+
 def test_status_single_match_hints_node_show():
     status = _status_resp(nodes=[_summary()])
     detail = _detail()
