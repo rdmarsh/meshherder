@@ -771,10 +771,7 @@ restores the factory admin password without auth, after which normal commissioni
 For the current prioritized todo list, wishlist, and explicit non-goals, see `BACKLOG.md`. This
 section only records stable design gaps that affect the architecture.
 
-- **Ghost resolution is one-directional**: `mch issues` shows DB-only ghosts, while `mch node prune`
-  and `mch node remove` delete their local DB state. Re-adopting a ghost still requires adding it back
-  to config.yaml manually.
-- **Commission idempotency**: running `mch node new` on a node already in config/DB has
+- **Commission idempotency**: running `mch node new` on a node already in the DB has
   undefined behaviour. Should detect and reject.
 - **Commission new ignores group defaults**: the wizard pre-fills radio settings from the gateway
   node's home radio, but does not yet inherit from the matching `config.yaml` group (or a

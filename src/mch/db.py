@@ -201,6 +201,24 @@ class Database:
         )
         await db.commit()
 
+    async def set_node_group(self, pubkey: str, group: str | None) -> None:
+        """Update only a node's group (inventory metadata); None clears membership."""
+        db = self._db_required()
+        await db.execute(
+            "UPDATE nodes SET node_group = ? WHERE pubkey = ?",
+            (group, pubkey),
+        )
+        await db.commit()
+
+    async def set_node_label(self, pubkey: str, label: str | None) -> None:
+        """Update only a node's local label (inventory metadata); None clears it."""
+        db = self._db_required()
+        await db.execute(
+            "UPDATE nodes SET label = ? WHERE pubkey = ?",
+            (label, pubkey),
+        )
+        await db.commit()
+
     async def set_next_sync(self, pubkey: str, when: datetime) -> None:
         """Update only the next_sync_at timestamp for a node."""
         db = self._db_required()

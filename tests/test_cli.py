@@ -875,6 +875,31 @@ def _status_resp(
     }}
 
 
+def test_fleet_issues_clean_exits_zero():
+    result = _run(["fleet", "issues"], _status_resp())
+    assert result.exit_code == 0
+    assert "no issues" in result.output
+
+
+def test_fleet_issues_present_exits_two():
+    result = _run(["fleet", "issues"], _status_resp(bad_state=[{
+        "pubkey": "aabbccdd" * 8, "label": "wip 07",
+        "name": "wip 07", "state": "configuring", "last_seen": None,
+    }]))
+    assert result.exit_code == 2
+    assert "problem states" in result.output
+    assert "wip 07" in result.output
+
+
+def test_fleet_issues_filters_by_query():
+    result = _run(["fleet", "issues", "nomatch"], _status_resp(open_nodes=[{
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "site-a",
+    }]))
+    # The one open node doesn't match the query, so nothing is reported → clean exit.
+    assert result.exit_code == 0
+    assert "no issues" in result.output
+
+
 def _summary(pubkey="aabbccdd" * 8, name="Tower", label="site-a",
              group=None, state="configured", ver=None, neighbors=None):
     return {"pubkey": pubkey, "name": name, "label": label, "group": group,
@@ -1755,6 +1780,35 @@ def test_status_single_match_activity_uses_logs_shape_without_node_columns():
     assert "(26m ago) [INFO   ] first event" in result.output
     assert "( 6h ago) [WARNING] second event" in result.output
     assert "[aabbccddaabb]" not in result.output
+
+
+# ------ node group / label ------
+
+def test_node_group_set():
+    resp = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "group": "solar",
+    }}
+    result = _run(["node", "group", "site-a", "solar"], resp)
+    assert result.exit_code == 0
+    assert "group set to 'solar'" in result.output
+
+
+def test_node_group_clear():
+    resp = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "group": None,
+    }}
+    result = _run(["node", "group", "site-a"], resp)
+    assert result.exit_code == 0
+    assert "group cleared" in result.output
+
+
+def test_node_label_set():
+    resp = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "east-hill", "name": "Tower", "group": None,
+    }}
+    result = _run(["node", "label", "aabbccdd", "east-hill"], resp)
+    assert result.exit_code == 0
+    assert "label set to 'east-hill'" in result.output
 
 
 # ------ contacts ------

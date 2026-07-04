@@ -21,9 +21,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   config-prefix filter (DB pubkeys are the managed set); `get_unfiled_contacts` filters gateway
   contacts against DB inventory and `mch node contacts` prints the `mch node adopt` command instead
   of a config.yaml block.
-- **No command assigns a node to a group post-sunset.** Group membership (`nodes.group`) is now set
-  only by `mch import` and commissioning. Consider `mch group <node> <name>` (or `mch set <node>
-  group <name>`) so an operator can move a node between groups without re-importing.
+- DONE (Unreleased): `mch node group NODE [GROUP]` and `mch node label NODE [LABEL]` edit DB
+  inventory metadata directly (set or clear), closing the "no way to move a node between groups
+  post-sunset" gap.
 
 ### Sunset follow-ups and release
 

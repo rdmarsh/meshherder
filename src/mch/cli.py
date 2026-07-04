@@ -662,6 +662,34 @@ def status(ctx: click.Context, query: str | None) -> None:
     _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
 
 
+@fleet_group.command("issues")
+@click.argument("query", required=False, default=None)
+@click.pass_context
+def issues(ctx: click.Context, query: str | None) -> None:
+    """Show only the fleet issues (drift, problem states, open nodes).
+
+    This is the same data as the footer of `mch fleet status`, on its own so a cron job or
+    script can check fleet health without parsing the table. QUERY optionally filters by
+    pubkey prefix, label, or mesh name. Exits 0 when clean and 2 when any issue is present,
+    so `mch fleet issues >/dev/null || alert` works.
+    """
+    resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
+    fleet = _check(resp)
+    data = _status_view(fleet)
+
+    drifted = _filter_drift(data.get("drifted", []), query)
+    bad_state = _filter_nodes(data.get("bad_state", []), query)
+    ghosts = _filter_ghosts(data.get("ghosts", []), query)
+    unseen_nodes = _filter_unseen_nodes(data.get("unseen_nodes", []), query)
+    open_nodes = _filter_nodes(data.get("open_nodes", []), query)
+
+    if not (drifted or bad_state or ghosts or unseen_nodes or open_nodes):
+        click.echo("no issues")
+        return
+    _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
+    ctx.exit(2)
+
+
 @node_group.command("path")
 @click.argument("node")
 @click.option(
@@ -1761,6 +1789,46 @@ def unretire_node(ctx: click.Context, node: str) -> None:
     ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
     click.echo(f"unretired {ident} ({_pk(data.get('pubkey'))}) — state now {data.get('state')}")
     click.echo("re-favourited and queued for sync.")
+
+
+@node_group.command("group")
+@click.argument("node")
+@click.argument("group", required=False, default=None)
+@click.pass_context
+def set_group(ctx: click.Context, node: str, group: str | None) -> None:
+    """Assign NODE to a group (inventory metadata), or clear it.
+
+    Post-sunset group membership lives in the DB. Pass a GROUP name to set it; omit GROUP (or
+    pass an empty string) to remove the node from its group. The node then inherits global
+    defaults directly. This only changes inventory metadata — run `mch fleet sync NODE` to
+    re-converge under the new group's desired settings.
+    """
+    data = _check(_rpc(
+        ctx.obj["socket"], {"cmd": "set_group", "query": node, "value": group}
+    ))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    grp = data.get("group")
+    click.echo(f"{ident} group set to {grp!r}" if grp else f"{ident} group cleared")
+
+
+@node_group.command("label")
+@click.argument("node")
+@click.argument("label", required=False, default=None)
+@click.pass_context
+def set_label(ctx: click.Context, node: str, label: str | None) -> None:
+    """Set NODE's local label (host-only), or clear it.
+
+    The label is mch's local name for the node and never leaves this host. Pass a LABEL to set
+    it; omit it (or pass an empty string) to clear it. Labels may use only letters, digits,
+    dashes, underscores, and dots.
+    """
+    data = _check(_rpc(
+        ctx.obj["socket"], {"cmd": "set_label", "query": node, "value": label}
+    ))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    lbl = data.get("label")
+    click.echo(f"{_pk(data.get('pubkey'))} label set to {lbl!r}" if lbl
+               else f"{ident} label cleared")
 
 
 # ---------------------------------------------------------------------------

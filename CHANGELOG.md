@@ -5,6 +5,15 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **New `mch fleet issues` command.** Shows just the issue sections (drift, problem states, open
+  nodes) that were previously only a footer of `mch fleet status`, with an optional node filter.
+  Exits `0` when clean and `2` when any issue is present, so `mch fleet issues || alert` works from
+  cron.
+- **New `mch node group` and `mch node label` commands.** Post-sunset there was no way to move a
+  node between groups or rename its local label without re-importing or re-commissioning.
+  `mch node group NODE [GROUP]` sets or (with GROUP omitted) clears group membership; `mch node
+  label NODE [LABEL]` sets or clears the host-only label (validated). Both edit DB inventory
+  metadata only — run `mch fleet sync NODE` to re-converge under a new group's settings.
 - **Fixed the 7 mypy errors and pinned CI tool versions.** Narrowed the `SettingConfig | None`
   radio-lookups in `queue.py` via a `_desired_radio_value` helper, typed the discovery
   formatters' inputs, and pinned the `clean_facts` delete args to `str`; `mypy src` is clean again.
