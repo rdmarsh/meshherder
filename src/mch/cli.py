@@ -627,12 +627,14 @@ def status(ctx: click.Context, query: str | None) -> None:
 
     filtered = bool(query and len(nodes) != len(all_nodes))
 
-    # Single match → detail view
+    # Single match → detail view. This "magic" switch is being retired in favour of the explicit
+    # `mch node show NODE`; keep it for one release but nudge operators toward the new command.
     if query and len(nodes) == 1:
         pubkey = nodes[0]["pubkey"]
         detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": pubkey})
         detail = _node_detail_view(_check(detail_resp))
         _render_node_detail(detail)
+        click.echo(f"(tip: `mch node show {query}` shows this detail view directly)", err=True)
         return
 
     # Zero matches with a query
@@ -1825,6 +1827,21 @@ def unretire_node(ctx: click.Context, node: str) -> None:
     ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
     click.echo(f"unretired {ident} ({_pk(data.get('pubkey'))}) — state now {data.get('state')}")
     click.echo("re-favourited and queued for sync.")
+
+
+@node_group.command("show")
+@click.argument("node")
+@click.pass_context
+def show_node(ctx: click.Context, node: str) -> None:
+    """Show full detail for one node: facts, all desired settings, schedule, and recent activity.
+
+    NODE is a pubkey prefix, label, or mesh-name substring; it must match exactly one node. This
+    is the detail view that `mch fleet status NODE` shows for a single match, as an explicit
+    command.
+    """
+    detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": node})
+    detail = _node_detail_view(_check(detail_resp))
+    _render_node_detail(detail)
 
 
 @node_group.command("group")

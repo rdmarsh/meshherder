@@ -636,6 +636,7 @@ mch daemon validate --config <path>  Validate an explicit config file
 mch fleet plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch fleet plan <label|prefix>       Filter planned writes/audit drift/unknown values
 mch fleet issues [label|prefix]     Just the issue sections; exits 2 when any issue is present
+mch node show <label|prefix>        Full detail for one node (facts, settings, schedule, activity)
 mch node group <label|prefix> [NAME]   Set (or, NAME omitted, clear) a node's DB group membership
 mch node label <label|prefix> [TEXT]   Set (or, TEXT omitted, clear) a node's host-only label
 mch node path <label|prefix>       Show cached gateway management route metadata; no mesh probe

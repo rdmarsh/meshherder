@@ -1226,6 +1226,23 @@ def test_status_single_match_shows_detail():
     assert "passwd:" in result.output
 
 
+def test_node_show_renders_detail():
+    detail = _detail(facts={"ver": "v1.14.1", "board": "T-Beam"})
+    result = _run(["node", "show", "aabb"], detail)
+    assert result.exit_code == 0
+    assert "pubkey:" in result.output
+    assert "pubkey full:" in result.output
+    assert "v1.14.1" in result.output
+
+
+def test_status_single_match_hints_node_show():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail()
+    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    assert result.exit_code == 0
+    assert "mch node show aabb" in result.output
+
+
 def test_status_single_match_shows_next_sync_estimate():
     status = _status_resp(nodes=[_summary()])
     detail = _detail()
