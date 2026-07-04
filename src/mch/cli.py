@@ -1986,6 +1986,9 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
 
     Destructive commands (reboot, clkreboot, etc.) require confirmation unless --yes is passed.
     Irreversible commands (erase, set prv.key, etc.) are blocked entirely.
+
+    Prints an advisory warning (does not block) if the command is newer than the node's known
+    firmware version.
     """
     cmd_str = " ".join(command)
     blocked = blocked_exec_command(cmd_str)
