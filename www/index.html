@@ -114,7 +114,9 @@ scheduler:
 
   <section id="cli">
     <h2>CLI reference</h2>
-    <pre><code>mch daemon validate                # validate config/secrets and warn about unknown facts
+    <pre><code>mch status / mch sync              # shortcuts for `mch fleet status` / `mch fleet sync`
+mch help selectors / concepts      # learn how to name a node, and mch's vocabulary
+mch daemon validate                # validate config/secrets and warn about unknown facts
 mch fleet status                   # fleet overview: state, label, group, firmware, neighbours, last seen
 mch fleet status &lt;label|prefix&gt;    # one match: node detail; multiple: filtered table
 mch fleet plan                     # desired-vs-known diff, no mesh traffic, no writes

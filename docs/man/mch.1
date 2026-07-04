@@ -48,6 +48,22 @@ Unix socket. Defaults to
 .B \-\-help
 Show command help.
 .SH COMMANDS
+.SS shortcuts and help
+.TP
+.B status \fR[\fILABEL_OR_PREFIX\fR]
+Shortcut for
+.BR "fleet status" .
+.TP
+.B sync \fR[\fILABEL_OR_PREFIX\fR]
+Shortcut for
+.BR "fleet sync" .
+.TP
+.B help selectors
+Explain how to name a node on the command line (label, pubkey prefix, or mesh name).
+.TP
+.B help concepts
+Explain desired vs reported values, policy (enforce/audit/fact/skip), scope
+precedence, what a sync cycle does, and the exit codes.
 .SS daemon \(em process lifecycle
 .TP
 .B daemon start
@@ -364,6 +380,21 @@ Desired and observed state, command history, facts, and sync schedule.
 .TP
 .I /run/meshherder/mchd.sock
 Default daemon socket.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error (bad usage, daemon unreachable, or a command that failed).
+.TP
+.B 2
+Issues present. Returned only by
+.BR "fleet issues" ,
+so a cron job can alert on fleet health
+.RB ( "mch fleet issues >/dev/null || notify" ).
+.B "fleet status"
+is a viewing command and always exits 0.
 .SH EXAMPLES
 .TP
 .B mch daemon validate

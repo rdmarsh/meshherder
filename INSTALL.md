@@ -118,6 +118,24 @@ retention with a drop-in — `sudo systemctl edit mch-backup.service` — settin
 and/or `MCH_BACKUP_KEEP` (default 14). Run one on demand with `sudo systemctl start
 mch-backup.service`, and restore after a loss with `mch config import <snapshot> --yes`.
 
+### Shell completion (optional)
+
+`mch` ships tab-completion for free (via click). Enable it for your shell by evaluating the
+generated script — add the matching line to your shell's startup file:
+
+```bash
+# bash — ~/.bashrc
+eval "$(_MCH_COMPLETE=bash_source mch)"
+
+# zsh — ~/.zshrc
+eval "$(_MCH_COMPLETE=zsh_source mch)"
+
+# fish — ~/.config/fish/completions/mch.fish
+_MCH_COMPLETE=fish_source mch | source
+```
+
+(The `_MCH_COMPLETE=<shell>_source` form is for click 8.x, which is what `mch` installs.)
+
 ## udev rule
 
 By default a MeshCore node appears as `/dev/ttyACM0` or similar, and that path can change between
