@@ -366,7 +366,10 @@ fetch). Open follow-ups:
      supported|unsupported|unknown` handling the `ver` build suffix and `get x`/`set x` forms;
      matches by longest catalogue-key prefix; offline tests (`tests/test_command_catalog.py`).
   2. DONE (Unreleased): `mch node exec` warns (never blocks) when `command_support` is `unsupported`
-     for the node's observed `ver`; `unknown` stays silent.
+     for the node's observed `ver` (`unknown` stays silent), and — from the vendored `flags` — when
+     a command is USB/serial-only (can't run over the mesh) or only takes effect after a reboot.
+     `build`/`destructive` flags are stored but not wired into behaviour (`command_safety.py` stays
+     authoritative for destructive/blocked).
   3. (Separate, needs UX design — still open) firmware-currency signal per node
      (`up-to-date`/`needs-updating`)
      from `CURRENT_VERSION`/newest-seen vs the node's `ver` — ties into CLAUDE.md "Future scope:

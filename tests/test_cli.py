@@ -2255,6 +2255,38 @@ def test_exec_no_warning_when_node_version_unknown():
     assert "warning" not in (result.output.lower() + (result.stderr or "").lower())
 
 
+def test_exec_warns_serial_only_command():
+    """exec advises (does not block) when a command is USB/serial-only."""
+    runner = CliRunner()
+    with patch(
+        "mch.cli._rpc",
+        side_effect=[_node_resp_with_ver("v1.16.0"), {"ok": True, "data": "(sent)"}],
+    ):
+        # get acl is serial-only; --yes not needed (not a confirm command).
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "node", "exec", "site-a", "get", "acl"]
+        )
+    assert result.exit_code == 0  # advisory only — still runs
+    combined = result.output.lower() + (result.stderr or "").lower()
+    assert "warning" in combined and "serial" in combined
+
+
+def test_exec_warns_reboot_required_command():
+    """exec advises when a command only takes effect after a reboot (e.g. set radio)."""
+    runner = CliRunner()
+    with patch(
+        "mch.cli._rpc",
+        side_effect=[_node_resp_with_ver("v1.16.0"), {"ok": True, "data": "(sent)"}],
+    ):
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "node", "exec", "site-a", "set", "radio", "915.8,250,11,5"],
+        )
+    assert result.exit_code == 0
+    combined = result.output.lower() + (result.stderr or "").lower()
+    assert "warning" in combined and "reboot" in combined
+
+
 def test_exec_confirm_with_yes_skips_prompt():
     """exec with --yes on a confirm command (reboot) runs without prompting."""
     runner = CliRunner()

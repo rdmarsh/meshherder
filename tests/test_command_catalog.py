@@ -11,6 +11,7 @@ from mch.command_catalog import (
     SUPPORTED,
     UNKNOWN,
     UNSUPPORTED,
+    command_flags,
     command_support,
     load_command_catalog,
 )
@@ -87,6 +88,27 @@ def test_unknown_node_version_is_unknown() -> None:
 def test_empty_command_is_unknown() -> None:
     assert command_support("", "v1.16.0") == UNKNOWN
     assert command_support("   ", "v1.16.0") == UNKNOWN
+
+
+# command_flags(command) -> set of upstream flags (serial / reboot / build / destructive)
+
+def test_serial_only_command_carries_serial_flag() -> None:
+    assert "serial" in command_flags("get acl")
+    assert "serial" in command_flags("stats-core")
+
+
+def test_reboot_command_carries_reboot_flag() -> None:
+    # set radio only takes effect after a reboot.
+    assert "reboot" in command_flags("set radio 915.8,250,11,5")
+
+
+def test_command_with_no_flags_returns_empty() -> None:
+    assert command_flags("reboot") == set()
+    assert command_flags("set name Tower") == set()
+
+
+def test_flags_of_unknown_command_is_empty() -> None:
+    assert command_flags("frobnicate") == set()
 
 
 def test_load_from_explicit_path(tmp_path: Path) -> None:

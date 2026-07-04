@@ -22,7 +22,7 @@ from typing import Any
 import click
 
 from mch import __version__
-from mch.command_catalog import UNSUPPORTED, command_support
+from mch.command_catalog import UNSUPPORTED, load_command_catalog
 from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     parse_radio_tuple,
@@ -1973,6 +1973,34 @@ def _suggest_detail(n: dict[str, Any]) -> None:
 # exec
 # ---------------------------------------------------------------------------
 
+def _exec_advisories(cmd_str: str, node_data: dict[str, Any], label: str) -> list[str]:
+    """Advisory (never blocking) compatibility notes for an exec command against a node.
+
+    Uses the vendored firmware/command catalogue; any load failure yields no advisories so the
+    check can never break exec. Warns when the command is newer than the node's known firmware,
+    is USB/serial-only (so it cannot run over the mesh), or only takes effect after a reboot.
+    """
+    try:
+        catalog = load_command_catalog()
+    except RuntimeError:
+        return []
+
+    advisories: list[str] = []
+    node_ver = (node_data.get("facts") or {}).get("ver")
+    if catalog.support(cmd_str, node_ver) == UNSUPPORTED:
+        advisories.append(
+            f"'{cmd_str}' is newer than {label}'s firmware ({node_ver}); it may not be supported"
+        )
+    flags = catalog.flags(cmd_str)
+    if "serial" in flags:
+        advisories.append(
+            f"'{cmd_str}' is USB/serial-only and will not run over the mesh on a remote node"
+        )
+    if "reboot" in flags:
+        advisories.append(f"'{cmd_str}' only takes effect after {label} reboots")
+    return advisories
+
+
 @node_group.command(name="exec")
 @click.argument("node")
 @click.argument("command", nargs=-1, required=True)
@@ -1988,7 +2016,7 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
     Irreversible commands (erase, set prv.key, etc.) are blocked entirely.
 
     Prints an advisory warning (does not block) if the command is newer than the node's known
-    firmware version.
+    firmware, is USB/serial-only (cannot run over the mesh), or only takes effect after a reboot.
     """
     cmd_str = " ".join(command)
     blocked = blocked_exec_command(cmd_str)
@@ -2009,15 +2037,10 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
     pubkey = data["pubkey"]
     label = data.get("label") or data["name"]
 
-    # Advisory only: warn (never block) if the command predates the node's known firmware. The node
-    # may have been upgraded past our vendored catalogue, so an unknown result stays silent.
-    node_ver = (data.get("facts") or {}).get("ver")
-    if command_support(cmd_str, node_ver) == UNSUPPORTED:
-        click.echo(
-            f"warning: '{cmd_str}' is newer than {label}'s firmware ({node_ver}); "
-            "it may not be supported",
-            err=True,
-        )
+    # Advisory only: warn (never block) about known compatibility issues before sending. The node
+    # may have been upgraded past our vendored catalogue, so anything unknown stays silent.
+    for warning in _exec_advisories(cmd_str, data, label):
+        click.echo(f"warning: {warning}", err=True)
 
     if confirm_exec_command(cmd_str) and not yes:
         click.echo(f"  {cmd_str}  {label}  ({pubkey[:8]})")
