@@ -267,6 +267,21 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### CLI And Reporting
 
+- **Fleet-wide firmware-currency surfaces (extends the per-node note already shipped).** The
+  per-node signal exists (`command_catalog.firmware_currency()`, shown as the `ver` fact NOTE in
+  `mch node show`); the operator chose detail-note-only for the first cut. Two follow-ups, if the
+  fleet view needs them later:
+  - **`mch fleet status` VER-column marker** — flag outdated versions in the table (e.g. a trailing
+    `!` or a dimmed cell) so who's behind is visible at a glance without opening each node. Mind the
+    already-wide 8-column table and its width calc (`cli.py` `_short_ver`/`ver_w`); keep the marker
+    cheap and colour/again width-safe.
+  - **"Outdated firmware" issues section** — an advisory entry in `mch fleet issues` / the status
+    footer (e.g. "3 nodes behind latest v1.16.0"), so a cron/health check catches it. Must stay
+    advisory, **not** a bad-state (`report.py` issue categories drive alerting; firmware age is not
+    a fault). Reuses `firmware_currency()`; needs the fleet response to carry each node's `ver`
+    (already present in the summary rows).
+  Ties into CLAUDE.md "Future scope: firmware age reporting" (report nodes below a configurable
+  minimum version, or older than the newest seen across the fleet).
 - Move toward DB-primary fleet inventory. Config should describe desired policy/defaults and remain
   exportable as a backup/import format, while DB owns discovered full pubkeys, labels, mesh names,
   observed radios, known paths, facts, and scheduling state.
@@ -373,9 +388,9 @@ fetch). Open follow-ups:
   3. DONE (Unreleased): per-node firmware-currency signal. `command_catalog.firmware_currency()`
      compares the node's `ver` to the catalogue's `current_version` (`up to date` /
      `N releases behind`), surfaced as the NOTE on the `ver` fact row in `mch node show` / the fleet
-     detail view. Read-only, advisory, never a node state. Still open if wanted later: a
-     fleet-status VER marker and/or an "outdated firmware" issues section (operator chose
-     detail-note-only for now) — ties into CLAUDE.md "Future scope: firmware age reporting".
+     detail view. Read-only, advisory, never a node state. Fleet-wide surfaces (a `fleet status`
+     VER marker and an "outdated firmware" issues section) were deferred — tracked under "CLI And
+     Reporting" > "Fleet-wide firmware-currency surfaces".
 
 ### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
 
