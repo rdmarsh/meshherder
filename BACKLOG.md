@@ -308,6 +308,28 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Later
 
+### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
+
+- **CLI redesign, remaining steps.** Converge `node remove` into `node prune` (single retired-node
+  vocabulary); unify the scope grammar (`config set/unset` use `--global`, `clean` uses `--all` —
+  pick one) and the mutation convention (preview-by-default + `--yes` everywhere). Add `--json`
+  output to the read commands (`fleet status/plan/issues/logs`, `node show`, `config show`) — the
+  report model already produces the JSON. Write the NODE selector grammar once (a `mch help
+  selectors` topic) and reference it. Document exit codes (0/1, and 2 = issues for
+  `fleet status`/`issues`). Document click shell completion (`_MCH_COMPLETE`) in INSTALL.
+- **C2 module splits (dedicated PR).** `cli.py` (~3k lines) → package (`render`, `commission`, one
+  module per noun group); `queue.py` (~2.4k) → `scheduler`/`node_processor`/`pathing` behind the
+  `WorkQueue` facade; `daemon._dispatch` (huge `if cmd == …` chain) → a `dict[str, Handler]`.
+  Mechanical, no operator-facing behaviour change, but large diff — keep test suites green at each
+  step. (Was SUGGEST #14/#2.)
+- **M4 test gaps still open.** CLI↔daemon contract tests over a real Unix socket with a stub gateway
+  (the `_status_view`/`_node_detail_view` projection shims exist because this has drifted before),
+  and concurrency tests for scheduler vs manual sync vs exec vs commission ownership (the operation
+  lock is load-bearing and untested; was SUGGEST #19).
+- **`node add` onboarding pipeline (Phase 7 / ROADMAP Direction 1).** Unify the commission wizard
+  modes (new/replace/adopt) under one `mch node add` entry point, aligned with the auth-first
+  onboarding work. Design-heavy; the largest piece — its own design + PR.
+
 - Add management path diagnostics and recovery controls: store/display the selected path, retain
   bounded successful-path history, and provide an explicit path-reset operation.
 - Split the fleet API summary response from full node detail before building a frequently polled
