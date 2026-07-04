@@ -208,7 +208,7 @@ the current directory, so an old copied tree can downgrade the daemon even when 
 systemd unit are otherwise correct.
 
 If `mchd` exits because `config.yaml` is invalid, the service stops instead of restart-looping.
-Fix the config with `mch config validate`, then restart `mchd`.
+Fix the config with `mch daemon validate`, then restart `mchd`.
 
 ## Testing a feature branch on the bench
 

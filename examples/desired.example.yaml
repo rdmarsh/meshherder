@@ -35,7 +35,7 @@ facts:
   - owner.name   # operator name set on the node
   - lat          # latitude - stored per-node for network planning and mapping tools
   - lon          # longitude
-  - neighbors    # neighbour count - used by 'mch config suggest' to suggest txdelay settings
+  - neighbors    # neighbour count - used by 'mch fleet suggest' to suggest txdelay settings
 
 # Setting policies control what mchd does when it checks a setting on a node.
 # Checks happen at each scheduled sync cycle for the node - not continuously.
@@ -142,7 +142,7 @@ groups:
 
 # Nodes: one entry per managed node.
 # pubkey_prefix: at least 8 hex characters of the node's public key.
-# Run 'mch node contacts' to see nodes visible to the gateway with their public keys.
+# Run 'mch gateway contacts' to see nodes visible to the gateway with their public keys.
 nodes:
 
   # Minimal entry: group and label, inherits all group settings and policy.

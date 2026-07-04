@@ -875,6 +875,36 @@ def _status_resp(
     }}
 
 
+def test_moved_commands_available_under_new_nouns():
+    """The relocated commands work under their new noun and are hidden from the old menu."""
+    runner = CliRunner()
+    for path in (["gateway", "admin", "--help"], ["gateway", "contacts", "--help"],
+                 ["fleet", "suggest", "--help"], ["daemon", "validate", "--help"]):
+        assert runner.invoke(cli, path).exit_code == 0
+    # New nouns list them; old nouns hide the deprecated aliases.
+    assert "admin" not in runner.invoke(cli, ["node", "--help"]).output
+    assert "suggest" not in runner.invoke(cli, ["config", "--help"]).output
+    assert "gateway" in runner.invoke(cli, ["--help"]).output
+
+
+def test_moved_commands_old_aliases_still_work():
+    """Deprecated old paths keep working for one release (hidden aliases)."""
+    runner = CliRunner()
+    for path in (["node", "admin", "--help"], ["node", "contacts", "--help"],
+                 ["config", "suggest", "--help"], ["config", "validate", "--help"]):
+        assert runner.invoke(cli, path).exit_code == 0
+
+
+def test_config_suggest_alias_matches_fleet_suggest():
+    """`config suggest` (alias) produces the same output as `fleet suggest`."""
+    resp = {"ok": True, "data": [_suggest_node("site-a")]}
+    new = _run(["fleet", "suggest", "site-a"], resp)
+    old = _run(["config", "suggest", "site-a"], resp)
+    assert new.exit_code == 0 and old.exit_code == 0
+    assert "mch config set site-a" in new.output
+    assert old.output == new.output
+
+
 def test_fleet_issues_clean_exits_zero():
     result = _run(["fleet", "issues"], _status_resp())
     assert result.exit_code == 0

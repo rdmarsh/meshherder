@@ -1,4 +1,4 @@
-.TH MCH 1 "2026-07-03" "meshherder 0.20.0" "User Commands"
+.TH MCH 1 "2026-07-04" "meshherder 0.20.1" "User Commands"
 .SH NAME
 mch \- manage MeshCore repeater nodes through the mchd daemon
 .SH SYNOPSIS
@@ -14,16 +14,18 @@ over a Unix socket and shows fleet status, validates configuration,
 triggers syncs, runs carefully checked one-off commands, and guides node
 commissioning.
 .PP
-Commands are organised under four noun groups so the top-level menu stays
+Commands are organised under noun groups so the top-level menu stays
 shallow:
 .B daemon
-(process lifecycle),
+(process lifecycle and config validation),
 .B fleet
-(whole-fleet status, sync, plan, logs),
+(whole-fleet status, issues, sync, plan, logs, suggest),
 .B node
-(per-node inventory, lifecycle, and diagnostics), and
+(per-node inventory, lifecycle, and diagnostics),
 .B config
-(desired state plus backup and validation). Run
+(desired state plus backup), and
+.B gateway
+(operate the locally attached gateway node). Run
 .B "mch \-\-help"
 to list the groups and, for example,
 .B "mch node \-\-help"
@@ -62,6 +64,24 @@ through systemd.
 Restart
 .B mchd
 through systemd.
+.TP
+.B daemon status
+Show the service status (a mirror of
+.BR "systemctl status mchd" ).
+.TP
+.B daemon logs \fR[\-n \fILINES\fR] [\-f]
+Show the daemon process journal (startup, crashes, tracebacks) from
+.BR journalctl ,
+distinct from
+.B "fleet logs"
+(per-node activity).
+.TP
+.B daemon validate \fR[\-\-config \fIPATH\fR]
+Validate the daemon's
+.I config.yaml
+(and secrets if readable) without contacting
+.BR mchd .
+Unrecognised fact names are reported as warnings with close-match suggestions.
 .SS fleet \(em whole-fleet views
 .TP
 .B fleet status
@@ -82,6 +102,17 @@ applies.
 Sync one node immediately while streaming fact reads, setting checks, enforcement
 actions, operations, and timeout failures as they occur.
 .TP
+.B fleet issues \fR[\fILABEL_OR_PREFIX\fR]
+Show only the fleet issue sections (drifted settings, problem states, open
+nodes). Exits 0 when clean and 2 when any issue is present, for cron alerting.
+.TP
+.B fleet suggest \fR[\fILABEL_OR_PREFIX\fR]
+Show suggested settings based on each node's neighbour count. With a match, shows
+detailed suggestions and the ready-to-run
+.B "mch config set"
+commands to apply them. (Moved from
+.BR "config suggest" .)
+.TP
 .B fleet plan
 Show desired-versus-known changes without sending mesh commands or writing to
 nodes.
@@ -99,8 +130,17 @@ Show recent activity for one node.
 .B node new
 Interactively add a fresh or replacement MeshCore node.
 .TP
-.B node contacts
-Show repeater contacts visible to the gateway that are not yet in config.
+.B node group \fILABEL_OR_PREFIX\fR \fR[\fINAME\fR]
+Set the node's DB group membership, or clear it when
+.I NAME
+is omitted. Inventory metadata only; run
+.B "fleet sync"
+to reconverge under the new group's settings.
+.TP
+.B node label \fILABEL_OR_PREFIX\fR \fR[\fITEXT\fR]
+Set the node's host-only label, or clear it when
+.I TEXT
+is omitted. Labels may use only letters, digits, dashes, underscores, and dots.
 .TP
 .B node discover \-\-radio \fIFREQ,BW,SF,CR\fR [\-\-dwell \fISECONDS\fR] [\-\-unknown\-only]
 Temporarily switch the gateway radio, send an active MeshCore discovery request,
@@ -225,16 +265,25 @@ or
 .B node exec \fILABEL_OR_PREFIX\fR \fICOMMAND...\fR
 Run a raw MeshCore CLI command on a managed node. Dangerous commands are blocked
 or require confirmation.
+.SS gateway \(em operate the locally attached gateway node
 .TP
-.B node admin \fR[\fICLI ARGS...\fR]
+.B gateway contacts \fR[\fILABEL_OR_PREFIX\fR]
+Show repeater contacts visible to the gateway that are not yet managed in the DB,
+printing the
+.B "mch node adopt"
+command to bring each under management. (Moved from
+.BR "node contacts" .)
+.TP
+.B gateway admin \fR[\fICLI ARGS...\fR]
 Stop
 .BR mchd ,
 run
 .B meshcore-cli
 against the configured gateway serial device, then restart
 .B mchd
-after the admin session.
-.SS config \(em desired state, backup, and validation
+after the admin session. (Moved from
+.BR "node admin" .)
+.SS config \(em desired state and backup
 .TP
 .B config set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]
 Record a desired setting in the database, the authoritative source of desired
@@ -262,12 +311,6 @@ like
 .B config show \fINODE KEY\fR
 Explain one key for one node: how each scope sets it, what resolves, and what is
 observed.
-.TP
-.B config suggest
-Show suggested settings for all nodes based on neighbour count.
-.TP
-.B config suggest \fILABEL_OR_PREFIX\fR
-Show detailed suggestions and a paste-ready config block for one node.
 .TP
 .B config import [\fIFILE\fR] [\-\-yes]
 Seed the database's desired state and node label/group inventory from
@@ -304,20 +347,6 @@ Redirect to save, for example
 .BR "mch config export > backup.yaml" ,
 and rebuild after a server or gateway loss with
 .BR "mch config import backup.yaml \-\-yes" .
-.TP
-.B config validate
-Validate
-.IR /etc/meshherder/config.yaml .
-This command does not contact
-.BR mchd .
-If the secrets file is not readable, the readable config is still checked and
-secrets are reported as not checked.
-Unrecognised names in the configured facts list are reported as warnings with
-close registered-name suggestions where possible; they remain permitted for
-new firmware reads that are not yet represented in mch metadata.
-.TP
-.B config validate \-\-config \fIPATH\fR
-Validate an explicit config file.
 .SH FILES
 .TP
 .I /etc/meshherder/config.yaml
@@ -334,10 +363,10 @@ Desired and observed state, command history, facts, and sync schedule.
 Default daemon socket.
 .SH EXAMPLES
 .TP
-.B mch config validate
+.B mch daemon validate
 Validate the active config file, and validate secrets too if they are readable.
 .TP
-.B sudo mch config validate
+.B sudo mch daemon validate
 Validate both production config and mode-600 secrets.
 .TP
 .B mch fleet status qh

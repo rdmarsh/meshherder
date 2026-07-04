@@ -137,7 +137,7 @@ scheduler:
 With the daemon running, bring nodes under management and set their desired state in the DB — see
 *Editing desired state in the database* and *Commissioning a new node* below. In short:
 `mch node adopt` / `mch node new` add a node to the inventory, then `mch config set` records desired
-settings. Run `mch node contacts` to list repeater nodes visible to the gateway that are not yet
+settings. Run `mch gateway contacts` to list repeater nodes visible to the gateway that are not yet
 managed.
 
 Settings default to `audit`: mchd reads and reports drift, but does not write to a node unless the
@@ -195,7 +195,7 @@ commissioning/replacement, where mchd intentionally sends the stored password or
 blank hardware as mesh commands as part of taking ownership of that node. It still does not edit
 the YAML files.
 
-`mch config validate` checks that each configured node's stored `prv_key`, when present, derives a public
+`mch daemon validate` checks that each configured node's stored `prv_key`, when present, derives a public
 key matching the node's `pubkey_prefix`. A mismatch is reported as a warning with the prefix that
 the private key actually implies. Do not run replacement commissioning with a mismatched key unless
 you intend the replacement hardware to come back under that derived identity.
@@ -240,7 +240,7 @@ nodes:
 ### First run — discover and add nodes
 
 1. Plug in the gateway node and start mchd.
-2. Run `mch node contacts` to list repeater nodes the gateway can already see but that aren't yet
+2. Run `mch gateway contacts` to list repeater nodes the gateway can already see but that aren't yet
    managed in the DB. Each entry shows the full pubkey and the ready-to-run `mch node adopt`
    command.
 3. Bring a node under management directly (no file editing):
@@ -299,7 +299,7 @@ nodes commissioned by mch, this was printed in the original `secrets.yaml` snipp
 ### Building a node on the bench
 
 Power the node on near the gateway. MeshCore nodes broadcast advertisements on startup; within a
-minute or two the gateway will have stored the contact. Run `mch node contacts` again to see it,
+minute or two the gateway will have stored the contact. Run `mch gateway contacts` again to see it,
 then bring it under management with the printed `mch node adopt` command. If the node needs a login
 password, add it to `secrets.yaml` before syncing.
 
@@ -308,14 +308,14 @@ password, add it to `secrets.yaml` before syncing.
 ```
 mch fleet status                  # fleet view: state, label, group, firmware, neighbours, last seen
 mch fleet status <label|prefix>   # one match → detail view; multiple matches → filtered table
-mch config validate                # validate the daemon's /etc/meshherder/config.yaml
-mch config suggest                    # suggested txdelay for every node based on neighbour count
-mch config suggest <label|prefix>     # full suggestions + the `mch config set` commands to apply them
-mch node contacts                # gateway contacts not yet managed in the DB
+mch daemon validate                # validate the daemon's /etc/meshherder/config.yaml
+mch fleet suggest                    # suggested txdelay for every node based on neighbour count
+mch fleet suggest <label|prefix>     # full suggestions + the `mch config set` commands to apply them
+mch gateway contacts                # gateway contacts not yet managed in the DB
 mch node discover --radio F,B,S,C  # active bounded scan on a temporary gateway radio
 ```
 
-`mch config validate` also warns about unrecognised names in `facts:` and suggests close known
+`mch daemon validate` also warns about unrecognised names in `facts:` and suggests close known
 readable values, for example `powersavings` to `powersaving`. Unknown fact keys are still allowed
 so newly added firmware reads can be evaluated before mch metadata catches up.
 
@@ -631,8 +631,8 @@ mch fleet status <label|prefix>     One match → node detail; multiple matches 
                               Detail view: facts, all desired settings (config + group, including
                               pending ones not yet synced), last seen/last conn and approximate
                               next sync with full timestamp and relative time, recent activity logs
-mch config validate                  Validate /etc/meshherder/config.yaml
-mch config validate --config <path>  Validate an explicit config file
+mch daemon validate                  Validate /etc/meshherder/config.yaml
+mch daemon validate --config <path>  Validate an explicit config file
 mch fleet plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch fleet plan <label|prefix>       Filter planned writes/audit drift/unknown values
 mch fleet issues [label|prefix]     Just the issue sections; exits 2 when any issue is present
@@ -646,11 +646,11 @@ mch node discover --radio R        Actively discover nodes on a temporary radio;
 mch node discover --radio R --unknown-only  Hide fully managed discovery results
 mch node adopt PUBKEY --radio R    Add a discovered running node to DB + gateway contact (direct route)
 mch node probe <node> --radio R [--login] [--advert]  Read-only reachability check on a given radio
-mch config suggest                      Suggested txdelay for all nodes based on neighbour count
-mch config suggest <label|prefix>       Full suggestions + the `mch config set` commands for one node
+mch fleet suggest                      Suggested txdelay for all nodes based on neighbour count
+mch fleet suggest <label|prefix>       Full suggestions + the `mch config set` commands for one node
 mch fleet logs                      Recent per-node activity across all nodes
 mch fleet logs <prefix>             Activity for one node
-mch node contacts                  Repeater nodes visible to the gateway not yet managed in the DB
+mch gateway contacts                  Repeater nodes visible to the gateway not yet managed in the DB
 mch config import [FILE]             Seed DB inventory + desired state from config.yaml or a FILE (dry run)
 mch config import [FILE] --yes       Write it (idempotent; full-pubkey nodes created even if unseen)
 mch config export > backup.yaml      Complete fleet backup as YAML (inventory + desired; inverse of import)
@@ -664,7 +664,7 @@ mch node remove <label|prefix>     Delete one node's local DB state (prefer mch 
 mch fleet sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch fleet sync <prefix>             Sync one node; stream progress while waiting for the result
 mch node exec <label|prefix> <command>  Run one raw remote command through mchd over the mesh
-mch node admin                     Stop mchd, open local serial meshcore-cli, then restart mchd
+mch gateway admin                     Stop mchd, open local serial meshcore-cli, then restart mchd
 mch node new                       Add a fresh or replacement MeshCore node (interactive wizard)
 mch daemon start                     Start mchd via systemd (alias: sudo systemctl start mchd)
 mch daemon stop                      Stop mchd via systemd
@@ -673,11 +673,15 @@ mch daemon status                    Show service status (mirror of systemctl st
 mch daemon logs [-n N] [-f]          Show the daemon process log from journald (not per-node activity)
 ```
 
-`mch config validate` checks whatever it can read. On a production install, an ordinary operator account
-can validate the group-readable config file but may need `sudo mch config validate` to validate the
+A few commands moved to the noun they act on: `config suggest` → `fleet suggest`, `config validate`
+→ `daemon validate`, `node contacts` → `gateway contacts`, and `node admin` → `gateway admin`. The
+old paths still work as hidden aliases for now but are deprecated — prefer the new names.
+
+`mch daemon validate` checks whatever it can read. On a production install, an ordinary operator account
+can validate the group-readable config file but may need `sudo mch daemon validate` to validate the
 mode-600 secrets file as well.
 
-`mch node admin` may need privilege to stop/start `mchd`. When run through `sudo`, it drops the
+`mch gateway admin` may need privilege to stop/start `mchd`. When run through `sudo`, it drops the
 `meshcore-cli` process back to the invoking user so the interactive serial session is not run as
 root.
 

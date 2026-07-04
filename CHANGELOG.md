@@ -5,6 +5,12 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Moved four commands to the noun they act on (with hidden back-compat aliases).**
+  `config suggest` → `fleet suggest`, `config validate` → `daemon validate`, `node contacts` →
+  `gateway contacts`, and `node admin` → `gateway admin` (a new `gateway` noun group operates the
+  locally attached gateway node). The old paths keep working as hidden, deprecated aliases for at
+  least one minor release; prefer the new names. README, the `mch.1` man page, and the website were
+  updated (the site's "minimal config" also dropped its daemon-bricking `nodes:`/`global:` block).
 - **New `mch fleet issues` command.** Shows just the issue sections (drift, problem states, open
   nodes) that were previously only a footer of `mch fleet status`, with an optional node filter.
   Exits `0` when clean and `2` when any issue is present, so `mch fleet issues || alert` works from

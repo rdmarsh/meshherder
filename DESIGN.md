@@ -271,7 +271,7 @@ Intended split:
 - `mch fleet status [LABEL_OR_PREFIX]`: current state and evidence.
 - `mch fleet plan [LABEL_OR_PREFIX]`: what mchd would do next.
 - `mch fleet logs [LABEL_OR_PREFIX]`: history.
-- `mch config suggest [LABEL_OR_PREFIX]`: recommendations.
+- `mch fleet suggest [LABEL_OR_PREFIX]`: recommendations.
 - `mch fleet sync [LABEL_OR_PREFIX]`: do work now.
 
 The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`, `ignored`, or
@@ -375,16 +375,16 @@ actions rather than a config-seeding pass.
 4. **Commissioning (`mch node new`).** After a new/replacement node reboots, the reconcile above
    seeds it from the gateway favourite; the operator then imports its desired state.
 
-`mch node contacts` reads live gateway contacts and filters against the DB inventory; it is
+`mch gateway contacts` reads live gateway contacts and filters against the DB inventory; it is
 read-only and does not itself write to the DB (it prints the `mch node adopt` command to run).
 
 To stop managing a node, `mch node retire` (keeps history, unfavourites the contact) or, to delete
 local DB state, `mch node prune` / `mch node remove`. Because reconcile re-seeds any still-favourited
 contact, retire before prune so the node is not immediately re-seeded on the next cycle.
 
-## `mch node contacts` vs the DB
+## `mch gateway contacts` vs the DB
 
-`mch node contacts` reads **live from the gateway**, and filters against the **DB inventory** (the
+`mch gateway contacts` reads **live from the gateway**, and filters against the **DB inventory** (the
 DB is the inventory post-sunset — see "Desired state in the DB"). It shows REP nodes the gateway
 knows about whose full pubkey is not yet a managed DB node. Use it to discover what is visible on
 the mesh and decide what to bring under management. It is read-only; it prints the ready-to-run
@@ -592,7 +592,7 @@ by a hidden default. A readable key with no scoped row is simply not read — fa
 `default_policy` directive keeps its `enforce`/`audit`/`skip` range; a global "everything is a fact"
 default is meaningless.
 
-Configured fact keys remain checked by `mch config validate` against the command registry's readable keys;
+Configured fact keys remain checked by `mch daemon validate` against the command registry's readable keys;
 unknown keys stay legal with the `get <key>` fallback but warn and suggest close names to prevent a
 typo causing silent repeated reads. Status presentation can still hide cached observation rows whose
 key is no longer configured, retaining the historical row until an explicit cleanup discards it.
