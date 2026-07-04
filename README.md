@@ -268,9 +268,9 @@ stopping mchd. The wizard supports two modes:
 1. Power on the fresh node near the gateway (factory default frequency: 869.618 MHz, 62.5 kHz, SF8, CR5).
 2. Run `mch node new` and select **n** (new).
 3. Enter the label, group, mesh-visible name, target frequency, and admin password. The radio
-   prompt offers the community region presets from the MeshCore app config
-   (`https://api.meshcore.nz/api/v1/config`) — the same list the app shows — falling back to the
-   bundled presets when offline. Override the source with `MCH_RADIO_PRESETS_URL` if self-hosting.
+   prompt offers the official regional presets (Australia, NZ, EU/UK, USA/Canada, …), vendored
+   offline from the community [MeshCore Ninja](https://meshcore.ninja) catalogue (CC0) — no network
+   call. Maintainers refresh them with `python tools/refresh_meshcore_networks.py`.
 4. The daemon discovers the node, generates and sets a new private key, sets the name, password,
    and radio, then reboots the node.
 5. `mch node new` prints an importable `nodes:`/`groups:` YAML doc (save it to a file) and the

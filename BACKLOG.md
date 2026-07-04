@@ -308,39 +308,39 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Later
 
-### External catalog integration (MeshCore app config + meshcore.ninja index)
+### External catalog integration (MeshCore Ninja, CC0)
 
-Two upstream data sources, investigated 2026-07-04. **DONE (Unreleased):** the `node new` wizard
-now pulls radio presets from `https://api.meshcore.nz/api/v1/config`
-(`config.suggested_radio_settings.entries`) with offline fallback to bundled presets
-(`fetch_community_radio_presets` in `recommend.py`). Open follow-ups:
+Source: the community MeshCore Ninja catalogue — `github.com/meshcore-cz/meshcore-index` (human YAML
+under `data/`, dedicated to the public domain under **CC0 1.0**) compiled to a single `data.json`
+**published for reuse** at `https://meshcore.ninja/data.json`. Principle (2026-07-04): consume the
+openly-published catalogue, **vendor it locally**, and never hammer an API at runtime — a maintainer
+refreshes the vendored copy and commits it. **DONE (Unreleased):** the `node new` radio prompt uses
+regional presets vendored into `src/mch/data/networks.yaml` from that catalogue via
+`tools/refresh_meshcore_networks.py` (`load_network_radio_presets` in `recommend.py`; no runtime
+fetch). Open follow-ups:
 
-- **Networks → location-aware radio suggestion.** The meshcore.ninja catalog
-  (`github.com/meshcore-cz/meshcore-index`, human YAML under `data/`, compiled to a single
-  `data.json`) has `data/networks/<name>/network.yaml` (a `radio:` freq/bw/sf/cr block, itself
-  *generated from* `api.meshcore.nz` and drift-checked) plus `area.geojson` coverage polygons and
-  `coverage.countries`. mch already stores per-node `lat`/`lon`. Use them to suggest the region's
-  radio for a node by point-in-polygon (or country) match — surfaced in commissioning and
-  `mch fleet suggest`. Decide the consumption point (the compiled `data.json` is one fetch;
-  per-network YAML is finer-grained) and a cache/offline story like the presets have.
-- **Command × firmware-version compatibility catalog → command validation.** meshcore.ninja
-  `/repeater-commands/` (ultimately derived from the firmware CLI source, e.g.
-  `meshcore-dev/MeshCore .../src/helpers/CommonCLI.cpp` per version tag) plus
-  `meshcore-index data/firmwares/` and `data/compatibility/meshcore/<ver>/<device>.yaml` describe
-  which commands/settings exist on which firmware versions. Store a catalog (fetched/refreshed into
-  the DB) of every command, its usage, and version support, then:
+- **Networks → location-aware radio suggestion.** Each catalogue network carries `radio`
+  (freq/bw/sf/cr, drift-checked against the app presets), `coverage.countries`, and an
+  `area.geojson` coverage polygon (`areaUrl`/`areaKm2` in `data.json`). mch already stores per-node
+  `lat`/`lon`. Use them to suggest the region's radio for a node by point-in-polygon (or country)
+  match — in commissioning and `mch fleet suggest`. Extend the vendoring tool to capture the
+  coverage geometry (or countries) alongside each preset; keep it a committed local snapshot.
+- **Command × firmware-version compatibility → command validation.** NB from investigation: the
+  index does *not* contain a machine-readable command list — its `compatibility` collection is
+  device×firmware support (and currently only ~2 entries, WIP). The repeater-command reference on
+  meshcore.ninja is derived from the firmware CLI source (`meshcore-dev/MeshCore
+  src/helpers/CommonCLI.cpp`, per `repeater-vX.Y.Z` tag), so building a command/version catalogue
+  means parsing those tagged sources (or getting a published dataset) ourselves. Once we have it,
+  store a vendored/DB catalogue of every command + which firmware versions support it, then:
   - validate `mch exec` and desired commands/settings *before* sending — warn when a command won't
-    work on the node's observed `ver` (we already collect `ver` as a fact), instead of discovering
-    it via a failed mesh round-trip;
-  - add a firmware-currency signal per node (e.g. `up-to-date` / `needs-updating`) derived from the
-    newest version seen in the catalog vs the node's `ver` — ties into the existing "Future scope:
-    firmware age reporting" note in CLAUDE.md;
-  - fold command-support into the policy vocabulary the operator already knows
+    work on the node's observed `ver` (already collected as a fact) instead of via a failed mesh
+    round-trip;
+  - add a firmware-currency signal per node (`up-to-date` / `needs-updating`) from the newest known
+    version vs the node's `ver` — ties into CLAUDE.md's "Future scope: firmware age reporting";
+  - fold command-support into the operator's existing policy vocabulary
     (`enforce`/`audit`/`fact`/`skip`) — e.g. don't enforce a setting the target firmware can't do.
-  Design-heavy (new DB table + refresh job + validation hooks + a new reporting signal); confirm
-  the repeater-commands data actually exposes a stable machine-readable form before committing.
-  Note the catalog is community-maintained and marked "work in progress" upstream, so treat it as
-  advisory (warn, don't hard-block) and keep the bundled data as the offline source of truth.
+  Design-heavy (source parser or dataset + refresh + validation hooks + a new reporting signal).
+  Treat as advisory (warn, don't hard-block), and keep a vendored copy as the offline source.
 
 ### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,22 +15,15 @@ log = logging.getLogger(__name__)
 _BUNDLED = Path(__file__).parent / "data" / "profiles.yaml"
 _CACHE = Path("/var/lib/meshherder/profiles.yaml")
 _DEFAULT_URL = "https://raw.githubusercontent.com/rdmarsh/meshherder/main/src/mch/data/profiles.yaml"
+# Regional radio presets vendored from the MeshCore Ninja catalogue (CC0). This is a cached local
+# copy — mch never calls the catalogue at runtime; a maintainer refreshes it with
+# tools/refresh_meshcore_networks.py. See load_network_radio_presets.
+_NETWORKS = Path(__file__).parent / "data" / "networks.yaml"
 
 _CACHE_MAX_AGE_SECONDS = 86400  # 24 hours
 
-# Community radio presets — the same list the official MeshCore app shows (regional freq/bw/sf/cr
-# presets). This is the upstream source that the meshcore.ninja network catalog is itself generated
-# from, so it is the canonical "what settings does my region use" reference. Overridable via
-# MCH_RADIO_PRESETS_URL for self-hosting or tests.
-MESHCORE_NZ_CONFIG_URL = "https://api.meshcore.nz/api/v1/config"
-
-
-def community_radio_presets_url() -> str:
-    return os.environ.get("MCH_RADIO_PRESETS_URL") or MESHCORE_NZ_CONFIG_URL
-
-
-# Some upstreams (e.g. Cloudflare-fronted APIs like api.meshcore.nz) reject the default
-# `Python-urllib` User-Agent with 403, so send an explicit one on every outbound fetch.
+# Identify ourselves honestly on the (operator-configured) profiles_url fetch — good HTTP
+# citizenship, not a bot workaround.
 _USER_AGENT = "meshherder (+https://github.com/rdmarsh/meshherder)"
 
 
@@ -132,45 +123,25 @@ def load_radio_presets(
     return []
 
 
-def fetch_community_radio_presets(
-    url: str | None = None, timeout: float = 5.0
-) -> list[RadioPreset]:
-    """Fetch community radio presets from the MeshCore app config API (api.meshcore.nz).
+def load_network_radio_presets(path: Path | None = None) -> list[RadioPreset]:
+    """Load the vendored regional radio presets (from the MeshCore Ninja catalogue, CC0).
 
-    Maps ``config.suggested_radio_settings.entries`` to :class:`RadioPreset`, where each
-    preset's value is the ``freq,bw,sf,cr`` string mch uses everywhere (e.g. an Australia entry
-    becomes ``"915.800,250,10,5"``). Returns an empty list on any network or parse failure, so
-    callers can fall back to the bundled presets — commissioning must work offline.
+    Reads the bundled ``networks.yaml`` — a cached local snapshot, so there is no runtime network
+    call. Each ``presets`` entry (``name``/``value``/``description``) becomes a :class:`RadioPreset`
+    whose value is the ``freq,bw,sf,cr`` string mch uses everywhere. Returns an empty list if the
+    file is missing or malformed, so callers can fall back to the profiles.yaml presets.
+    Refresh with ``tools/refresh_meshcore_networks.py``.
     """
-    url = url or community_radio_presets_url()
-    try:
-        with _urlopen(url, timeout) as resp:
-            data = json.loads(resp.read().decode())
-    except Exception as exc:
-        log.warning("could not fetch community radio presets from %s: %s", url, exc)
+    raw = _load_yaml(path or _NETWORKS)
+    if not raw:
         return []
-
-    entries: Any = []
-    if isinstance(data, dict):
-        entries = (
-            data.get("config", {})
-            .get("suggested_radio_settings", {})
-            .get("entries", [])
-        )
     presets: list[RadioPreset] = []
-    for entry in entries if isinstance(entries, list) else []:
-        if not isinstance(entry, dict):
+    for entry in raw.get("presets", []):
+        if not isinstance(entry, dict) or "value" not in entry:
             continue
-        try:
-            value = (
-                f"{entry['frequency']},{entry['bandwidth']},"
-                f"{entry['spreading_factor']},{entry['coding_rate']}"
-            )
-        except (KeyError, TypeError):
-            continue  # skip an incomplete entry rather than emit a malformed radio tuple
         presets.append(RadioPreset(
-            name=str(entry.get("title") or value),
-            value=value,
+            name=str(entry.get("name") or entry["value"]),
+            value=str(entry["value"]),
             description=str(entry.get("description", "")),
         ))
     return presets

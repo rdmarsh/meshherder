@@ -1,0 +1,156 @@
+# Regional radio presets for `mch node new`.
+#
+# Vendored from the MeshCore Ninja catalogue (https://meshcore.ninja/data.json), whose
+# data is dedicated to the public domain under CC0 1.0. Upstream source of truth:
+# https://github.com/meshcore-cz/meshcore-index (data/networks/<id>/network.yaml).
+#
+# This is a CACHED LOCAL COPY so mch never calls an API at runtime. Do not hand-edit —
+# regenerate with `python tools/refresh_meshcore_networks.py`; fixes belong upstream.
+source_url: https://meshcore.ninja/data.json
+upstream_schema_version: 3
+generated_at: "2026-07-04T03:15:41+00:00"
+presets:
+  - name: "Australia"
+    value: "915.800,250,10,5"
+    countries: [AU]
+    description: "915.800 MHz / BW250 / SF10 / CR4/5"
+  - name: "Australia (Mid)"
+    value: "915.075,125,9,5"
+    countries: [AU]
+    description: "915.075 MHz / BW125 / SF9 / CR4/5"
+  - name: "Australia (Narrow)"
+    value: "916.575,62.5,7,8"
+    countries: [AU]
+    description: "916.575 MHz / BW62.5 / SF7 / CR4/8"
+  - name: "Australia (Narrow)"
+    value: "916.575,62.5,7,8"
+    countries: [AU]
+    description: "916.575 MHz / BW62.5 / SF7 / CR4/8"
+  - name: "Australia: QLD"
+    value: "923.125,62.5,8,5"
+    countries: [AU]
+    description: "923.125 MHz / BW62.5 / SF8 / CR4/5"
+  - name: "Australia: SA, WA"
+    value: "923.125,62.5,8,8"
+    countries: [AU]
+    description: "923.125 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "Brazil"
+    value: "923.125,62.5,8,8"
+    countries: [BR]
+    description: "923.125 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "Czech Republic (Narrow)"
+    value: "869.432,62.5,7,5"
+    countries: [CZ]
+    description: "869.432 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "EU 433MHz (Long Range)"
+    value: "433.650,250,11,5"
+    countries: [EU]
+    description: "433.650 MHz / BW250 / SF11 / CR4/5"
+  - name: "EU 433MHz (Narrow)"
+    value: "433.650,62.5,8,8"
+    countries: [UA]
+    description: "433.650 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Deprecated)"
+    value: "869.525,250,11,5"
+    countries: [EU, GB]
+    description: "869.525 MHz / BW250 / SF11 / CR4/5"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [BG]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [EU, GB]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [LT]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [DE]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [DE]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [DE, LU]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [DE]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [SE, DK]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [GB]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "EU/UK (Narrow)"
+    value: "869.618,62.5,8,8"
+    countries: [SI]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "Netherlands"
+    value: "869.618,62.5,7,5"
+    countries: [NL]
+    description: "869.618 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "New Zealand"
+    value: "917.375,250,11,5"
+    countries: [NZ]
+    description: "917.375 MHz / BW250 / SF11 / CR4/5"
+  - name: "New Zealand (Narrow)"
+    value: "917.375,62.5,7,5"
+    countries: [NZ]
+    description: "917.375 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "Switzerland"
+    value: "869.618,62.5,8,8"
+    countries: [CH]
+    description: "869.618 MHz / BW62.5 / SF8 / CR4/8"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [CA]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [US]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [US]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [US]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [US]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [US]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [CA]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [US]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "USA/Canada (Recommended)"
+    value: "910.525,62.5,7,5"
+    countries: [US, CA]
+    description: "910.525 MHz / BW62.5 / SF7 / CR4/5"
+  - name: "Vietnam (Deprecated)"
+    value: "920.250,250,11,5"
+    countries: [VN]
+    description: "920.250 MHz / BW250 / SF11 / CR4/5"
+  - name: "Vietnam (Narrow)"
+    value: "920.250,62.5,8,5"
+    countries: [VN]
+    description: "920.250 MHz / BW62.5 / SF8 / CR4/5"

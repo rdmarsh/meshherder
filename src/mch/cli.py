@@ -37,7 +37,7 @@ from mch.config import (
 )
 from mch.config import load as load_config
 from mch.meshkey import derive_public_key, generate_private_key
-from mch.recommend import fetch_community_radio_presets, load_radio_presets
+from mch.recommend import load_network_radio_presets, load_radio_presets
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
 DEFAULT_CONFIG = Path("/etc/meshherder/config.yaml")
@@ -2584,15 +2584,14 @@ def _validate_radio_tuple(raw: str) -> tuple[str, str, str, str] | None:
 
 
 def _profile_radio_options() -> list[tuple[str, str]]:
-    # Prefer the live community presets (api.meshcore.nz — what the MeshCore app shows); fall back
-    # to the bundled profiles.yaml presets when offline so commissioning still works without
-    # internet. Both are validated so a malformed tuple never reaches the prompt.
-    presets = fetch_community_radio_presets()
-    if not presets:
-        try:
-            presets = load_radio_presets()
-        except RuntimeError:
-            return []
+    # The vendored regional presets from the MeshCore Ninja catalogue first (the "what does my
+    # region use" list), then any bundled profiles.yaml presets. Both are local files — no runtime
+    # network call — and each value is validated so a malformed tuple never reaches the prompt.
+    presets = list(load_network_radio_presets())
+    try:
+        presets += load_radio_presets()
+    except RuntimeError:
+        pass
     seen: set[str] = set()
     options: list[tuple[str, str]] = []
     for preset in presets:

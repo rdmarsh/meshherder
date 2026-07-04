@@ -1,5 +1,16 @@
 # MeshCore Test Tools
 
+## `refresh_meshcore_networks.py`
+
+Regenerate `src/mch/data/networks.yaml` (the regional radio presets shown by `mch node new`) from
+the community [MeshCore Ninja](https://meshcore.ninja) catalogue's published `data.json` (CC0 1.0).
+mch never fetches this at runtime — run the tool occasionally and commit the refreshed file:
+
+```bash
+python tools/refresh_meshcore_networks.py                 # fetch upstream and rewrite the file
+python tools/refresh_meshcore_networks.py --from data.json # regenerate from a local copy
+```
+
 ## `query_node_info.py`
 
 Query a MeshCore repeater using anonymous request types.

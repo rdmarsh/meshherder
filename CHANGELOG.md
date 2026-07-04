@@ -5,13 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
-- **Commissioning radio presets from the MeshCore app config API.** `mch node new` now offers the
-  community region presets from `https://api.meshcore.nz/api/v1/config` (the same list the MeshCore
-  app shows — Australia, New Zealand, EU/UK, USA/Canada, …) at the radio prompt, mapping each to a
-  `freq,bw,sf,cr` tuple. It falls back to the bundled `profiles.yaml` presets when offline so
-  commissioning still works without internet, and the source is overridable via
-  `MCH_RADIO_PRESETS_URL`. Outbound fetches now send an explicit User-Agent (some upstreams 403 the
-  default `Python-urllib` one).
+- **Commissioning radio presets from the MeshCore Ninja catalogue (vendored, offline).** `mch node
+  new` now offers the official regional radio presets (Australia, New Zealand, EU/UK, USA/Canada, …)
+  at the radio prompt, each mapped to a `freq,bw,sf,cr` tuple. The data is vendored into
+  `src/mch/data/networks.yaml` from the community MeshCore Ninja catalogue
+  (`https://meshcore.ninja/data.json`, dedicated to the public domain under CC0 1.0), so **mch makes
+  no network call at runtime** — a maintainer refreshes the file with
+  `tools/refresh_meshcore_networks.py` and commits it (same pattern as `profiles.yaml`).
 
 - **Named DB migrations.** Schema evolution now runs through an ordered `_MIGRATIONS` list gated by
   SQLite's `PRAGMA user_version`, replacing the ad-hoc `try: ALTER TABLE … except` patches in
