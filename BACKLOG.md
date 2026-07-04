@@ -325,22 +325,50 @@ fetch). Open follow-ups:
   `lat`/`lon`. Use them to suggest the region's radio for a node by point-in-polygon (or country)
   match — in commissioning and `mch fleet suggest`. Extend the vendoring tool to capture the
   coverage geometry (or countries) alongside each preset; keep it a committed local snapshot.
-- **Command × firmware-version compatibility → command validation.** NB from investigation: the
-  index does *not* contain a machine-readable command list — its `compatibility` collection is
-  device×firmware support (and currently only ~2 entries, WIP). The repeater-command reference on
-  meshcore.ninja is derived from the firmware CLI source (`meshcore-dev/MeshCore
-  src/helpers/CommonCLI.cpp`, per `repeater-vX.Y.Z` tag), so building a command/version catalogue
-  means parsing those tagged sources (or getting a published dataset) ourselves. Once we have it,
-  store a vendored/DB catalogue of every command + which firmware versions support it, then:
-  - validate `mch exec` and desired commands/settings *before* sending — warn when a command won't
-    work on the node's observed `ver` (already collected as a fact) instead of via a failed mesh
-    round-trip;
-  - add a firmware-currency signal per node (`up-to-date` / `needs-updating`) from the newest known
-    version vs the node's `ver` — ties into CLAUDE.md's "Future scope: firmware age reporting";
-  - fold command-support into the operator's existing policy vocabulary
-    (`enforce`/`audit`/`fact`/`skip`) — e.g. don't enforce a setting the target firmware can't do.
-  Design-heavy (source parser or dataset + refresh + validation hooks + a new reporting signal).
-  Treat as advisory (warn, don't hard-block), and keep a vendored copy as the offline source.
+- **Command × firmware-version compatibility → advisory command validation.** Investigated
+  2026-07-04; **source located and extraction proven** — ready to build when picked up.
+
+  **Data source (definitive).** Not in `data.json`. It lives in the app source of the same repo:
+  `src/lib/repeaterCommands.js` (+ `src/lib/repeaterCommandsHistory.js` for per-version changelog
+  text). `src/` is **MIT-licensed** (not CC0) — attribute *MeshCore Ninja*. They already derived it
+  from the firmware CLI source (`meshcore-dev/MeshCore` `src/helpers/CommonCLI.cpp` +
+  `examples/simple_repeater/MyMesh.cpp`, per `repeater-vX.Y.Z` tag) across all releases, so **we do
+  NOT parse C++ ourselves** — we consume and re-vendor their compiled result.
+  - DIY alternative (rejected as high-maintenance): fetch those two `.cpp` files at each of the ~33
+    `repeater-*` git tags via raw.githubusercontent, parse each for its commands, diff to compute
+    `addedIn`. A parser we'd own forever; skip it while meshcore.ninja publishes the data.
+
+  **Schema.** `COMMAND_GROUPS[] = {id, label, commands[]}`; each command has `cmd` (bare, e.g.
+  `reboot`) OR `name` (a setting, with `get: true` / `set: '<val>'`, e.g. `radio`, `powersaving`),
+  plus `desc`, `flags[]` (`destructive`/`serial`/`reboot`/`build`/`admin`), and **`addedIn`** = first
+  firmware version (absent ⇒ `BASE_VERSION`). `VERSION_ORDER[]` lists all ~33 releases oldest→newest
+  (`v1.0.0a` … `v1.16.0`); compare **by list index, not numeric parse** (prerelease suffixes like
+  `v1.0.0a`). `CURRENT_VERSION` and `availableIn(entry, version)` (index of version ≥ index of
+  `addedIn`) are exported too. 92 commands, 66 with `addedIn`. No `removedIn` in the current file.
+
+  **Extraction (proven).** Node (v22 present) can `import` the ESM module and `JSON.stringify`
+  `COMMAND_GROUPS`/`VERSION_ORDER`/`CURRENT_VERSION`. Verified: `poweroff` (`addedIn v1.14.1`) →
+  `availableIn=false` on `v1.13.0`, `true` on `v1.15.0`. Build `tools/refresh_meshcore_commands.py`
+  (Node → vendored file), same "vendor locally, no runtime fetch" pattern as `networks.yaml`.
+
+  **Operator preferences (rdm, 2026-07-04):**
+  - **Vendor as JSON** (`src/mch/data/repeater_commands.json`) — JSON preferred over YAML here.
+  - **Warn only, never enforce/block.** The node may have been upgraded past what our catalogue
+    knows, and the operator knows more than us. So the catalogue is purely advisory: a warning, not
+    a gate. Do **not** fold it into `enforce`/`audit` decisions.
+  - The `mch exec` warning is the primary wanted feature: before sending, if the command's `addedIn`
+    is newer than the node's observed `ver`, warn (and let the operator proceed).
+
+  **Suggested slices:**
+  1. Data only (no behaviour): refresh tool → vendored `repeater_commands.json`;
+     `load_command_catalog()` + `command_support(command, node_ver) -> supported|unsupported|unknown`
+     handling the `ver` fact's build suffix (`"v1.14.1-467959c (Build: …)"` → `v1.14.1`) and mch's
+     `get x`/`set x` forms; tests offline.
+  2. Advisory **warn in `mch exec`** when `command_support` is `unsupported` for the node's `ver`
+     (never blocks; `unknown` stays silent).
+  3. (Separate, needs UX design) firmware-currency signal per node (`up-to-date`/`needs-updating`)
+     from `CURRENT_VERSION`/newest-seen vs the node's `ver` — ties into CLAUDE.md "Future scope:
+     firmware age reporting" and a possible read-only reporting column. Not a policy state.
 
 ### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
 
