@@ -432,11 +432,16 @@ def config_group() -> None:
     """Edit and back up desired state (the DB source of truth)."""
 
 
+@cli.group("gateway")
+def gateway_group() -> None:
+    """Operate the locally attached gateway node (admin console, contacts)."""
+
+
 # ---------------------------------------------------------------------------
 # validate
 # ---------------------------------------------------------------------------
 
-@config_group.command("validate")
+@daemon_group.command("validate")
 @click.option(
     "--config", "-c",
     "config_path",
@@ -595,12 +600,14 @@ def status(ctx: click.Context, query: str | None) -> None:
 
     filtered = bool(query and len(nodes) != len(all_nodes))
 
-    # Single match → detail view
+    # Single match → detail view. This "magic" switch is being retired in favour of the explicit
+    # `mch node show NODE`; keep it for one release but nudge operators toward the new command.
     if query and len(nodes) == 1:
         pubkey = nodes[0]["pubkey"]
         detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": pubkey})
         detail = _node_detail_view(_check(detail_resp))
         _render_node_detail(detail)
+        click.echo(f"(tip: `mch node show {query}` shows this detail view directly)", err=True)
         return
 
     # Zero matches with a query
@@ -660,6 +667,34 @@ def status(ctx: click.Context, query: str | None) -> None:
         click.echo(f"{len(all_nodes)} nodes")
 
     _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
+
+
+@fleet_group.command("issues")
+@click.argument("query", required=False, default=None)
+@click.pass_context
+def issues(ctx: click.Context, query: str | None) -> None:
+    """Show only the fleet issues (drift, problem states, open nodes).
+
+    This is the same data as the footer of `mch fleet status`, on its own so a cron job or
+    script can check fleet health without parsing the table. QUERY optionally filters by
+    pubkey prefix, label, or mesh name. Exits 0 when clean and 2 when any issue is present,
+    so `mch fleet issues >/dev/null || alert` works.
+    """
+    resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
+    fleet = _check(resp)
+    data = _status_view(fleet)
+
+    drifted = _filter_drift(data.get("drifted", []), query)
+    bad_state = _filter_nodes(data.get("bad_state", []), query)
+    ghosts = _filter_ghosts(data.get("ghosts", []), query)
+    unseen_nodes = _filter_unseen_nodes(data.get("unseen_nodes", []), query)
+    open_nodes = _filter_nodes(data.get("open_nodes", []), query)
+
+    if not (drifted or bad_state or ghosts or unseen_nodes or open_nodes):
+        click.echo("no issues")
+        return
+    _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
+    ctx.exit(2)
 
 
 @node_group.command("path")
@@ -1011,7 +1046,7 @@ def _render_discovery(data: dict[str, Any]) -> None:
         ))
 
 
-def _discovery_type(value: object) -> str:
+def _discovery_type(value: Any) -> str:
     names = {1: "cli", 2: "repeater", 3: "room"}
     try:
         return names.get(int(value), str(value))
@@ -1019,7 +1054,7 @@ def _discovery_type(value: object) -> str:
         return "-"
 
 
-def _discovery_snr(value: object) -> str:
+def _discovery_snr(value: Any) -> str:
     try:
         return f"{float(value):.1f}"
     except (TypeError, ValueError):
@@ -1120,7 +1155,7 @@ def _render_issue_sections(
         click.echo("")
 
     if ghosts:
-        click.echo("ghost nodes (in local DB but not config.yaml):")
+        click.echo("ghost nodes (in the local DB but no longer managed):")
         label_w = max(
             _wlen("LABEL"),
             max((_wlen(g.get("label") or "-") for g in ghosts), default=0),
@@ -1152,7 +1187,7 @@ def _render_issue_sections(
         click.echo("")
 
     if unseen_nodes:
-        click.echo("unseen config nodes (in config.yaml but not known to gateway/DB):")
+        click.echo("unseen nodes (in desired state but not known to the gateway/DB):")
         label_w = max(
             _wlen("LABEL"),
             max((_wlen(n.get("label") or "-") for n in unseen_nodes), default=0),
@@ -1258,19 +1293,20 @@ def _filter_unseen_nodes(nodes: list[dict[str, Any]], query: str | None) -> list
     ]
 
 
-@node_group.command("contacts")
+@gateway_group.command("contacts")
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def contacts(ctx: click.Context, query: str | None) -> None:
-    """Show gateway repeater contacts not yet in your config.yaml.
+    """Show gateway repeater contacts not yet managed in the DB.
 
     Optionally filter by pubkey prefix or name substring:
 
       mch node contacts 4e       # pubkeys starting with 4e
       mch node contacts mill     # names containing "mill"
 
-    Prints ready-to-paste YAML snippets. Review and append to the nodes:
-    section of your config.yaml for any nodes you want mch to manage.
+    For each contact it prints the ready-to-run `mch node adopt` command that brings the
+    node under management (the DB is the inventory now — there is nothing to paste into
+    config.yaml), plus the matching secrets.yaml snippet if the node needs a login password.
     """
     resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
     data = _check(resp)
@@ -1278,20 +1314,20 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
     if not data:
         if query:
-            click.echo(f"no contacts matching '{query}' outside your config.yaml")
+            click.echo(f"no unmanaged repeater contacts matching '{query}'")
         else:
-            click.echo("no repeater contacts found outside your config.yaml")
+            click.echo("no unmanaged repeater contacts found")
         return
 
     if query:
-        click.echo(f"# Repeater contacts matching '{query}' not in your config.yaml.")
+        click.echo(f"# Repeater contacts matching '{query}' not yet managed in the DB.")
     else:
-        click.echo("# Repeater contacts visible to the gateway but not in your config.yaml.")
-    click.echo("# Review each one, then paste the snippets into your config files.\n")
+        click.echo("# Repeater contacts visible to the gateway but not yet managed in the DB.")
+    click.echo("# Bring one under management by running its `mch node adopt` command below.\n")
 
     for c in data:
         pubkey = c.get("public_key", "")
-        prefix = pubkey[:8]
+        prefix = pubkey[:12]
         name = c.get("adv_name", "") or "unknown"
 
         # pubkey line is always 79 chars — use that as the fixed row width
@@ -1302,12 +1338,14 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         click.echo(f"# ── {name} {sep}")
         click.echo(f"# full pubkey: {pubkey}\n")
 
-        click.echo("# config.yaml — append to the 'nodes:' section:")
-        click.echo(f"  - pubkey_prefix: {prefix}")
-        click.echo(f'    label: "{name}"')
-        click.echo("    group:          # assign to a group, or remove this line\n")
+        # `mch node adopt` needs the radio the contact was discovered on; the gateway home
+        # radio is the safe default, so prompt the operator to confirm/replace it.
+        click.echo("# adopt this node into the DB inventory (set --radio to where it was heard):")
+        click.echo(
+            f'  mch node adopt {pubkey} --radio FREQ,BW,SF,CR --label "{name}"\n'
+        )
 
-        click.echo("# secrets.yaml — append to the 'nodes:' section:")
+        click.echo("# if the node requires a login, add its password to secrets.yaml:")
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
 
 
@@ -1760,11 +1798,66 @@ def unretire_node(ctx: click.Context, node: str) -> None:
     click.echo("re-favourited and queued for sync.")
 
 
+@node_group.command("show")
+@click.argument("node")
+@click.pass_context
+def show_node(ctx: click.Context, node: str) -> None:
+    """Show full detail for one node: facts, all desired settings, schedule, and recent activity.
+
+    NODE is a pubkey prefix, label, or mesh-name substring; it must match exactly one node. This
+    is the detail view that `mch fleet status NODE` shows for a single match, as an explicit
+    command.
+    """
+    detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": node})
+    detail = _node_detail_view(_check(detail_resp))
+    _render_node_detail(detail)
+
+
+@node_group.command("group")
+@click.argument("node")
+@click.argument("group", required=False, default=None)
+@click.pass_context
+def set_group(ctx: click.Context, node: str, group: str | None) -> None:
+    """Assign NODE to a group (inventory metadata), or clear it.
+
+    Post-sunset group membership lives in the DB. Pass a GROUP name to set it; omit GROUP (or
+    pass an empty string) to remove the node from its group. The node then inherits global
+    defaults directly. This only changes inventory metadata — run `mch fleet sync NODE` to
+    re-converge under the new group's desired settings.
+    """
+    data = _check(_rpc(
+        ctx.obj["socket"], {"cmd": "set_group", "query": node, "value": group}
+    ))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    grp = data.get("group")
+    click.echo(f"{ident} group set to {grp!r}" if grp else f"{ident} group cleared")
+
+
+@node_group.command("label")
+@click.argument("node")
+@click.argument("label", required=False, default=None)
+@click.pass_context
+def set_label(ctx: click.Context, node: str, label: str | None) -> None:
+    """Set NODE's local label (host-only), or clear it.
+
+    The label is mch's local name for the node and never leaves this host. Pass a LABEL to set
+    it; omit it (or pass an empty string) to clear it. Labels may use only letters, digits,
+    dashes, underscores, and dots.
+    """
+    data = _check(_rpc(
+        ctx.obj["socket"], {"cmd": "set_label", "query": node, "value": label}
+    ))
+    ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
+    lbl = data.get("label")
+    click.echo(f"{_pk(data.get('pubkey'))} label set to {lbl!r}" if lbl
+               else f"{ident} label cleared")
+
+
 # ---------------------------------------------------------------------------
 # suggest
 # ---------------------------------------------------------------------------
 
-@config_group.command("suggest")
+@fleet_group.command("suggest")
 @click.argument("query", required=False)
 @click.pass_context
 def suggest(ctx: click.Context, query: str | None) -> None:
@@ -1773,11 +1866,11 @@ def suggest(ctx: click.Context, query: str | None) -> None:
     QUERY: pubkey prefix, label substring, or name substring. Omit to show all nodes.
 
     Prints the matching profile (e.g. rooftop, tower), suggested txdelay
-    and universal settings with one-line explanations, and a ready-to-paste
-    config.yaml settings: block.
+    and universal settings with one-line explanations, and the ready-to-run
+    `mch config set` commands to apply them.
 
-    Requires 'neighbors' in the facts: list in config.yaml and at least
-    one completed sync cycle to populate the neighbour count.
+    Requires a `neighbors` fact-policy key (mch config set --global neighbors
+    --policy fact) and at least one completed sync cycle to populate the count.
     """
     _show_suggestions(ctx, query)
 
@@ -1829,7 +1922,8 @@ def _suggest_detail(n: dict[str, Any]) -> None:
 
     if count is None:
         click.echo(
-            "(no neighbour data - add 'neighbors' to facts: in config.yaml"
+            "(no neighbour data - collect it with"
+            " `mch config set --global neighbors --policy fact`"
             " and run mch fleet sync to start collecting it)"
         )
         click.echo("")
@@ -1864,12 +1958,14 @@ def _suggest_detail(n: dict[str, Any]) -> None:
     for key, val, desc in settings:
         click.echo(f"  {key:<{key_w}}  {val:<{val_w}}  {desc}")
 
+    # Desired state lives in the DB now (sunset), so emit runnable `mch config set` commands
+    # instead of a config.yaml block. Prefer the local label as the selector; fall back to the
+    # pubkey prefix when the node has no label.
+    selector = n.get("label") or (n.get("pubkey") or "")[:12]
     click.echo("")
-    click.echo("To apply, paste into this node's settings: block in config.yaml:")
+    click.echo("To apply, run:")
     for key, val, _ in settings:
-        click.echo(f"      {key}:")
-        click.echo(f'        desired: "{val}"')
-        click.echo("        policy: enforce")
+        click.echo(f'  mch config set {selector} {key} "{val}" --policy enforce')
 
 
 # ---------------------------------------------------------------------------
@@ -2959,7 +3055,7 @@ def daemon_logs(lines: int, follow: bool) -> None:
     raise SystemExit(result.returncode)
 
 
-@node_group.command("admin", context_settings={"ignore_unknown_options": True})
+@gateway_group.command("admin", context_settings={"ignore_unknown_options": True})
 @click.option(
     "--config",
     "config_path",

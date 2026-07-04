@@ -59,6 +59,10 @@ sudo usermod -aG dialout mch
 sudo install -d -o root -g mch -m 750 /etc/meshherder
 
 # Config and secrets
+# config.example.yaml holds daemon settings only (gateway, scheduler, messenger, api, paths).
+# Desired state (managed nodes, groups, global defaults, facts) lives in the DB, not this file —
+# the daemon refuses to start if config.yaml carries nodes:/groups:/global:/facts: blocks. Seed
+# desired state after first start with `mch config import` (see examples/desired.example.yaml).
 sudo install -o root -g mch -m 640 examples/config.example.yaml /etc/meshherder/config.yaml
 sudo install -o mch -g mch -m 600 examples/secrets.example.yaml /etc/meshherder/secrets.yaml
 
@@ -94,6 +98,25 @@ mch fleet status
 
 > **Note:** the systemd unit is named `mchd` - always use `systemctl ... mchd`, not `mch`.
 > The `mch daemon start`, `mch daemon stop`, and `mch daemon restart` CLI commands are shortcuts to the same thing.
+
+### Scheduled desired-state backups (recommended)
+
+The SQLite database is now the only live copy of desired state, so keep automated `mch config
+export` snapshots. A systemd timer writes a dated, restorable snapshot each day and rotates to the
+newest N:
+
+```bash
+sudo install -D -m 755 systemd/mch-backup.sh /usr/local/bin/mch-backup
+sudo cp systemd/mch-backup.service systemd/mch-backup.timer /etc/systemd/system/
+sudo install -d -o mch -g mch -m 750 /var/lib/meshherder/backups
+sudo systemctl daemon-reload
+sudo systemctl enable --now mch-backup.timer
+```
+
+Snapshots land in `/var/lib/meshherder/backups/backup-YYYY-MM-DD.yaml`. Change the location or
+retention with a drop-in — `sudo systemctl edit mch-backup.service` — setting `MCH_BACKUP_DIR`
+and/or `MCH_BACKUP_KEEP` (default 14). Run one on demand with `sudo systemctl start
+mch-backup.service`, and restore after a loss with `mch config import <snapshot> --yes`.
 
 ## udev rule
 
@@ -204,7 +227,7 @@ the current directory, so an old copied tree can downgrade the daemon even when 
 systemd unit are otherwise correct.
 
 If `mchd` exits because `config.yaml` is invalid, the service stops instead of restart-looping.
-Fix the config with `mch config validate`, then restart `mchd`.
+Fix the config with `mch daemon validate`, then restart `mchd`.
 
 ## Testing a feature branch on the bench
 

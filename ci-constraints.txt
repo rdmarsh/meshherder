@@ -1,0 +1,10 @@
+# Pinned tool versions for CI so an upstream release of a linter/type-checker/test
+# runner can't silently redden `main` (see RECOMMENDATIONS C1). The `dev` extra in
+# pyproject.toml stays loose (>=) for local development; CI applies these exact pins
+# on top with `pip install -c ci-constraints.txt`.
+#
+# Bump these deliberately (with a green run) rather than letting CI float.
+mypy==2.1.0
+ruff==0.15.20
+pytest==9.1.1
+pytest-asyncio==1.4.0

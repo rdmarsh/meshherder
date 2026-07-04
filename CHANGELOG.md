@@ -5,6 +5,65 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Named DB migrations.** Schema evolution now runs through an ordered `_MIGRATIONS` list gated by
+  SQLite's `PRAGMA user_version`, replacing the ad-hoc `try: ALTER TABLE … except` patches in
+  `Database.open()`. Since the DB is the only copy of desired state, versioned migrations make
+  schema changes auditable and each run exactly once; the former column additions are adopted as
+  migration 1 (tolerant of a pre-versioning DB that already has them).
+- **Docs-drift guard.** A new test parses every `mch <group> <command>` out of README, the man
+  page, and the website and asserts each resolves in the real CLI (hidden aliases count), so a
+  renamed or removed command can't silently outlive its documentation — the class of drift that
+  caused the post-sunset stale-command bugs.
+- **Scheduled desired-state backup unit.** New `systemd/mch-backup.{service,timer}` +
+  `mch-backup.sh` write a dated `mch config export` snapshot daily to
+  `/var/lib/meshherder/backups` with keep-N rotation (`MCH_BACKUP_KEEP`, default 14). Since the DB
+  is the only live copy of desired state, this is the disaster-recovery mechanism; restore with
+  `mch config import <snapshot> --yes`. See INSTALL.md.
+- **Retired `SUGGEST.md`.** Its still-open items were confirmed already tracked in `BACKLOG.md`;
+  the historical file and its README docs-table row were removed.
+- **Breaking: moved four commands to the noun they act on.** `config suggest` → `fleet suggest`,
+  `config validate` → `daemon validate`, `node contacts` → `gateway contacts`, and `node admin` →
+  `gateway admin` (a new `gateway` noun group operates the locally attached gateway node). The old
+  paths are removed (no aliases — alpha software); update any scripts. README, the `mch.1` man page,
+  and the website were updated (the site's "minimal config" also dropped its daemon-bricking
+  `nodes:`/`global:` block).
+- **New `mch node show NODE` command.** The single-node detail view (facts, settings, schedule,
+  activity) is now an explicit command instead of only the "magic" single-match behaviour of
+  `mch fleet status NODE`. That magic switch still works but now prints a one-line tip pointing at
+  `mch node show`; it will be retired in a future release.
+- **New `mch fleet issues` command.** Shows just the issue sections (drift, problem states, open
+  nodes) that were previously only a footer of `mch fleet status`, with an optional node filter.
+  Exits `0` when clean and `2` when any issue is present, so `mch fleet issues || alert` works from
+  cron.
+- **New `mch node group` and `mch node label` commands.** Post-sunset there was no way to move a
+  node between groups or rename its local label without re-importing or re-commissioning.
+  `mch node group NODE [GROUP]` sets or (with GROUP omitted) clears group membership; `mch node
+  label NODE [LABEL]` sets or clears the host-only label (validated). Both edit DB inventory
+  metadata only — run `mch fleet sync NODE` to re-converge under a new group's settings.
+- **Fixed the 7 mypy errors and pinned CI tool versions.** Narrowed the `SettingConfig | None`
+  radio-lookups in `queue.py` via a `_desired_radio_value` helper, typed the discovery
+  formatters' inputs, and pinned the `clean_facts` delete args to `str`; `mypy src` is clean again.
+  Added `ci-constraints.txt` (mypy/ruff/pytest/pytest-asyncio pins) applied in CI so an upstream
+  tool release can't silently redden `main` — the `dev` extra stays loose for local development.
+- **`mch node contacts` and commission replace/scan now use the DB inventory (sunset fix).**
+  `mch node contacts` filtered gateway contacts against `config.nodes` — always empty under the
+  strict daemon — so it listed every managed node as unmanaged and printed config.yaml snippets that
+  make the daemon refuse to start. It now filters against the DB inventory and prints the
+  ready-to-run `mch node adopt` command per contact (plus the secrets.yaml snippet). Commission
+  `replace` resolves the node identity and desired reach-radio from the DB (secrets.yaml still
+  supplies the prv_key/password); `list_replace` lists DB nodes that have a prv_key in secrets; and
+  discovery's managed-detection dropped its dead config-prefix filter. Replacement commissioning
+  works again under the strict daemon.
+- **Docs/examples: finish the config.yaml → DB sunset.** Split the shipped example into
+  `examples/config.example.yaml` (daemon settings only — now loads with the strict daemon, so a
+  fresh install can start) and `examples/desired.example.yaml` (nodes/groups/global/facts,
+  documented as `mch config import` input). Rewrote the README Configuration and workflow sections,
+  INSTALL notes, and CLI help around the DB-primary model: no more "paste into config.yaml" flows or
+  "config.yaml is the source of truth" wording. `mch config suggest` now prints runnable
+  `mch config set` commands instead of a config.yaml block. Reworded the stale fleet-status issue
+  headings that still named config.yaml. Added a regression test that strict-loads the shipped
+  daemon example so this can't regress.
+
 ## 0.20.1 - 2026-07-03
 
 - **New `mch daemon status` and `mch daemon logs`.** Thin read-only wrappers over

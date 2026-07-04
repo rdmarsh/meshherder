@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import aiosqlite
 import pytest
 
-from mch.db import Database
+from mch.db import _CURRENT_SCHEMA_VERSION, _SCHEMA, Database
 from mch.models import (
     DesiredOperation,
     DesiredSetting,
@@ -27,6 +28,54 @@ async def db(tmp_path):
     await d.open()
     yield d
     await d.close()
+
+
+# ------------------------------------------------------------------
+# schema migrations (PRAGMA user_version)
+# ------------------------------------------------------------------
+
+async def _user_version(path) -> int:
+    async with aiosqlite.connect(path) as conn:
+        async with conn.execute("PRAGMA user_version") as cur:
+            row = await cur.fetchone()
+    return int(row[0])
+
+
+async def test_fresh_db_records_current_schema_version(tmp_path):
+    path = tmp_path / "fresh.db"
+    d = Database(path)
+    await d.open()
+    await d.close()
+    assert await _user_version(path) == _CURRENT_SCHEMA_VERSION
+
+
+async def test_migrations_are_idempotent_on_reopen(tmp_path):
+    path = tmp_path / "reopen.db"
+    for _ in range(3):
+        d = Database(path)
+        await d.open()  # must not raise on an already-migrated DB
+        await d.close()
+    assert await _user_version(path) == _CURRENT_SCHEMA_VERSION
+
+
+async def test_legacy_db_with_adhoc_columns_adopts_migrations(tmp_path):
+    """A pre-versioning DB (columns already present, user_version still 0) opens and adopts cleanly.
+
+    Migration 1's ADD COLUMNs are already satisfied by the base schema on any real DB, so adoption
+    must tolerate the duplicate-column error and just bump user_version to current.
+    """
+    path = tmp_path / "legacy.db"
+    async with aiosqlite.connect(path) as conn:
+        await conn.executescript(_SCHEMA)  # columns present, but user_version left at 0
+        await conn.commit()
+    assert await _user_version(path) == 0
+
+    d = Database(path)
+    await d.open()  # duplicate-column ALTERs in migration 1 must be tolerated during adoption
+    await d.upsert_node(Node(pubkey="aabbcc", name="Legacy", label="lab"))
+    assert (await d.get_node("aabbcc")).label == "lab"
+    await d.close()
+    assert await _user_version(path) == _CURRENT_SCHEMA_VERSION
 
 
 # ------------------------------------------------------------------

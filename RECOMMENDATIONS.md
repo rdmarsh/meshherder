@@ -1,5 +1,29 @@
 # Recommendations — project review, todo, missing, cleanup
 
+> ## Progress (updated 2026-07-04, branch `recommendations-sweep`)
+>
+> **Done and committed** (all gates green: `pytest` 916 passed, `ruff`, `mypy src`):
+> - **P0 Broken/stale — all fixed.** B1 (split example into `config.example.yaml` +
+>   `desired.example.yaml`, strict-load regression test), B2 (`node contacts` filters DB inventory,
+>   prints `mch node adopt`), B3/B4 (README/DESIGN/INSTALL/website/CLI wording off config.yaml),
+>   B5 (commission replace/scan + `list_replace` resolve from the DB).
+> - **P1 CLI redesign (partial).** M2 `mch fleet issues`, M3 `mch node group`/`mch node label`,
+>   `mch node show` (+ hint from the fleet-status magic switch), and the low-risk moves
+>   `config suggest`→`fleet suggest`, `config validate`→`daemon validate`,
+>   `node contacts`/`node admin`→`gateway …` (new `gateway` group; old paths removed, no aliases —
+>   alpha software).
+> - **P2/P3 cleanup+missing (partial).** C1 (7 mypy errors fixed + `ci-constraints.txt` pinning),
+>   C3 (named DB migrations via `PRAGMA user_version`), C4 (retired `SUGGEST.md`), M1 (scheduled
+>   backup systemd unit + script), M5 (docs-drift guard test).
+>
+> **Deferred to re-review** (tracked in `BACKLOG.md`):
+> - CLI redesign steps 4+: prune/remove convergence, scope/`--yes` grammar unification, `--json`
+>   output, a `mch help selectors` topic, exit codes doc, shell-completion docs.
+> - C2 module splits (`cli.py`/`queue.py` → packages, `daemon._dispatch` → handler dict) — large
+>   mechanical refactor, no operator-facing value; wants a dedicated PR.
+> - M4 remainder: CLI↔daemon contract tests over a real socket, and concurrency tests.
+> - Phase 7: the `node add` onboarding pipeline (design-heavy, ROADMAP Direction 1).
+
 A full-project review of Mesh Herder at **v0.20.1** (commit `5f9d65a`, 2026-07-03), written as a
 work plan that another AI model (or human) can execute item by item. It covers four things:
 

@@ -14,26 +14,23 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Commission flow: finish the config.yaml sunset
 
-- **`mch commission` replace/scan flows still read config inventory.** After the slice-8 sunset
-  (config.yaml no longer carries inventory; daemon loads strict), the commission **new** flow is
-  DB-oriented (prints an importable `nodes:` doc + `mch import` guidance, accepts any group). But the
-  **replace** path still resolves the node from `config.nodes`/`config.secrets` (`commission.py`
-  `_commission_replace`, ~line 532), and the scan/managed-detection helpers filter by config pubkey
-  prefixes. Under the strict daemon `config.nodes` is empty, so replace errors ("no config entry")
-  and scan can't tell managed from unmanaged. Rework these to resolve identity + desired radio from
-  the DB (and secrets.yaml for the prv_key). Not data-corrupting today — replace is simply
-  unavailable — but it should be DB-driven to match the rest of the sunset.
-- **No command assigns a node to a group post-sunset.** Group membership (`nodes.group`) is now set
-  only by `mch import` and commissioning. Consider `mch group <node> <name>` (or `mch set <node>
-  group <name>`) so an operator can move a node between groups without re-importing.
+- DONE (Unreleased, 2026-07-03): `mch commission` replace/scan and `mch node contacts` now resolve
+  inventory from the DB, not config. `_commission_replace` resolves the node + desired radio from
+  the DB inventory (secrets.yaml still supplies the prv_key/password, matched by pubkey prefix);
+  `list_replace` lists DB nodes with a secrets prv_key; `discover_unmanaged` dropped its dead
+  config-prefix filter (DB pubkeys are the managed set); `get_unfiled_contacts` filters gateway
+  contacts against DB inventory and `mch node contacts` prints the `mch node adopt` command instead
+  of a config.yaml block.
+- DONE (Unreleased): `mch node group NODE [GROUP]` and `mch node label NODE [LABEL]` edit DB
+  inventory metadata directly (set or clear), closing the "no way to move a node between groups
+  post-sunset" gap.
 
 ### Sunset follow-ups and release
 
-- **Installable scheduled-backup unit.** The DB is now the only copy of desired state, so an
-  automated `mch export` backup matters. Ship a systemd timer + service (and an INSTALL note) that
-  writes a dated `mch export > .../backup-YYYY-MM-DD.yaml`, with simple rotation (keep N days). The
-  export is already a complete, restorable backup (full pubkeys + inventory + retired tags); this
-  just automates capturing it. A bare cron line works today as a stopgap.
+- DONE (Unreleased): shipped `systemd/mch-backup.{service,timer}` + `systemd/mch-backup.sh` (dated
+  `mch config export` snapshots to `/var/lib/meshherder/backups`, keep-N rotation via
+  `MCH_BACKUP_KEEP`, temp-file-then-rename so a failed export never truncates a good snapshot) plus
+  an INSTALL section. Restore with `mch config import <snapshot> --yes`.
 - **Cut a release with a version bump.** The sunset is a breaking change (the daemon refuses to
   start on a config.yaml that still carries desired state), so bump `0.9.35` -> `0.10.0` in
   `pyproject.toml` and `src/mch/__init__.py`, and move the `## Unreleased` CHANGELOG block under a
@@ -302,8 +299,36 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 - Persist "configured node not visible to gateway" warnings in `mch logs`, not only the journal.
 - Make `mch suggest <node>` show differences from current configuration and consider geographic
   separation when suggesting settings for nearby nodes.
+- Remove the dead `ghosts`/`unseen_nodes` issue categories. Post-sunset `report.py` always sets
+  `configured=True` and `unseen=[]`, so these two issue sections can never populate; the CLI render
+  paths (`_render_issue_sections`, `_filter_ghosts`, `_filter_unseen_nodes`), the `legacy_status`
+  spread, the `_issues_report`/`_summary` fields, and their tests are all dead weight. Phase-1 doc
+  pass (2026-07-03) only reworded the never-printed strings off config.yaml; the schema/render
+  removal is the real cleanup. Fold into the issue-assembly dedup work (was SUGGEST #15).
 
 ## Later
+
+### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
+
+- **CLI redesign, remaining steps.** Converge `node remove` into `node prune` (single retired-node
+  vocabulary); unify the scope grammar (`config set/unset` use `--global`, `clean` uses `--all` —
+  pick one) and the mutation convention (preview-by-default + `--yes` everywhere). Add `--json`
+  output to the read commands (`fleet status/plan/issues/logs`, `node show`, `config show`) — the
+  report model already produces the JSON. Write the NODE selector grammar once (a `mch help
+  selectors` topic) and reference it. Document exit codes (0/1, and 2 = issues for
+  `fleet status`/`issues`). Document click shell completion (`_MCH_COMPLETE`) in INSTALL.
+- **C2 module splits (dedicated PR).** `cli.py` (~3k lines) → package (`render`, `commission`, one
+  module per noun group); `queue.py` (~2.4k) → `scheduler`/`node_processor`/`pathing` behind the
+  `WorkQueue` facade; `daemon._dispatch` (huge `if cmd == …` chain) → a `dict[str, Handler]`.
+  Mechanical, no operator-facing behaviour change, but large diff — keep test suites green at each
+  step. (Was SUGGEST #14/#2.)
+- **M4 test gaps still open.** CLI↔daemon contract tests over a real Unix socket with a stub gateway
+  (the `_status_view`/`_node_detail_view` projection shims exist because this has drifted before),
+  and concurrency tests for scheduler vs manual sync vs exec vs commission ownership (the operation
+  lock is load-bearing and untested; was SUGGEST #19).
+- **`node add` onboarding pipeline (Phase 7 / ROADMAP Direction 1).** Unify the commission wizard
+  modes (new/replace/adopt) under one `mch node add` entry point, aligned with the auth-first
+  onboarding work. Design-heavy; the largest piece — its own design + PR.
 
 - Add management path diagnostics and recovery controls: store/display the selected path, retain
   bounded successful-path history, and provide an explicit path-reset operation.
@@ -324,8 +349,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   known-good cached profile.
 - Add concurrency coverage for scheduled sync, manual sync, `exec`, and commissioning ownership.
 - Add compact per-sync outcome counters for contacts, writes attempted, and settings changed.
-- Add named DB migrations, typed MeshCore contact data, and smaller ownership-focused modules as
-  persistence and queue behavior grow.
+- Add typed MeshCore contact data and smaller ownership-focused modules as persistence and queue
+  behavior grow. (Named DB migrations DONE Unreleased: `PRAGMA user_version` + ordered
+  `_MIGRATIONS` list in `db.py`, adopting the former ad-hoc ALTERs as migration 1.)
 - Reduce duplicated status/issue assembly and continue converging terminology on `mch status`
   rather than legacy node-detail command wording.
 - Polish `mch validate` output ordering and revisit whether `mch remove` and `mch prune` should
@@ -397,6 +423,11 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-07-04: Retired `SUGGEST.md` (historical review notes). Confirmed every still-open item it
+  tracked (#12 migrations, #13 profile-cache path, #14 module split, #15 issue-assembly dedup,
+  #16 typed contacts, #19 concurrency tests, #33 partial-commission retry, #35 wizard sentinels,
+  #37–39 field-aware validation) is already represented in this backlog, then deleted the file and
+  its README docs-table row.
 - 2026-07-03: Nested the flat 26-command `mch` menu under four noun groups — `daemon`, `fleet`,
   `node`, `config` — so the top-level menu lists only the groups. Breaking change to invocation
   paths only (e.g. `mch set` → `mch config set`); all behaviour, options, and output preserved.

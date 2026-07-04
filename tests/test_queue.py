@@ -439,8 +439,10 @@ async def test_exec_command_returns_busy_during_other_operation(db):
     gw.send_command.assert_not_awaited()
 
 
-async def test_work_queue_unfiled_contacts_uses_config_and_gateway(db):
-    cfg = _make_config([_node("aabbccdd")])
+async def test_work_queue_unfiled_contacts_uses_db_and_gateway(db):
+    # Managed = present in the DB inventory (post-sunset), not config.
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="Managed", label="Managed"))
+    cfg = _make_config()
     gw = _make_gateway(contacts=[
         _contact("aabbccdd1122", name="Managed"),
         _contact("ff001122aabb", name="NewREP"),
@@ -2521,13 +2523,14 @@ async def test_reschedule_overdue_leaves_future_nodes_alone(db):
 # ------------------------------------------------------------------
 
 async def test_unfiled_contacts_excludes_managed_nodes(db):
-    """get_unfiled_contacts omits contacts whose pubkey is already in config."""
-    cfg = _make_config(node_cfgs=[_node(pubkey="aabbcc")])
+    """get_unfiled_contacts omits contacts already in the DB inventory (post-sunset)."""
+    # DB is the inventory now, so a managed node is one whose full pubkey is a DB node.
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="Managed", label="Managed"))
     gw = _make_gateway(contacts=[
         _contact("aabbccdd1122", name="Managed"),
         _contact("ff001122aabb", name="NewREP"),
     ])
-    result = await get_unfiled_contacts(cfg, gw)
+    result = await get_unfiled_contacts(db, gw)
     names = [c["adv_name"] for c in result]
     assert "Managed" not in names
     assert "NewREP" in names
@@ -2767,12 +2770,11 @@ async def test_successful_enforcement_records_setting_history(db):
 
 async def test_unfiled_contacts_excludes_non_repeaters(db):
     """get_unfiled_contacts only returns REP contacts, not CLI."""
-    cfg = _make_config()
     gw = _make_gateway(contacts=[
         _contact("ff001122aabb", name="NewREP", type_=2),
         _contact("ee991122aabb", name="Companion", type_=1),
     ])
-    result = await get_unfiled_contacts(cfg, gw)
+    result = await get_unfiled_contacts(db, gw)
     names = [c["adv_name"] for c in result]
     assert "NewREP" in names
     assert "Companion" not in names

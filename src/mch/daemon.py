@@ -42,6 +42,7 @@ from mch.config import (
     resolve_desired_configs,
     settable_keys,
     validate_directive_value,
+    validate_node_label,
 )
 from mch.config import load as load_config
 from mch.db import Database
@@ -991,7 +992,9 @@ async def _dispatch(
             return {"ok": False, "error": str(exc)}
         if not dry_run:
             for candidate in candidates:
-                await db.delete_fact(candidate["pubkey"], candidate["key"])
+                # pubkey and key are always non-None strings here (node.pubkey / fact.key);
+                # the candidate dict's mixed value types widen to str | None, so pin them.
+                await db.delete_fact(str(candidate["pubkey"]), str(candidate["key"]))
         return {
             "ok": True,
             "data": {
@@ -1108,6 +1111,45 @@ async def _dispatch(
             "label": node.label,
             "name": node.name,
             "state": node.state.value,
+        }}
+
+    if cmd in ("set_group", "set_label"):
+        query = str(req.get("query") or "")
+        if not query:
+            return {"ok": False, "error": "missing node"}
+        try:
+            node = await _resolve_node(query, db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"no such node: {query}"}
+        # Empty string clears the field (ungroup / drop label); a value sets it.
+        raw = req.get("value")
+        value = str(raw).strip() if raw is not None and str(raw).strip() else None
+        if cmd == "set_group":
+            await db.set_node_group(node.pubkey, value)
+            await db.write_log(
+                node.pubkey, "INFO",
+                f"group set to {value!r}" if value else "group cleared",
+            )
+        else:
+            if value is not None:
+                try:
+                    validate_node_label(value)
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
+            await db.set_node_label(node.pubkey, value)
+            await db.write_log(
+                node.pubkey, "INFO",
+                f"label set to {value!r}" if value else "label cleared",
+            )
+        updated = await db.get_node(node.pubkey)
+        assert updated is not None  # just written above; row must exist
+        return {"ok": True, "data": {
+            "pubkey": updated.pubkey,
+            "label": updated.label,
+            "name": updated.name,
+            "group": updated.group,
         }}
 
     if cmd == "logs":

@@ -1,0 +1,26 @@
+[Unit]
+Description=Mesh Herder desired-state backup (mch config export)
+Documentation=https://github.com/rdmarsh/meshherder#readme
+# The export talks to mchd over its Unix socket, so the daemon must be up.
+After=mchd.service
+Requisite=mchd.service
+
+[Service]
+Type=oneshot
+# Same account as mchd so it can reach the group-owned socket and write under /var/lib/meshherder.
+User=mch
+Group=mch
+# Defaults; override with a drop-in (systemctl edit mch-backup.service) if you want a different
+# location or retention.
+Environment=MCH_BACKUP_DIR=/var/lib/meshherder/backups
+Environment=MCH_BACKUP_KEEP=14
+ExecStart=/usr/local/bin/mch-backup
+
+# Hardening — it only needs to read the DB via the daemon and write the backups directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/meshherder
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mch-backup

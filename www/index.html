@@ -71,7 +71,7 @@ pip install -e .</code></pre>
     <h2>What it does</h2>
     <ul>
       <li><strong>Desired-state enforcement</strong> — declare readable/writable CLI settings; mchd enforces, audits, or skips them with Node &gt; Group &gt; Global precedence.</li>
-      <li><strong>Fact collection</strong> — firmware, hardware, role, location, neighbours, and other registered readable values are cached in SQLite. <code>mch config validate</code> warns about likely misspelled fact keys.</li>
+      <li><strong>Fact collection</strong> — firmware, hardware, role, location, neighbours, and other registered readable values are cached in SQLite. <code>mch daemon validate</code> warns about likely misspelled fact keys.</li>
       <li><strong>Multi-frequency support</strong> — use <code>via_radio:</code> globally, per group, or per node; mchd temporarily switches the gateway when required and restores its home radio afterward.</li>
       <li><strong>Group name prefix</strong> — prepend a <code>name_prefix:</code> (usually an emoji) to each member's desired name, set globally, per group, or per node. No space is added, and mchd refuses to start if a prefix+name would overflow the 31-byte firmware name limit.</li>
       <li><strong>Staggered scheduler</strong> — nodes are spread randomly across the sync window so mchd restarts never cause a surge.</li>
@@ -87,6 +87,11 @@ pip install -e .</code></pre>
 
   <section id="config">
     <h2>Minimal config</h2>
+    <p>
+      <code>config.yaml</code> holds daemon settings only. Inventory and desired state (nodes,
+      groups, global defaults, facts) live in the database — the daemon refuses to start if
+      <code>config.yaml</code> still carries <code>nodes:</code>/<code>groups:</code>/<code>global:</code>/<code>facts:</code>.
+    </p>
     <pre><code>gateway:
   device: /dev/meshcore0
   baud: 115200
@@ -98,47 +103,34 @@ pip install -e .</code></pre>
 
 scheduler:
   sync_interval_days: 1
-  inter_node_delay_seconds: 120
-
-facts:
-  - ver
-  - board
-  - neighbors
-
-global:
-  default_policy: audit
-  settings:
-    owner.info: "Managed with Mesh Herder"
-
-nodes:
-  - pubkey_prefix: aabbccdd
-    label: MyRepeater
-    settings:
-      owner.info:
-        desired: "Managed with Mesh Herder"
-        policy: enforce</code></pre>
+  inter_node_delay_seconds: 120</code></pre>
     <p>
-      Run <code>mch node contacts</code> to list repeater nodes visible to the gateway
-      that are not yet in your config, with pubkey prefixes ready to paste in.
+      Run <code>mch gateway contacts</code> to list repeater nodes visible to the gateway that
+      are not yet managed, then bring one under management with <code>mch node adopt</code> and set
+      its desired state with <code>mch config set</code> (or seed many at once with
+      <code>mch config import</code>).
     </p>
   </section>
 
   <section id="cli">
     <h2>CLI reference</h2>
-    <pre><code>mch config validate                # validate config/secrets and warn about unknown facts
+    <pre><code>mch daemon validate                # validate config/secrets and warn about unknown facts
 mch fleet status                   # fleet overview: state, label, group, firmware, neighbours, last seen
 mch fleet status &lt;label|prefix&gt;    # one match: node detail; multiple: filtered table
 mch fleet plan                     # desired-vs-known diff, no mesh traffic, no writes
 mch fleet plan &lt;label|prefix&gt;      # filter to one node
 mch fleet sync                     # sweep all nodes in background
 mch fleet sync &lt;prefix&gt;            # sync one node now; stream radio/path/command progress
-mch node contacts                  # nodes visible to the gateway but not yet in config
+mch fleet issues                   # just the issue sections; exits 2 when any issue is present
+mch gateway contacts               # gateway contacts not yet managed in the DB
+mch node adopt &lt;pubkey&gt; --radio R  # bring a discovered node under management
+mch node group &lt;node&gt; [name]       # set or clear a node's DB group
 mch node exec &lt;node&gt; &lt;command&gt;      # run a raw MeshCore CLI command on a managed node
 mch node new                       # add a fresh or replacement node (interactive)
 mch fleet logs                     # recent per-node activity across all nodes
 mch fleet logs &lt;prefix&gt;            # activity for one node
-mch config suggest                 # suggested txdelay per node based on neighbour count
-mch config suggest &lt;label|prefix&gt;  # full suggestions + paste-ready config block</code></pre>
+mch fleet suggest                 # suggested txdelay per node based on neighbour count
+mch fleet suggest &lt;label|prefix&gt;  # full suggestions + the mch config set commands to apply</code></pre>
   </section>
 
   <section id="testing">

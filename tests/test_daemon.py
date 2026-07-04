@@ -105,6 +105,53 @@ async def _seed_node_with_facts(db: Database) -> Node:
 
 
 # ------------------------------------------------------------------
+# set_group / set_label — inventory metadata editing (M3)
+# ------------------------------------------------------------------
+
+async def test_set_group_assigns_and_clears(db, wq, config):
+    node = await _seed_node_with_facts(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_group", "query": node.pubkey[:8], "value": "solar"}, wq, db, config
+    )
+    assert resp["ok"] is True
+    assert resp["data"]["group"] == "solar"
+    assert (await db.get_node(node.pubkey)).group == "solar"
+
+    # Empty value clears membership.
+    resp = await _dispatch(
+        {"cmd": "set_group", "query": node.pubkey[:8], "value": ""}, wq, db, config
+    )
+    assert resp["ok"] is True
+    assert resp["data"]["group"] is None
+    assert (await db.get_node(node.pubkey)).group is None
+
+
+async def test_set_label_updates_and_validates(db, wq, config):
+    node = await _seed_node_with_facts(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_label", "query": node.pubkey[:8], "value": "east-hill"}, wq, db, config
+    )
+    assert resp["ok"] is True
+    assert (await db.get_node(node.pubkey)).label == "east-hill"
+
+    # Invalid label characters are rejected, leaving the label unchanged.
+    resp = await _dispatch(
+        {"cmd": "set_label", "query": node.pubkey[:8], "value": "bad label!"}, wq, db, config
+    )
+    assert resp["ok"] is False
+    assert (await db.get_node(node.pubkey)).label == "east-hill"
+
+
+async def test_set_group_unknown_node_errors(db, wq, config):
+    resp = await _dispatch(
+        {"cmd": "set_group", "query": "nope", "value": "solar"}, wq, db, config
+    )
+    assert resp["ok"] is False
+
+
+# ------------------------------------------------------------------
 # node command — prefix lookup
 # ------------------------------------------------------------------
 

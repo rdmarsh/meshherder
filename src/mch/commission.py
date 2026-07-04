@@ -20,7 +20,13 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from mch.command_registry import DEFAULT_COMMAND_TIMEOUT, command_timeout
-from mch.config import Config, resolve_via_radio, validate_node_label
+from mch.config import (
+    Config,
+    NodeSecrets,
+    resolve_desired_configs,
+    resolve_via_radio,
+    validate_node_label,
+)
 from mch.gateway import Gateway
 from mch.meshkey import derive_public_key, generate_private_key
 
@@ -266,21 +272,17 @@ async def discover_unmanaged(
     """
     Discover nodes on the factory frequency and filter out already-managed ones.
 
-    A node is considered managed if its pubkey matches any config pubkey_prefix
-    or any full pubkey in the DB.
+    A node is considered managed if its full pubkey is in the DB inventory (the DB is the
+    inventory post-sunset; config.nodes is empty under the strict daemon, so the old
+    config-prefix filter was dead and is removed here).
     """
     discovered = await gateway.discover(dwell=dwell)
 
-    known_prefixes = {nc.pubkey_prefix for nc in config.nodes}
-    db_nodes = await db.get_all_nodes()
-    known_pubkeys = {n.pubkey for n in db_nodes}
+    known_pubkeys = {n.pubkey for n in await db.get_all_nodes()}
 
     unmanaged = []
     for node in discovered:
         pubkey = node.get("pubkey", "")
-        if any(pubkey.startswith(p) for p in known_prefixes):
-            log.debug("discover: filtering known config node %s", pubkey[:12])
-            continue
         if any(pubkey.startswith(p) for p in known_pubkeys):
             log.debug("discover: filtering known DB node %s", pubkey[:12])
             continue
@@ -315,12 +317,14 @@ async def handle_commission(
         }
 
     if mode == "list_replace":
-        # Return config nodes that have a prv_key in secrets — no discovery needed.
-        replaceable = [
-            {"pubkey_prefix": nc.pubkey_prefix, "label": nc.label}
-            for nc in config.nodes
-            if nc.pubkey_prefix in config.secrets and config.secrets[nc.pubkey_prefix].prv_key
-        ]
+        # Return DB-inventory nodes that have a prv_key in secrets — no discovery needed.
+        # Post-sunset the DB is the inventory (config.nodes is empty under the strict daemon),
+        # so replaceable candidates come from the DB; secrets.yaml is still the prv_key source.
+        replaceable = []
+        for node in await db.get_all_nodes():
+            ns = _secrets_for_pubkey(config.secrets, node.pubkey)
+            if ns and ns.prv_key:
+                replaceable.append({"pubkey_prefix": node.pubkey[:12], "label": node.label})
         return {"ok": True, "data": {"replaceable": replaceable}}
 
     async def _prog(msg: str) -> None:
@@ -396,7 +400,7 @@ async def handle_commission(
                 # secrets.yaml so it can recover from a previous partial commission.
                 if mode == "new":
                     return await _commission_new(req, gateway, config, contact, _prog)
-                return await _commission_replace(req, gateway, config, contact, _prog)
+                return await _commission_replace(req, gateway, config, db, contact, _prog)
             finally:
                 await gateway.restore_radio(*home_radio)
 
@@ -524,10 +528,32 @@ async def _commission_new(
     }
 
 
+def _secrets_for_pubkey(
+    secrets: dict[str, NodeSecrets], pubkey: str
+) -> NodeSecrets | None:
+    """Return the secrets entry whose pubkey_prefix key is a prefix of this full pubkey.
+
+    Secrets stay in secrets.yaml keyed by an operator-chosen pubkey_prefix, while the DB
+    inventory is keyed by full pubkey (sunset). Match by prefix, longest key first so a
+    specific per-node entry wins over a shorter one. The fleet-wide "default" key is a
+    password fallback, not an identity, so it never supplies a prv_key here.
+    """
+    candidates = [
+        (key, ns)
+        for key, ns in secrets.items()
+        if key != "default" and pubkey.startswith(key)
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda kv: len(kv[0]), reverse=True)
+    return candidates[0][1]
+
+
 async def _commission_replace(
     req: dict[str, Any],
     gateway: Gateway,
     config: Config,
+    db: Database,
     contact: dict[str, Any],
     progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
@@ -537,17 +563,18 @@ async def _commission_replace(
     Sends: set prv.key (from secrets), password, guest.password, set radio (from via_radio),
     then reboot. Config and secrets files are not modified — the existing entries
     are already correct.
+
+    Identity and desired radio resolve from the DB inventory (post-sunset the DB is the
+    inventory, not config.nodes); secrets.yaml remains the prv_key/password source.
     """
     pubkey_prefix = req.get("pubkey_prefix", "")
 
-    node_cfg = next(
-        (nc for nc in config.nodes if nc.pubkey_prefix == pubkey_prefix),
-        None,
-    )
-    if not node_cfg:
-        return {"ok": False, "error": f"no config entry for pubkey_prefix {pubkey_prefix!r}"}
+    db_nodes = await db.get_all_nodes()
+    node = next((n for n in db_nodes if n.pubkey.startswith(pubkey_prefix)), None)
+    if not node:
+        return {"ok": False, "error": f"no DB node for pubkey_prefix {pubkey_prefix!r}"}
 
-    ns = config.secrets.get(pubkey_prefix)
+    ns = _secrets_for_pubkey(config.secrets, node.pubkey)
     if not ns or not ns.prv_key:
         return {"ok": False, "error": f"no prv_key in secrets for {pubkey_prefix!r}"}
 
@@ -566,8 +593,9 @@ async def _commission_replace(
     if ns.password:
         cmds.append((f"password {ns.password}", False))
     cmds.append((f"set prv.key {ns.prv_key}", False))
-    group_cfg = next((group for group in config.groups if group.name == node_cfg.group), None)
-    via_radio = resolve_via_radio(node_cfg, group_cfg, config.global_settings)
+    # Desired reach radio comes from the DB now (Node > Group > Global), rebuilt from rows.
+    node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
+    via_radio = resolve_via_radio(node_cfg, group_cfg, global_cfg)
     if via_radio:
         v = via_radio
         cmds.append((f"set radio {v.freq:.3f},{v.bw},{v.sf},{v.cr}", False))
@@ -583,12 +611,12 @@ async def _commission_replace(
         if error:
             return {"ok": False, "error": error}
 
-    log.info("replaced node identity for %s (%s)", pubkey_prefix, node_cfg.label or "")
+    log.info("replaced node identity for %s (%s)", pubkey_prefix, node.label or "")
     return {
         "ok": True,
         "data": {
             "pubkey_prefix": pubkey_prefix,
-            "label": node_cfg.label,
+            "label": node.label,
         },
     }
 

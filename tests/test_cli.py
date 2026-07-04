@@ -673,7 +673,7 @@ nodes:
 
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc:
-        result = runner.invoke(cli, ["config", "validate", "--config", str(config)])
+        result = runner.invoke(cli, ["daemon", "validate", "--config", str(config)])
 
     mock_rpc.assert_not_called()
     assert result.exit_code == 0
@@ -701,7 +701,7 @@ nodes:
 
         with patch("mch.cli._rpc") as mock_rpc, \
              patch("mch.cli.DEFAULT_CONFIG", default_config):
-            result = runner.invoke(cli, ["config", "validate"])
+            result = runner.invoke(cli, ["daemon", "validate"])
 
     mock_rpc.assert_not_called()
     assert result.exit_code == 0
@@ -716,7 +716,7 @@ def test_validate_invalid_config_exits_nonzero(tmp_path):
 
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc:
-        result = runner.invoke(cli, ["config", "validate", "--config", str(config)])
+        result = runner.invoke(cli, ["daemon", "validate", "--config", str(config)])
 
     mock_rpc.assert_not_called()
     assert result.exit_code != 0
@@ -728,7 +728,7 @@ def test_validate_tab_indentation_explains_fix(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text("nodes:\n\t- pubkey_prefix: aabbccdd\n")
 
-    result = CliRunner().invoke(cli, ["config", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
 
     assert result.exit_code != 0
     assert "tab character in YAML indentation" in result.output
@@ -746,7 +746,7 @@ groups:
       radio: 915.800,250,10,5
 """)
 
-    result = CliRunner().invoke(cli, ["config", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
 
     assert result.exit_code != 0
     assert "duplicate YAML key 'settings' at line 5" in result.output
@@ -765,7 +765,7 @@ nodes:
     group: test
 """)
 
-    result = CliRunner().invoke(cli, ["config", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
 
     assert result.exit_code != 0
     assert "node '3134bf10' references unknown group 'test'" in result.output
@@ -783,7 +783,7 @@ def test_validate_explicit_missing_secrets_exits_nonzero(tmp_path):
         result = runner.invoke(
             cli,
             [
-                            "config",
+                            "daemon",
                             "validate",
                             "--config",
                             str(config),
@@ -813,7 +813,7 @@ def test_validate_permission_denied_suggests_sudo(tmp_path):
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc, \
          patch("mch.cli.load_config", side_effect=[denied, config_only]):
-        result = runner.invoke(cli, ["config", "validate", "--config", str(config)])
+        result = runner.invoke(cli, ["daemon", "validate", "--config", str(config)])
 
     mock_rpc.assert_not_called()
     assert result.exit_code != 0
@@ -838,7 +838,7 @@ nodes:
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc:
         result = runner.invoke(
-            cli, ["config", "validate", "--config", str(config), "--secrets", str(secrets)]
+            cli, ["daemon", "validate", "--config", str(config), "--secrets", str(secrets)]
         )
 
     mock_rpc.assert_not_called()
@@ -851,7 +851,7 @@ def test_validate_warns_for_unknown_fact_and_suggests_typo(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text("facts:\n  - powersavings\n")
 
-    result = CliRunner().invoke(cli, ["config", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
 
     assert result.exit_code == 0
     assert "warning: facts contains unrecognised key 'powersavings'" in result.output
@@ -873,6 +873,44 @@ def _status_resp(
         "unseen_nodes": unseen_nodes or [],
         "open_nodes": open_nodes or [],
     }}
+
+
+def test_moved_commands_available_under_new_nouns():
+    """Relocated commands live under their new noun; old paths are gone (alpha, no aliases)."""
+    runner = CliRunner()
+    for path in (["gateway", "admin", "--help"], ["gateway", "contacts", "--help"],
+                 ["fleet", "suggest", "--help"], ["daemon", "validate", "--help"]):
+        assert runner.invoke(cli, path).exit_code == 0
+    assert "gateway" in runner.invoke(cli, ["--help"]).output
+    # Old paths no longer resolve.
+    for path in (["node", "admin"], ["node", "contacts"],
+                 ["config", "suggest"], ["config", "validate"]):
+        assert runner.invoke(cli, [*path, "--help"]).exit_code != 0
+
+
+def test_fleet_issues_clean_exits_zero():
+    result = _run(["fleet", "issues"], _status_resp())
+    assert result.exit_code == 0
+    assert "no issues" in result.output
+
+
+def test_fleet_issues_present_exits_two():
+    result = _run(["fleet", "issues"], _status_resp(bad_state=[{
+        "pubkey": "aabbccdd" * 8, "label": "wip 07",
+        "name": "wip 07", "state": "configuring", "last_seen": None,
+    }]))
+    assert result.exit_code == 2
+    assert "problem states" in result.output
+    assert "wip 07" in result.output
+
+
+def test_fleet_issues_filters_by_query():
+    result = _run(["fleet", "issues", "nomatch"], _status_resp(open_nodes=[{
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "site-a",
+    }]))
+    # The one open node doesn't match the query, so nothing is reported → clean exit.
+    assert result.exit_code == 0
+    assert "no issues" in result.output
 
 
 def _summary(pubkey="aabbccdd" * 8, name="Tower", label="site-a",
@@ -1114,7 +1152,7 @@ def test_status_shows_unseen_config_nodes_section():
     result = _run(["fleet", "status"], _status_resp(unseen_nodes=[
         {"pubkey_prefix": "deadbeef", "label": "wrong"}
     ]))
-    assert "unseen config nodes" in result.output
+    assert "unseen nodes" in result.output
     assert "deadbeef" in result.output
     assert "wrong" in result.output
 
@@ -1169,6 +1207,23 @@ def test_status_single_match_shows_detail():
     assert "v1.14.1" in result.output
     assert "authed:" in result.output
     assert "passwd:" in result.output
+
+
+def test_node_show_renders_detail():
+    detail = _detail(facts={"ver": "v1.14.1", "board": "T-Beam"})
+    result = _run(["node", "show", "aabb"], detail)
+    assert result.exit_code == 0
+    assert "pubkey:" in result.output
+    assert "pubkey full:" in result.output
+    assert "v1.14.1" in result.output
+
+
+def test_status_single_match_hints_node_show():
+    status = _status_resp(nodes=[_summary()])
+    detail = _detail()
+    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    assert result.exit_code == 0
+    assert "mch node show aabb" in result.output
 
 
 def test_status_single_match_shows_next_sync_estimate():
@@ -1757,22 +1812,53 @@ def test_status_single_match_activity_uses_logs_shape_without_node_columns():
     assert "[aabbccddaabb]" not in result.output
 
 
+# ------ node group / label ------
+
+def test_node_group_set():
+    resp = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "group": "solar",
+    }}
+    result = _run(["node", "group", "site-a", "solar"], resp)
+    assert result.exit_code == 0
+    assert "group set to 'solar'" in result.output
+
+
+def test_node_group_clear():
+    resp = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "group": None,
+    }}
+    result = _run(["node", "group", "site-a"], resp)
+    assert result.exit_code == 0
+    assert "group cleared" in result.output
+
+
+def test_node_label_set():
+    resp = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "east-hill", "name": "Tower", "group": None,
+    }}
+    result = _run(["node", "label", "aabbccdd", "east-hill"], resp)
+    assert result.exit_code == 0
+    assert "label set to 'east-hill'" in result.output
+
+
 # ------ contacts ------
 
 def test_contacts_no_contacts():
-    result = _run(["node", "contacts"], {"ok": True, "data": []})
+    result = _run(["gateway", "contacts"], {"ok": True, "data": []})
     assert result.exit_code == 0
-    assert "no repeater contacts" in result.output
+    assert "no unmanaged repeater contacts" in result.output
 
 
-def test_contacts_shows_yaml_snippet():
-    result = _run(["node", "contacts"], {"ok": True, "data": [
+def test_contacts_shows_adopt_command():
+    result = _run(["gateway", "contacts"], {"ok": True, "data": [
         {"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2},
     ]})
     assert result.exit_code == 0
-    assert "pubkey_prefix" in result.output
-    assert "aabbccdd" in result.output
+    # Post-sunset: print the runnable adopt command with the full pubkey, not a config.yaml block.
+    assert "mch node adopt" in result.output
+    assert "aabbccdd" * 8 in result.output
     assert "Millbrook" in result.output
+    assert "config.yaml" not in result.output
 
 
 # ------ sync ------
@@ -1925,7 +2011,7 @@ nodes: []
     with patch("mch.cli.subprocess.run", return_value=ok) as run:
         result = runner.invoke(
             cli,
-            ["node", "admin", "--config", str(config), "--", "-r", "ver"],
+            ["gateway", "admin", "--config", str(config), "--", "-r", "ver"],
         )
 
     assert result.exit_code == 0
@@ -1959,7 +2045,7 @@ nodes: []
     with patch("mch.cli.subprocess.run", return_value=ok) as run:
         result = runner.invoke(
             cli,
-            ["node", "admin", "--config", str(config), "--no-restart"],
+            ["gateway", "admin", "--config", str(config), "--no-restart"],
         )
 
     assert result.exit_code == 0
@@ -1992,7 +2078,7 @@ nodes: []
          ), \
          patch("mch.cli.pwd.getpwuid", return_value=pwent), \
          patch("mch.cli.grp.getgrall", return_value=[dialout]):
-        result = runner.invoke(cli, ["node", "admin", "--config", str(config)])
+        result = runner.invoke(cli, ["gateway", "admin", "--config", str(config)])
 
     assert result.exit_code == 0
     assert run.call_args_list[1].args[0] == [
@@ -2028,7 +2114,7 @@ def _suggest_node(label="site-a", name="Tower", count=5):
 
 def test_suggest_table_multiple_nodes():
     result = _run(
-        ["config", "suggest"],
+        ["fleet", "suggest"],
         {"ok": True, "data": [_suggest_node("site-a"), _suggest_node("site-b")]},
     )
     assert result.exit_code == 0
@@ -2039,23 +2125,25 @@ def test_suggest_table_multiple_nodes():
 
 
 def test_suggest_detail_single_node():
-    result = _run(["config", "suggest", "site-a"], {"ok": True, "data": [_suggest_node("site-a")]})
+    result = _run(["fleet", "suggest", "site-a"], {"ok": True, "data": [_suggest_node("site-a")]})
     assert result.exit_code == 0
     assert "neighbours:" in result.output
     assert "rooftop" in result.output
-    assert "config.yaml" in result.output
+    # Suggest emits runnable `mch config set` commands (desired state lives in the DB now).
+    assert "mch config set site-a" in result.output
+    assert "--policy enforce" in result.output
 
 
 def test_suggest_no_neighbour_data():
     node = _suggest_node(count=None)
     node["profile"] = None
-    result = _run(["config", "suggest"], {"ok": True, "data": [node]})
+    result = _run(["fleet", "suggest"], {"ok": True, "data": [node]})
     assert result.exit_code == 0
     assert "-" in result.output  # NBRS column shows dash
 
 
 def test_suggest_no_nodes():
-    result = _run(["config", "suggest"], {"ok": True, "data": []})
+    result = _run(["fleet", "suggest"], {"ok": True, "data": []})
     assert result.exit_code == 0
     assert "no nodes" in result.output
 

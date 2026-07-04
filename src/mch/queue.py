@@ -34,6 +34,7 @@ from mch.config import (
     NodeConfig,
     OperationConfig,
     RadioConfig,
+    SettingConfig,
     _parse_radio,
     resolve_desired,
     resolve_desired_configs,
@@ -293,6 +294,16 @@ def resolved_fact_keys(
     }
 
 
+def _desired_radio_value(settings: dict[str, SettingConfig]) -> str | None:
+    """Return the desired ``radio`` value from a settings map, or None if unset.
+
+    Binding ``.get("radio")`` to a local lets the type checker narrow the ``SettingConfig |
+    None``; two separate ``.get()`` calls in a conditional expression would not narrow.
+    """
+    sc = settings.get("radio")
+    return sc.desired if sc else None
+
+
 def _radio_from_setting(raw: str | None, source: str) -> _RadioCandidate | None:
     if raw is None:
         return None
@@ -390,22 +401,21 @@ def radio_recovery_candidates(
         _radio_from_config(config.gateway.radio, "gateway.radio"),
         _radio_from_config(global_cfg.via_radio if global_cfg else None, "global via_radio"),
         _radio_from_setting(
-            global_cfg.settings.get("radio").desired
-            if global_cfg and global_cfg.settings.get("radio") else None,
+            _desired_radio_value(global_cfg.settings) if global_cfg else None,
             "global desired radio",
         ),
     ]
     for group in config.groups:
         configured.append(_radio_from_config(group.via_radio, f"group {group.name} via_radio"))
         configured.append(_radio_from_setting(
-            group.settings.get("radio").desired if group.settings.get("radio") else None,
+            _desired_radio_value(group.settings),
             f"group {group.name} desired radio",
         ))
     for node in config.nodes:
         label = node.label or node.pubkey_prefix
         configured.append(_radio_from_config(node.via_radio, f"node {label} via_radio"))
         configured.append(_radio_from_setting(
-            node.settings.get("radio").desired if node.settings.get("radio") else None,
+            _desired_radio_value(node.settings),
             f"node {label} desired radio",
         ))
 
@@ -689,8 +699,8 @@ class WorkQueue:
         return node
 
     async def unfiled_contacts(self) -> list[dict[str, Any]]:
-        """Return visible repeater contacts that are not yet in config."""
-        return await get_unfiled_contacts(self._config, self._gateway)
+        """Return visible repeater contacts that are not yet in the DB inventory."""
+        return await get_unfiled_contacts(self._db, self._gateway)
 
     async def discover_nodes(
         self,
@@ -2436,21 +2446,23 @@ class WorkQueue:
 # unfiled contacts — for mch node contacts
 # ---------------------------------------------------------------------------
 
-async def get_unfiled_contacts(config: Config, gateway: Gateway) -> list[dict[str, Any]]:
+async def get_unfiled_contacts(db: Database, gateway: Gateway) -> list[dict[str, Any]]:
     """
-    Return gateway contacts that are REP nodes but not yet in config.
+    Return gateway contacts that are REP nodes but not yet in the DB inventory.
 
-    Used by 'mch node contacts' to show operators what they can add to config.yaml.
+    Used by 'mch node contacts' to show operators which repeater contacts they can bring
+    under management (adopt/commission). Post-sunset the DB is the inventory, so a fully
+    managed node must be filtered against the DB — filtering against config.nodes (empty
+    under the strict daemon) would list every managed node as "not yet managed". Full
+    pubkeys are the stable identity, so match on exact pubkey membership.
     """
     contacts = await gateway.get_contacts(managed_only=False)
-    managed_prefixes = [nc.pubkey_prefix for nc in config.nodes]
+    known_pubkeys = {node.pubkey for node in await db.get_all_nodes()}
 
     unfiled = []
     for c in contacts:
         if c.get("type") != CONTACT_TYPE_REPEATER:
             continue
-        pubkey = c["public_key"]
-        already_managed = any(pubkey.startswith(p) for p in managed_prefixes)
-        if not already_managed:
+        if c["public_key"] not in known_pubkeys:
             unfiled.append(c)
     return unfiled
