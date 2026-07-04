@@ -57,10 +57,33 @@ def make_gateway(discovered: list[dict] | None = None) -> MagicMock:
     return gw
 
 
-def make_db(nodes: list[Node] | None = None) -> MagicMock:
+def make_db(nodes: list[Node] | None = None, desired=None) -> MagicMock:
     db = MagicMock()
     db.get_all_nodes = AsyncMock(return_value=nodes or [])
+    rows = list(desired or [])
+
+    async def _get_desired(scope_type, scope_id):
+        return [r for r in rows if r.scope_type == scope_type and r.scope_id == scope_id]
+
+    db.get_desired_settings = AsyncMock(side_effect=_get_desired)
     return db
+
+
+def db_from_config(cfg: Config, prefix_to_pubkey: dict[str, str] | None = None) -> MagicMock:
+    """Build a mock DB whose inventory + desired rows mirror a Config (post-sunset the DB is
+    the inventory). Each node prefix becomes a full pubkey (padded, or per prefix_to_pubkey),
+    and the config's settings/directives are flattened via the same `mch config import` path.
+    """
+    from mch.config import config_to_desired_rows
+
+    pk_map = dict(prefix_to_pubkey or {})
+    nodes = []
+    for nc in cfg.nodes:
+        full = pk_map.get(nc.pubkey_prefix) or (nc.pubkey_prefix + "0" * 64)[:64]
+        pk_map[nc.pubkey_prefix] = full
+        nodes.append(Node(pubkey=full, name="test", label=nc.label or "", group=nc.group))
+    rows, _ = config_to_desired_rows(cfg, lambda p: pk_map.get(p))
+    return make_db(nodes=nodes, desired=rows)
 
 
 def make_wq(gateway=None, db=None) -> MagicMock:
@@ -110,17 +133,17 @@ async def test_discover_unmanaged_returns_empty_when_no_nodes():
 
 
 @pytest.mark.asyncio
-async def test_discover_unmanaged_filters_config_known_nodes():
-    """Nodes whose pubkey matches a config pubkey_prefix are excluded."""
+async def test_discover_unmanaged_ignores_config_only_membership():
+    """Post-sunset config.nodes no longer filters discovery; only the DB inventory does."""
     from mch.commission import discover_unmanaged
 
     known_pubkey = "aa" * 32
-    gw = make_gateway(discovered=[discover_payload(known_pubkey[:64])])
-    db = make_db()
+    gw = make_gateway(discovered=[discover_payload(known_pubkey)])
+    db = make_db()  # empty inventory — node not yet adopted into the DB
     cfg = make_config(nodes=[NodeConfig(pubkey_prefix="aa" * 4)])
 
     result = await discover_unmanaged(gw, db, cfg, dwell=0.01)
-    assert result == []
+    assert len(result) == 1  # returned despite the config entry (config no longer filters)
 
 
 @pytest.mark.asyncio
@@ -660,15 +683,39 @@ async def test_commission_new_returns_secrets_snippet():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_commission_replace_missing_config_entry_returns_error():
-    """'replace' mode returns error if pubkey_prefix not in config."""
+async def test_commission_list_replace_from_db_inventory():
+    """'list_replace' lists DB-inventory nodes that have a prv_key in secrets (post-sunset)."""
+    from mch.commission import handle_commission
+
+    # Two DB nodes; only one has a prv_key in secrets.yaml. Secrets are keyed by prefix.
+    node_a = make_node("aabbccdd" + "0" * 56, label="HasKey")
+    node_b = make_node("eeff0011" + "0" * 56, label="NoKey")
+    db = make_db(nodes=[node_a, node_b])
+    wq = make_wq()
+    cfg = make_config(secrets={
+        "aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8),
+        "eeff0011": NodeSecrets(password="pw"),  # no prv_key
+    })
+
+    resp = await handle_commission(
+        {"cmd": "commission", "mode": "list_replace"}, wq, db, cfg
+    )
+
+    assert resp["ok"] is True
+    labels = [r["label"] for r in resp["data"]["replaceable"]]
+    assert labels == ["HasKey"]
+
+
+@pytest.mark.asyncio
+async def test_commission_replace_missing_db_node_returns_error():
+    """'replace' mode returns error if the pubkey_prefix is not in the DB inventory."""
     from mch.commission import handle_commission
 
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
-    cfg = make_config()  # no nodes in config
+    cfg = make_config()  # empty inventory
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -687,11 +734,11 @@ async def test_commission_replace_missing_prv_key_returns_error():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="pw")},  # no prv_key
     )
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -710,11 +757,11 @@ async def test_commission_replace_sends_prv_key():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="Old Node")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -734,11 +781,11 @@ async def test_commission_replace_sends_password_from_secrets():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -757,7 +804,6 @@ async def test_commission_replace_sends_radio_from_config_via_radio():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
@@ -765,6 +811,7 @@ async def test_commission_replace_sends_radio_from_config_via_radio():
         )],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -782,7 +829,6 @@ async def test_commission_replace_sends_radio_inherited_from_group_via_radio():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         groups=[GroupConfig(
             name="wide",
@@ -791,6 +837,7 @@ async def test_commission_replace_sends_radio_inherited_from_group_via_radio():
         nodes=[NodeConfig(pubkey_prefix="aabbccdd", group="wide")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -808,7 +855,6 @@ async def test_commission_replace_sends_radio_inherited_from_global_via_radio():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         global_settings=GroupConfig(
             name="global",
@@ -817,6 +863,7 @@ async def test_commission_replace_sends_radio_inherited_from_global_via_radio():
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -835,11 +882,11 @@ async def test_commission_replace_sends_reboot_last():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -893,7 +940,6 @@ async def test_commission_replace_waits_for_radio_then_reboots_without_waiting()
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(
             pubkey_prefix="aabbccdd",
@@ -901,6 +947,7 @@ async def test_commission_replace_waits_for_radio_then_reboots_without_waiting()
         )],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -1202,11 +1249,11 @@ async def test_commission_replace_login_failure_returns_error():
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     gw.login = AsyncMock(return_value=False)
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -1227,11 +1274,11 @@ async def test_commission_replace_switches_back_to_factory_before_commands():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -1280,11 +1327,11 @@ async def test_commission_replace_emits_login_progress_messages():
     pubkey = "cc" * 32
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="pw", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
     messages: list[str] = []
 
     async def _capture(msg: str) -> None:
@@ -1439,11 +1486,11 @@ async def test_commission_replace_falls_back_to_managed_password_when_factory_fa
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     gw.login = _make_login_mock(factory_ok=False, managed_ok=True, managed_password="nodepass")
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -1469,11 +1516,11 @@ async def test_commission_replace_does_not_try_managed_when_factory_succeeds():
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     # Default gw.login from make_gateway() returns True — verify only one call is made.
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -1495,12 +1542,12 @@ async def test_commission_replace_no_login_succeeds_factory_fails_no_managed_pas
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     gw.login = AsyncMock(return_value=False)
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         # No password in secrets — only prv_key
         secrets={"aabbccdd": NodeSecrets(prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -1525,11 +1572,11 @@ async def test_commission_replace_no_login_succeeds_both_passwords_fail():
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     gw.login = _make_login_mock(factory_ok=False, managed_ok=False, managed_password="nodepass")
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
 
     resp = await handle_commission({
         "cmd": "commission", "mode": "replace",
@@ -1553,11 +1600,11 @@ async def test_commission_replace_emits_fallback_progress_message():
     gw = make_gateway(discovered=[discover_payload(pubkey)])
     gw.login = _make_login_mock(factory_ok=False, managed_ok=True, managed_password="nodepass")
     wq = make_wq(gateway=gw)
-    db = make_db()
     cfg = make_config(
         nodes=[NodeConfig(pubkey_prefix="aabbccdd")],
         secrets={"aabbccdd": NodeSecrets(password="nodepass", prv_key="deadbeef" * 8)},
     )
+    db = db_from_config(cfg)
     messages: list[str] = []
 
     async def _capture(msg: str) -> None:

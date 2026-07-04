@@ -1262,15 +1262,16 @@ def _filter_unseen_nodes(nodes: list[dict[str, Any]], query: str | None) -> list
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def contacts(ctx: click.Context, query: str | None) -> None:
-    """Show gateway repeater contacts not yet in your config.yaml.
+    """Show gateway repeater contacts not yet managed in the DB.
 
     Optionally filter by pubkey prefix or name substring:
 
       mch node contacts 4e       # pubkeys starting with 4e
       mch node contacts mill     # names containing "mill"
 
-    Prints ready-to-paste YAML snippets. Review and append to the nodes:
-    section of your config.yaml for any nodes you want mch to manage.
+    For each contact it prints the ready-to-run `mch node adopt` command that brings the
+    node under management (the DB is the inventory now — there is nothing to paste into
+    config.yaml), plus the matching secrets.yaml snippet if the node needs a login password.
     """
     resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
     data = _check(resp)
@@ -1278,20 +1279,20 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
     if not data:
         if query:
-            click.echo(f"no contacts matching '{query}' outside your config.yaml")
+            click.echo(f"no unmanaged repeater contacts matching '{query}'")
         else:
-            click.echo("no repeater contacts found outside your config.yaml")
+            click.echo("no unmanaged repeater contacts found")
         return
 
     if query:
-        click.echo(f"# Repeater contacts matching '{query}' not in your config.yaml.")
+        click.echo(f"# Repeater contacts matching '{query}' not yet managed in the DB.")
     else:
-        click.echo("# Repeater contacts visible to the gateway but not in your config.yaml.")
-    click.echo("# Review each one, then paste the snippets into your config files.\n")
+        click.echo("# Repeater contacts visible to the gateway but not yet managed in the DB.")
+    click.echo("# Bring one under management by running its `mch node adopt` command below.\n")
 
     for c in data:
         pubkey = c.get("public_key", "")
-        prefix = pubkey[:8]
+        prefix = pubkey[:12]
         name = c.get("adv_name", "") or "unknown"
 
         # pubkey line is always 79 chars — use that as the fixed row width
@@ -1302,12 +1303,14 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         click.echo(f"# ── {name} {sep}")
         click.echo(f"# full pubkey: {pubkey}\n")
 
-        click.echo("# config.yaml — append to the 'nodes:' section:")
-        click.echo(f"  - pubkey_prefix: {prefix}")
-        click.echo(f'    label: "{name}"')
-        click.echo("    group:          # assign to a group, or remove this line\n")
+        # `mch node adopt` needs the radio the contact was discovered on; the gateway home
+        # radio is the safe default, so prompt the operator to confirm/replace it.
+        click.echo("# adopt this node into the DB inventory (set --radio to where it was heard):")
+        click.echo(
+            f'  mch node adopt {pubkey} --radio FREQ,BW,SF,CR --label "{name}"\n'
+        )
 
-        click.echo("# secrets.yaml — append to the 'nodes:' section:")
+        click.echo("# if the node requires a login, add its password to secrets.yaml:")
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
 
 

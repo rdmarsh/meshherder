@@ -5,6 +5,15 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **`mch node contacts` and commission replace/scan now use the DB inventory (sunset fix).**
+  `mch node contacts` filtered gateway contacts against `config.nodes` — always empty under the
+  strict daemon — so it listed every managed node as unmanaged and printed config.yaml snippets that
+  make the daemon refuse to start. It now filters against the DB inventory and prints the
+  ready-to-run `mch node adopt` command per contact (plus the secrets.yaml snippet). Commission
+  `replace` resolves the node identity and desired reach-radio from the DB (secrets.yaml still
+  supplies the prv_key/password); `list_replace` lists DB nodes that have a prv_key in secrets; and
+  discovery's managed-detection dropped its dead config-prefix filter. Replacement commissioning
+  works again under the strict daemon.
 - **Docs/examples: finish the config.yaml → DB sunset.** Split the shipped example into
   `examples/config.example.yaml` (daemon settings only — now loads with the strict daemon, so a
   fresh install can start) and `examples/desired.example.yaml` (nodes/groups/global/facts,

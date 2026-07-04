@@ -353,43 +353,49 @@ neutral default such as `Managed with Mesh Herder`, not a forced project URL. A 
 someone logs in as guest, but it can feel like advertising when written to someone else's mesh;
 leave that as an explicit operator choice.
 
-config.yaml stores a `pubkey_prefix` (8 hex chars) per node. The full 32-byte pubkey is
-resolved at startup by cross-referencing the prefix against the gateway's stored contacts.
-Once found, the full pubkey is written to the DB and used from there on.
+The DB stores the full 32-byte pubkey as each node's stable identity. Post-sunset the DB is the
+inventory (config.yaml no longer lists nodes), so nodes enter the DB through explicit management
+actions rather than a config-seeding pass.
 
 ## How nodes enter the DB
 
-1. `_seed_from_config()` runs at startup. For each node in config.yaml, it looks for a matching
-   gateway contact (by pubkey_prefix). If found and not already in the DB, it seeds a DB record.
-   If not found, it logs a warning — the node is unknown to the gateway (out of range, wrong
-   prefix, never advertised).
+1. **Gateway favourites (bootstrap).** `_reconcile_favourites()` runs at startup and after a
+   contact refresh. A favourited repeater contact the gateway knows but the DB does not is
+   inserted as a managed node — a manual favourite means "manage this node". The same pass
+   re-favourites ("pins") any managed DB node whose contact lost the favourite flag, so a dense
+   mesh cannot evict it. It never unfavourites (that is the retire path).
 
-2. That is the only path into the DB. Nodes do not enter the DB by appearing in the gateway's
-   contact store unless they are also in config.yaml. Discovery via `mch node contacts` (which shows
-   gateway contacts not in config) is purely informational — it does not write to the DB.
+2. **`mch node adopt`.** Adds a discovered running node to the DB inventory and gateway contact
+   store directly, installing a route and confirming reachability.
 
-A node in the DB but not in config.yaml is called a **ghost**. Ghosts appear in `mch issues`.
-They accumulate if you remove a node from config.yaml without purging the DB, or if a node was
-previously added via an older seeding path. Use `mch node prune` or `mch node remove <node>` to clean up
-local DB state for retired nodes.
+3. **`mch config import`.** Seeds inventory + desired state from a YAML backup/desired file. A node
+   given by full pubkey is created up-front (restore path); a node given by short prefix must
+   already be a known DB node so its full pubkey resolves.
 
-A node in config.yaml that has no matching DB record is an **unseen config node**. This usually
-means the gateway has never seen the configured prefix, or the prefix does not match the intended
-node. Unseen config nodes appear separately in `mch issues` because the fix is different: correct
-the config prefix, bring the node into gateway range, or wait for it to advertise.
+4. **Commissioning (`mch node new`).** After a new/replacement node reboots, the reconcile above
+   seeds it from the gateway favourite; the operator then imports its desired state.
+
+`mch node contacts` reads live gateway contacts and filters against the DB inventory; it is
+read-only and does not itself write to the DB (it prints the `mch node adopt` command to run).
+
+To stop managing a node, `mch node retire` (keeps history, unfavourites the contact) or, to delete
+local DB state, `mch node prune` / `mch node remove`. Because reconcile re-seeds any still-favourited
+contact, retire before prune so the node is not immediately re-seeded on the next cycle.
 
 ## `mch node contacts` vs the DB
 
-`mch node contacts` reads **live from the gateway**, not from the DB. It shows REP nodes the gateway
-knows about that are not yet in config.yaml. Use it to discover what is visible on the mesh and
-decide what to add to config. It is a read-only informational command.
+`mch node contacts` reads **live from the gateway**, and filters against the **DB inventory** (the
+DB is the inventory post-sunset — see "Desired state in the DB"). It shows REP nodes the gateway
+knows about whose full pubkey is not yet a managed DB node. Use it to discover what is visible on
+the mesh and decide what to bring under management. It is read-only; it prints the ready-to-run
+`mch node adopt` command for each contact (adopt/import/commission do the actual DB writes).
 
 ## config.yaml is operator-managed
 
-mchd reads config.yaml at startup and on hot reload. It does not modify it. When `mch node new`
-provisions a new node, it prints ready-to-paste YAML snippets for both config.yaml and
-secrets.yaml — the operator copies them in, puts them in git, then waits for hot reload or sends
-SIGHUP to mchd.
+mchd reads config.yaml (daemon settings) at startup and on hot reload. It does not modify it, and
+it never edits secrets.yaml. When `mch node new` provisions a node, it prints an importable
+`nodes:` desired-state doc (applied with `mch config import`) plus the secrets.yaml snippet — the
+operator applies the import and adds the password, keeping both under version control.
 
 Reasons for this constraint:
 - Config files belong in version control. Auto-writes bypass review, diff, and commit history.

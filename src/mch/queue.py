@@ -689,8 +689,8 @@ class WorkQueue:
         return node
 
     async def unfiled_contacts(self) -> list[dict[str, Any]]:
-        """Return visible repeater contacts that are not yet in config."""
-        return await get_unfiled_contacts(self._config, self._gateway)
+        """Return visible repeater contacts that are not yet in the DB inventory."""
+        return await get_unfiled_contacts(self._db, self._gateway)
 
     async def discover_nodes(
         self,
@@ -2436,21 +2436,23 @@ class WorkQueue:
 # unfiled contacts — for mch node contacts
 # ---------------------------------------------------------------------------
 
-async def get_unfiled_contacts(config: Config, gateway: Gateway) -> list[dict[str, Any]]:
+async def get_unfiled_contacts(db: Database, gateway: Gateway) -> list[dict[str, Any]]:
     """
-    Return gateway contacts that are REP nodes but not yet in config.
+    Return gateway contacts that are REP nodes but not yet in the DB inventory.
 
-    Used by 'mch node contacts' to show operators what they can add to config.yaml.
+    Used by 'mch node contacts' to show operators which repeater contacts they can bring
+    under management (adopt/commission). Post-sunset the DB is the inventory, so a fully
+    managed node must be filtered against the DB — filtering against config.nodes (empty
+    under the strict daemon) would list every managed node as "not yet managed". Full
+    pubkeys are the stable identity, so match on exact pubkey membership.
     """
     contacts = await gateway.get_contacts(managed_only=False)
-    managed_prefixes = [nc.pubkey_prefix for nc in config.nodes]
+    known_pubkeys = {node.pubkey for node in await db.get_all_nodes()}
 
     unfiled = []
     for c in contacts:
         if c.get("type") != CONTACT_TYPE_REPEATER:
             continue
-        pubkey = c["public_key"]
-        already_managed = any(pubkey.startswith(p) for p in managed_prefixes)
-        if not already_managed:
+        if c["public_key"] not in known_pubkeys:
             unfiled.append(c)
     return unfiled

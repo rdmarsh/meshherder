@@ -1762,17 +1762,19 @@ def test_status_single_match_activity_uses_logs_shape_without_node_columns():
 def test_contacts_no_contacts():
     result = _run(["node", "contacts"], {"ok": True, "data": []})
     assert result.exit_code == 0
-    assert "no repeater contacts" in result.output
+    assert "no unmanaged repeater contacts" in result.output
 
 
-def test_contacts_shows_yaml_snippet():
+def test_contacts_shows_adopt_command():
     result = _run(["node", "contacts"], {"ok": True, "data": [
         {"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2},
     ]})
     assert result.exit_code == 0
-    assert "pubkey_prefix" in result.output
-    assert "aabbccdd" in result.output
+    # Post-sunset: print the runnable adopt command with the full pubkey, not a config.yaml block.
+    assert "mch node adopt" in result.output
+    assert "aabbccdd" * 8 in result.output
     assert "Millbrook" in result.output
+    assert "config.yaml" not in result.output
 
 
 # ------ sync ------

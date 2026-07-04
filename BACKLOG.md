@@ -14,15 +14,13 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Commission flow: finish the config.yaml sunset
 
-- **`mch commission` replace/scan flows still read config inventory.** After the slice-8 sunset
-  (config.yaml no longer carries inventory; daemon loads strict), the commission **new** flow is
-  DB-oriented (prints an importable `nodes:` doc + `mch import` guidance, accepts any group). But the
-  **replace** path still resolves the node from `config.nodes`/`config.secrets` (`commission.py`
-  `_commission_replace`, ~line 532), and the scan/managed-detection helpers filter by config pubkey
-  prefixes. Under the strict daemon `config.nodes` is empty, so replace errors ("no config entry")
-  and scan can't tell managed from unmanaged. Rework these to resolve identity + desired radio from
-  the DB (and secrets.yaml for the prv_key). Not data-corrupting today — replace is simply
-  unavailable — but it should be DB-driven to match the rest of the sunset.
+- DONE (Unreleased, 2026-07-03): `mch commission` replace/scan and `mch node contacts` now resolve
+  inventory from the DB, not config. `_commission_replace` resolves the node + desired radio from
+  the DB inventory (secrets.yaml still supplies the prv_key/password, matched by pubkey prefix);
+  `list_replace` lists DB nodes with a secrets prv_key; `discover_unmanaged` dropped its dead
+  config-prefix filter (DB pubkeys are the managed set); `get_unfiled_contacts` filters gateway
+  contacts against DB inventory and `mch node contacts` prints the `mch node adopt` command instead
+  of a config.yaml block.
 - **No command assigns a node to a group post-sunset.** Group membership (`nodes.group`) is now set
   only by `mch import` and commissioning. Consider `mch group <node> <name>` (or `mch set <node>
   group <name>`) so an operator can move a node between groups without re-importing.
