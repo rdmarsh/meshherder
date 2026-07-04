@@ -5,6 +5,10 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Docs-drift guard.** A new test parses every `mch <group> <command>` out of README, the man
+  page, and the website and asserts each resolves in the real CLI (hidden aliases count), so a
+  renamed or removed command can't silently outlive its documentation — the class of drift that
+  caused the post-sunset stale-command bugs.
 - **Scheduled desired-state backup unit.** New `systemd/mch-backup.{service,timer}` +
   `mch-backup.sh` write a dated `mch config export` snapshot daily to
   `/var/lib/meshherder/backups` with keep-N rotation (`MCH_BACKUP_KEEP`, default 14). Since the DB
