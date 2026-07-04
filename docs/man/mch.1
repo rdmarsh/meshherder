@@ -193,26 +193,18 @@ the normal way to decommission a node.
 .B node unretire \fILABEL_OR_PREFIX\fR
 Return a retired node to management: re-favourite it and queue it to reconverge.
 .TP
-.B node prune
-List retired nodes \(em the candidates for a hard delete.
+.B node prune \fR[\fILABEL_OR_PREFIX\fR]
+Preview deleting retired nodes. With no argument this lists every retired node;
+with a
+.I LABEL_OR_PREFIX
+it targets that one. A still-managed (non-retired) node is refused
+\(em retire it first, because an un-retired node is re-seeded from gateway
+favourites on the next restart.
 .TP
-.B node prune \-\-yes
-Hard-delete retired nodes' local database state (facts, settings, operations, logs,
-and the node row). This does not edit
+.B node prune \fR[\fILABEL_OR_PREFIX\fR] \-\-yes
+Hard-delete the previewed retired node(s): local facts, settings, operations,
+logs, and the node row. This does not edit
 .IR secrets.yaml .
-.TP
-.B node remove \fILABEL_OR_PREFIX\fR
-Delete one node's local database state after confirmation. This deletes local
-facts, settings, operations, logs, and the database node row. It refuses a
-still-managed (non-retired) node unless
-.B \-\-force
-is supplied, because an un-retired node is re-seeded from gateway favourites on the
-next restart \(em prefer
-.B "node retire"
-for active nodes.
-.TP
-.B node remove \fILABEL_OR_PREFIX\fR \-\-yes
-Delete without prompting.
 .TP
 .B node clean facts \fINODE\fR [\-\-fact \fIKEY\fR] [\-\-yes]
 List or delete cached fact rows that are no longer present in the configured
@@ -410,8 +402,8 @@ Show nodes matching
 .B mch fleet sync qh-wold
 Sync one node immediately and show live progress while waiting for mesh replies.
 .TP
-.B mch node remove old-site --yes
-Delete local DB state for a retired node.
+.B mch node prune old-site --yes
+Hard-delete one retired node and its local history.
 .SH SEE ALSO
 .BR mchd (8),
 .BR systemctl (1)

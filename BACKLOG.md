@@ -394,13 +394,11 @@ fetch). Open follow-ups:
 
 ### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
 
-- **CLI redesign, remaining steps.** Converge `node remove` into `node prune` (single retired-node
-  vocabulary); unify the scope grammar (`config set/unset` use `--global`, `clean` uses `--all` —
-  decision in RECOMMENDATIONS-2 S2.1: keep both, codify the rule) and the mutation convention
-  (preview-by-default + `--yes` everywhere; `node path --apply` still prompts). Add `--json`
-  output to the read commands (`fleet status/plan/issues/logs`, `node show`, `config show`) — the
-  report model already produces the JSON. (DONE 2026-07-04: the `mch help selectors` topic, exit
-  codes 0/1/2 documented + tested, and shell-completion docs — RECOMMENDATIONS-2 slice 1.)
+- **CLI redesign, remaining steps.** DONE 2026-07-04 except `--json`: `node remove`→`node prune NODE`
+  convergence, scope-grammar + mutation-convention codification, `mch help selectors`, exit codes
+  0/1/2, and shell-completion docs all shipped in RECOMMENDATIONS-2 slices 1–2. **Still open:** add
+  `--json` output to the read commands (`fleet status/plan/issues/logs`, `node show`, `config show`)
+  — the report model already produces the JSON (RECOMMENDATIONS-2 S3.2).
 - **C2 module splits (dedicated PR).** `cli.py` (~3k lines) → package (`render`, `commission`, one
   module per noun group); `queue.py` (~2.4k) → `scheduler`/`node_processor`/`pathing` behind the
   `WorkQueue` facade; `daemon._dispatch` (huge `if cmd == …` chain) → a `dict[str, Handler]`.
@@ -507,6 +505,15 @@ fetch). Open follow-ups:
 
 ## Done Recently
 
+- 2026-07-04: **RECOMMENDATIONS-2 slice 2 (grammar unification).** `mch node prune [NODE]` gained a
+  single-node form (previews, `--yes` deletes, refuses a still-managed node — "retire it first"),
+  converging `mch node remove` into it; `remove` is now a hidden deprecated alias kept only as the
+  `--force` escape hatch, to be deleted once a release ships `prune NODE`. `mch node path --apply`
+  now previews by default and needs `--yes`. Codified two grammar rules (scope flags:
+  `--group`/`--global` for a setting's scope vs `--all` for a fleet-wide action; mutation convention:
+  preview-by-default + `--yes`) in `mch help concepts` and DESIGN.md, and audited the tree for
+  conformance (no renames needed). Note: part 1's "cut a release, then break without aliases" premise
+  did not hold (still Unreleased), so `remove` was kept as an alias rather than deleted outright.
 - 2026-07-04: **RECOMMENDATIONS-2 slice 1 (operator-first UX).** Rewrote every command's `--help`
   in operator language (jargon-banned, regression-tested); added `mch help selectors` /
   `mch help concepts` topics; added top-level `mch status` / `mch sync` shortcuts; documented exit

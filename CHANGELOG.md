@@ -5,6 +5,21 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **CLI grammar unification (RECOMMENDATIONS-2 slice 2).**
+  - **`mch node prune` now takes an optional NODE.** `mch node prune` still lists/purges every
+    retired node; `mch node prune <label|prefix>` previews and (with `--yes`) hard-deletes just that
+    one. A still-managed node is refused with "retire it first". This converges the old
+    `mch node remove` into `prune` — `remove` is now a **hidden, deprecated alias** (kept only as the
+    `--force` escape hatch for deleting a still-managed node), to be removed once a release ships
+    carrying `prune NODE`.
+  - **`mch node path --apply` previews by default.** It now prints what it would change and requires
+    `--yes` to apply, matching the preview-then-`--yes` convention of `prune`/`clean`/`import` (was an
+    interactive prompt).
+  - **Two codified grammar rules**, documented in `mch help concepts` and DESIGN.md: `--group`/
+    `--global` set the *scope of a setting* while `--all` applies an *action* fleet-wide; and mutating
+    commands preview by default and execute with `--yes` (wizards and the destructive-`exec` confirm
+    are the only exceptions).
+
 - **Operator-first CLI pass (RECOMMENDATIONS-2 slice 1).** A round of usability work aimed at the
   "the UI is confusing" feedback, with no behaviour changes to existing commands:
   - **Help text rewritten for operators.** Every command's `--help` now leads with what you get,
