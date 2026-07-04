@@ -663,11 +663,11 @@ mch config import [FILE] --yes       Write it (idempotent; full-pubkey nodes cre
 mch config export > backup.yaml      Complete fleet backup as YAML (inventory + desired; inverse of import)
 mch node retire <label|prefix>     Stop managing a node: skip sync + unfavourite, keep history
 mch node unretire <label|prefix>   Return a retired node to management (re-favourite + reconverge)
-mch node prune                     List retired nodes (hard-delete candidates)
-mch node prune --yes               Hard-delete retired nodes' local DB state
+mch node prune                     List all retired nodes (hard-delete candidates)
+mch node prune --yes               Hard-delete every retired node (facts, settings, history)
+mch node prune <label|prefix>      Preview deleting one retired node (--yes to delete; refuses if still managed)
 mch node clean facts --all         List cached facts no longer configured as fact-policy keys
 mch node clean facts NODE --fact K Delete one stale fact key with --yes
-mch node remove <label|prefix>     Delete one node's local DB state (prefer mch node retire)
 mch fleet sync                      Trigger an immediate sync cycle (respects rate limiting)
 mch fleet sync <prefix>             Sync one node; stream progress while waiting for the result
 mch node exec <label|prefix> <command>  Run one raw remote command through mchd over the mesh
@@ -710,11 +710,11 @@ it from sync — while keeping its history. `mch node unretire` reverses it (re-
 Retire-don't-delete is the normal way to decommission a node.
 
 `mch node prune` then hard-deletes retired nodes (their local facts, settings, operations, and logs) —
-the deliberate purge step. It is dry-run first; `mch node prune --yes` deletes. It does not edit
-`secrets.yaml`, so operators may keep passwords or private keys there for replacement hardware.
-`mch node remove <label|prefix>` deletes one node's local DB state directly; it refuses a still-managed
-(non-retired) node unless `--force` is supplied, because an un-retired node is re-seeded from gateway
-favourites on the next restart — prefer `mch node retire` for active nodes.
+the deliberate purge step. It previews first; `mch node prune --yes` deletes. With no argument it
+acts on every retired node; give it a `<label|prefix>` to delete just that one. A node that is still
+managed is refused ("retire it first") — an un-retired node is re-seeded from gateway favourites on
+the next restart, so retire it before pruning. It does not edit `secrets.yaml`, so operators may keep
+passwords or private keys there for replacement hardware.
 
 `mch node clean facts` is also dry-run first. Use it after changing `facts:` to review cached fact rows
 that are no longer collected, then add `--yes` to delete them. It can be scoped to one node,

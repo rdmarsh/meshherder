@@ -532,13 +532,27 @@ def test_path_apply_command_confirms_and_renders_updated_status():
     with patch("mch.cli._rpc", return_value=rpc_response):
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "node", "path", "site-a", "--apply", "e260:1"],
-            input="y\n",
+            ["--socket", "/fake.sock", "node", "path", "site-a", "--apply", "e260:1", "--yes"],
         )
 
     assert result.exit_code == 0
     assert "updated cached management path" in result.output
     assert "route: stored" in result.output
+
+
+def test_path_apply_previews_without_yes_and_does_not_call_daemon():
+    """--apply previews by default and only mutates with --yes (RECOMMENDATIONS-2 S2.2)."""
+    runner = CliRunner()
+    with patch("mch.cli._rpc") as mock_rpc:
+        result = runner.invoke(
+            cli,
+            ["--socket", "/fake.sock", "node", "path", "site-a", "--apply", "e260:1"],
+        )
+
+    assert result.exit_code == 0
+    mock_rpc.assert_not_called()
+    assert "would set management path" in result.output
+    assert "--yes" in result.output
 
 
 def test_path_command_rejects_multiple_mutating_options():
@@ -1541,6 +1555,43 @@ def test_prune_yes_reports_deleted_count():
     }], deleted=1))
     assert result.exit_code == 0
     assert "deleted 1 retired node(s)" in result.output
+
+
+def test_prune_single_node_previews_without_yes():
+    """`node prune NODE` previews the one retired node and doesn't delete without --yes (S2.3)."""
+    result = _run(["node", "prune", "old-site"], _remove_resp())
+    assert result.exit_code == 0
+    assert "retired node to delete" in result.output
+    assert "run again with --yes" in result.output
+
+
+def test_prune_single_node_yes_deletes():
+    result = _run_multi(
+        ["node", "prune", "old-site", "--yes"], _remove_resp(), _remove_resp(deleted=1)
+    )
+    assert result.exit_code == 0
+    assert "deleted 1 node(s)" in result.output
+
+
+def test_prune_single_node_refuses_still_managed():
+    """A still-managed node is refused with a retire-first hint, not deleted (S2.3 guard)."""
+    refusal = {"ok": False, "error": "'site-a' is still managed - retire it first, or use --force"}
+    result = _run(["node", "prune", "site-a"], refusal)
+    assert result.exit_code != 0
+    combined = result.output + (result.stderr or "")
+    assert "retire it first" in combined
+    assert "mch node retire site-a" in combined
+
+
+def test_node_remove_is_hidden_but_still_works():
+    """`node remove` stays as a hidden deprecated alias until a release ships `prune NODE`."""
+    runner = CliRunner()
+    assert ("node", "remove") not in {
+        ("node", name) for name in cli.commands["node"].commands
+    } or cli.commands["node"].commands["remove"].hidden
+    result = runner.invoke(cli, ["node", "remove", "--help"])
+    assert result.exit_code == 0
+    assert "deprecated" in result.output.lower()
 
 
 # ------ clean facts ------

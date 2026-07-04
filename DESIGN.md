@@ -341,6 +341,27 @@ flows must stay marked as hypotheses. On v1.15.0 repeater firmware,
 persistent write and still requires reboot. Other examples needing hardware confirmation are
 `clkreboot` and version-specific region enablement such as `region allowf`.
 
+## CLI grammar conventions
+
+Two conventions keep the 30-command surface consistent (RECOMMENDATIONS-2 slice 2). They are taught
+to operators once in `mch help concepts`; this is the developer statement plus the conformance rule
+for new commands.
+
+- **Scope flags.** `--group NAME` / `--global` express the *scope of a desired setting*
+  (`config set`/`unset`) — "set this value at global scope" reads correctly. `--all` expresses
+  *applying an action fleet-wide* (`node clean facts|settings`, and any future fleet-wide action) —
+  "clean facts across the fleet". The bright line is `--global` (a setting's scope) vs `--all` (an
+  action's reach); no command should use `--global` for an action or `--all` for a setting.
+  `--group` is shared (restrict either a setting or an action to one group).
+- **Mutation convention.** Commands that delete or change local state *preview by default and execute
+  with `--yes`* (`node prune`, `node clean facts|settings`, `config import`, `node path --apply`).
+  The only exceptions are interactive wizards (`node new`) and the typed-confirmation guard on
+  destructive `node exec` commands (that is a confirm, not a preview). `node prune [NODE]` is the
+  single delete-local-state command: no argument lists/purges every retired node, a NODE argument
+  prunes that one retired node, and a still-managed node is refused ("retire it first"). The old
+  `node remove` survives only as a hidden deprecated alias — and as the sole `--force` path (delete
+  a still-managed node) — until a release ships carrying `prune NODE`.
+
 ## Node identity
 
 **The public key is the stable node identity.** Names can change. Labels are local-only (in

@@ -497,11 +497,21 @@ Policy — what mch does about a setting
 Scope — who a setting applies to
   Set a value on one node, on a group, or on the whole fleet. A node's own
   value beats its group's, which beats the fleet-wide value.
+  Two flag words, one rule: --group/--global choose the *scope of a setting*
+  (`config set --global ...`); --all applies an *action* to the whole fleet
+  (`node clean facts --all`).
 
 A sync cycle
   mch works through the nodes one at a time, reads the settings it cares
   about, and applies changes for anything under enforce. It is paced to be
   gentle on the mesh. `mch fleet sync` runs one now.
+
+Previewing changes
+  Commands that delete or change local state show a preview first and only
+  act when you add --yes (`node prune`, `node clean`, `config import`,
+  `node path --apply`). Interactive wizards (`node new`) and the
+  typed-confirmation guard on destructive `node exec` commands are the
+  exceptions.
 
 Where your data lives
   mch keeps its inventory and desired settings in a local database.
@@ -803,7 +813,7 @@ def issues(ctx: click.Context, query: str | None) -> None:
     metavar="PATH[:MODE]",
     help="Apply an operator-approved replacement path to the gateway contact.",
 )
-@click.option("--yes", "-y", is_flag=True, help="Apply without an interactive confirmation.")
+@click.option("--yes", "-y", is_flag=True, help="Apply the change (default: preview only).")
 @click.pass_context
 def path(
     ctx: click.Context,
@@ -821,7 +831,7 @@ def path(
     over flood.
 
     Repair flow: run --discover or --advert to print a candidate, then apply an
-    operator-approved value with --apply PATH[:MODE].
+    operator-approved value with --apply PATH[:MODE] --yes (previews without --yes).
     """
     selected = sum(1 for value in (discover, advert, apply_path is not None) if value)
     if selected > 1:
@@ -839,11 +849,16 @@ def path(
         return
 
     if apply_path is not None:
+        # Preview-by-default + --yes, the same mutation convention as prune/clean/import.
         if not yes:
-            click.confirm(
-                f"Apply management path {apply_path!r} to {node!r} on the gateway contact?",
-                abort=True,
+            click.echo(
+                f"would set management path {apply_path!r} on {node!r} (gateway contact)"
             )
+            click.echo(
+                f"run again with --yes to apply: "
+                f"mch node path {node} --apply {apply_path} --yes"
+            )
+            return
         resp = _rpc(
             ctx.obj["socket"],
             {"cmd": "path_apply", "query": node, "path": apply_path},
@@ -1631,11 +1646,55 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
     _render_probe_result(data)
 
 
+def _prune_one(ctx: click.Context, node: str, yes: bool) -> None:
+    """Prune a single retired node. Refuses a still-managed node — retire it first."""
+    # A single-node prune reuses the daemon's `remove` (dry-run preview + --yes execute), without
+    # a force path: the whole point of prune is that the node is already retired.
+    resp = _rpc(
+        ctx.obj["socket"], {"cmd": "remove", "query": node, "dry_run": True, "force": False}
+    )
+    if not resp.get("ok"):
+        err = resp.get("error", "") or "unknown error"
+        if "still managed" in err:
+            err = f"{node!r} is still managed — retire it first: mch node retire {node}"
+        click.echo(f"error: {err}", err=True)
+        raise SystemExit(1)
+    data = resp["data"]
+
+    click.echo("retired node to delete (history and all):")
+    click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
+    click.echo(f"  label:     {data.get('label') or '-'}")
+    click.echo(f"  mesh name: {data.get('name') or '-'}")
+    click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
+    click.echo("")
+
+    if not yes:
+        click.echo(f"run again with --yes to delete: mch node prune {node} --yes")
+        click.echo("secrets.yaml entries are left unchanged")
+        return
+
+    del_resp = _rpc(
+        ctx.obj["socket"],
+        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": False},
+    )
+    deleted = _check(del_resp).get("deleted", 0)
+    click.echo(f"deleted {deleted} node(s)")
+    click.echo("secrets.yaml entries are left unchanged")
+
+
 @node_group.command("prune")
+@click.argument("node", required=False)
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed nodes (default: preview only).")
 @click.pass_context
-def prune(ctx: click.Context, yes: bool) -> None:
-    """Permanently delete retired nodes (the cleanup step after `mch node retire`)."""
+def prune(ctx: click.Context, node: str | None, yes: bool) -> None:
+    """Permanently delete retired nodes (the cleanup step after `mch node retire`).
+
+    With no NODE, lists every retired node and deletes them all with --yes. Pass a NODE to
+    delete just that one. A node that is still managed is refused — retire it first.
+    """
+    if node:
+        _prune_one(ctx, node, yes)
+        return
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
     candidates = data.get("candidates", [])
@@ -1841,7 +1900,7 @@ def clean_settings(
     )
 
 
-@node_group.command("remove")
+@node_group.command("remove", hidden=True)
 @click.argument("node")
 @click.option("--yes", "-y", is_flag=True, help="Delete without prompting.")
 @click.option(
@@ -1851,7 +1910,15 @@ def clean_settings(
 )
 @click.pass_context
 def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
-    """Permanently delete one node locally (prefer `mch node retire` to stop managing a node)."""
+    """Deprecated: use `mch node prune NODE`. Kept as a hidden alias, and as the only
+    path with --force (delete a still-managed node). Removed once a release ships that
+    carries the `prune NODE` replacement.
+    """
+    click.echo(
+        "note: `mch node remove` is deprecated — use `mch node prune NODE` "
+        "(use this only for --force).",
+        err=True,
+    )
     resp = _rpc(
         ctx.obj["socket"],
         {"cmd": "remove", "query": node, "dry_run": True, "force": force},
