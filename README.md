@@ -604,11 +604,33 @@ curl -fsS http://127.0.0.1:8743/status | jq
 curl -fsS http://127.0.0.1:8743/status/SiteA-Rooftop | jq '.health, .facts, .settings'
 ```
 
-`/status` returns `schema_version: 2`, a health summary, DB-backed nodes, unseen configured
-nodes, issues, and planned work. Each node includes `health`, configured `fact_keys`, collected `facts` such as
-`lat`/`lon`, and settings classified with `status` (`ok`, `nominal`, `drift`, `unknown`,
-`ignored`) and `action` (`none`, `read`, `write`, `report`, `ignore`). This is the contract a
-future green/red map dashboard should consume; the API never contacts nodes or makes changes.
+`/status` returns `schema_version: 2`, a health summary, the managed nodes, issues, an advisory
+`firmware` block (which nodes trail the latest known release), and planned work. Each node includes
+`health`, configured `fact_keys`, collected `facts` such as `lat`/`lon`, and settings classified
+with `status` (`ok`, `nominal`, `drift`, `unknown`, `ignored`) and `action` (`none`, `read`,
+`write`, `report`, `ignore`). This is the contract a future green/red map dashboard should consume;
+the API never contacts nodes or makes changes.
+
+### Scripting with `--json`
+
+You don't need to enable the HTTP API to script against mch. The read commands take `--json`, which
+emits the **same report model** the API serves (so `mch fleet status --json` and `GET /status` match
+for the same fleet). Available on `fleet status`, `fleet issues`, `fleet plan`, `fleet logs`,
+`node show`, and `config show`.
+
+```bash
+# Nodes not seen in the last 24 hours (labels), straight from the CLI:
+mch fleet status --json | jq -r --arg cutoff "$(date -u -d '24 hours ago' +%FT%T)" \
+  '.nodes[] | select((.last_seen // "0") < $cutoff) | .label'
+
+# Which nodes are behind the latest firmware the catalogue knows:
+mch fleet status --json | jq '.firmware'
+```
+
+`mch fleet issues --json` keeps the exit codes below (machine-readable output, machine-readable
+code): it exits `2` when any issue is present. Firmware age is **advisory** — it appears in the
+`firmware` block and as a footer line, but never as an issue, so it never sets exit `2`. In the
+`mch fleet status` table an outdated node is flagged with a trailing `!` in the VER column.
 
 ### Changing a setting fleet-wide
 
@@ -632,8 +654,9 @@ mch status                          Shortcut for `mch fleet status` (the daily l
 mch sync                            Shortcut for `mch fleet sync`
 mch help selectors                  How to name a node on the command line
 mch help concepts                   Desired vs reported, policy, scope, sync, exit codes
-mch fleet status                    Fleet overview: state, label, group, firmware, neighbours, last seen
+mch fleet status                    Fleet overview: state, label, group, firmware (VER, ! = outdated), neighbours, last seen
 mch fleet status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
+                              (add --json to fleet status/issues/plan/logs, node show, config show for scripting)
                               Detail view: facts, all desired settings (config + group, including
                               pending ones not yet synced), last seen/last conn and approximate
                               next sync with full timestamp and relative time, recent activity logs

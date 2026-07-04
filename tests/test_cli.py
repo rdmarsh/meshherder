@@ -1,6 +1,7 @@
 """Tests for CLI helper functions and command output."""
 
 import asyncio
+import json
 import os
 import re
 import time
@@ -894,15 +895,13 @@ def test_validate_warns_for_unknown_fact_and_suggests_typo(tmp_path):
 # ------ status ------
 
 def _status_resp(
-    nodes=None, drifted=None, bad_state=None, ghosts=None, unseen_nodes=None, open_nodes=None
+    nodes=None, drifted=None, bad_state=None, open_nodes=None
 ):
     """Build a status RPC response with empty defaults for all issue arrays."""
     return {"ok": True, "data": {
         "nodes": nodes or [],
         "drifted": drifted or [],
         "bad_state": bad_state or [],
-        "ghosts": ghosts or [],
-        "unseen_nodes": unseen_nodes or [],
         "open_nodes": open_nodes or [],
     }}
 
@@ -964,6 +963,136 @@ def test_help_topics_teach_vocabulary():
         assert word in concepts.output
 
 
+# ------ --json scripting surface (RECOMMENDATIONS-2 S3.2) ------
+
+def _report_resp(nodes=None, issues=None, plan=None):
+    """A fleet response in the report-model shape the daemon's `fleet` command returns."""
+    return {"ok": True, "data": {
+        "schema_version": 2,
+        "generated_at": "2026-07-04T00:00:00Z",
+        "summary": {"known_nodes": len(nodes or [])},
+        "nodes": nodes or [],
+        "issues": issues or {"drifted": [], "bad_state": [], "open_nodes": []},
+        "plan": plan or {"writes": [], "audits": [], "unknown": [], "blocked": []},
+    }}
+
+
+def _report_node(pubkey="aabbccdd" * 8, label="tower", name="Tower"):
+    return {"pubkey": pubkey, "label": label, "name": name, "group": None,
+            "state": "configured", "last_seen": None, "last_connected": None,
+            "next_sync_at": None, "facts": {}, "settings": [],
+            "issues": [], "health": "healthy",
+            "auth": {"required": False, "cached": True, "password_known": True, "open": False}}
+
+
+def test_fleet_status_json_emits_report_verbatim():
+    resp = _report_resp(nodes=[_report_node()])
+    result = _run(["fleet", "status", "--json"], resp)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == resp["data"]
+
+
+def test_fleet_status_json_filters_nodes_by_query():
+    resp = _report_resp(nodes=[_report_node(label="tower"),
+                               _report_node(pubkey="11" * 32, label="ridge", name="Ridge")])
+    result = _run(["fleet", "status", "ridge", "--json"], resp)
+    assert result.exit_code == 0
+    nodes = json.loads(result.output)["nodes"]
+    assert [n["label"] for n in nodes] == ["ridge"]
+
+
+def test_fleet_issues_json_exit_two_when_present():
+    issues = {"drifted": [], "bad_state": [
+        {"pubkey": "aa" * 32, "label": "x", "name": "x", "state": "configuring", "last_seen": None}
+    ], "open_nodes": []}
+    result = _run(["fleet", "issues", "--json"], _report_resp(issues=issues))
+    assert result.exit_code == 2
+    assert json.loads(result.output)["bad_state"][0]["label"] == "x"
+
+
+def test_fleet_issues_json_exit_zero_when_clean():
+    result = _run(["fleet", "issues", "--json"], _report_resp())
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"drifted": [], "bad_state": [], "open_nodes": []}
+
+
+def test_fleet_plan_json_emits_plan():
+    plan = {"writes": [{"key": "name", "command": "set name New"}],
+            "audits": [], "unknown": [], "blocked": []}
+    result = _run(["fleet", "plan", "--json"], _report_resp(plan=plan))
+    assert result.exit_code == 0
+    assert json.loads(result.output)["writes"][0]["command"] == "set name New"
+
+
+def test_fleet_logs_json_emits_list():
+    logs = [{"timestamp": "2026-07-04T00:00:00Z", "level": "info", "message": "hi"}]
+    result = _run(["fleet", "logs", "--json"], {"ok": True, "data": logs})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == logs
+
+
+def test_node_show_json_emits_report_verbatim():
+    node = _report_node()
+    node["logs"] = []
+    result = _run(["node", "show", "tower", "--json"], {"ok": True, "data": node})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == node
+
+
+def test_config_show_json_emits_resolution_verbatim():
+    data = {"pubkey": "aabbccdd" * 8, "label": "tower", "name": "Tower",
+            "configured": True, "resolved": {"policy": "enforce", "desired": "New",
+            "desired_source": "node", "observed": "Old", "observed_at": None}, "scopes": []}
+    result = _run(["config", "show", "tower", "name", "--json"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == data
+
+
+def test_top_level_status_json_shortcut():
+    resp = _report_resp(nodes=[_report_node()])
+    result = _run(["status", "--json"], resp)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == resp["data"]
+
+
+# ------ fleet-wide firmware-currency surfaces (RECOMMENDATIONS-2 S3.3) ------
+
+def _report_resp_with_firmware(ver, outdated):
+    """Report response where one node reports `ver` and firmware carries the advisory."""
+    node = _report_node()
+    node["facts"] = {"ver": ver}
+    firmware = {"latest": "v1.16.0", "outdated": outdated}
+    resp = _report_resp(nodes=[node])
+    resp["data"]["firmware"] = firmware
+    return resp
+
+
+def test_status_marks_outdated_firmware_in_ver_column():
+    outdated = [{"pubkey": "aabbccdd" * 8, "label": "tower", "name": "Tower",
+                 "ver": "v1.14.1", "releases_behind": 2}]
+    result = _run(["fleet", "status"], _report_resp_with_firmware("v1.14.1", outdated))
+    assert result.exit_code == 0
+    assert "v1.14.1!" in result.output  # trailing marker flags the outdated node
+    assert "behind latest v1.16.0" in result.output  # advisory footer
+
+
+def test_status_no_firmware_marker_when_current():
+    result = _run(["fleet", "status"], _report_resp_with_firmware("v1.16.0", []))
+    assert result.exit_code == 0
+    assert "!" not in result.output
+    assert "behind latest" not in result.output
+
+
+def test_issues_shows_firmware_advisory_without_exit_two():
+    """Firmware age is advisory: it prints but never trips the exit-2 alert code (S3.3)."""
+    outdated = [{"pubkey": "aabbccdd" * 8, "label": "tower", "name": "Tower",
+                 "ver": "v1.14.1", "releases_behind": 2}]
+    result = _run(["fleet", "issues"], _report_resp_with_firmware("v1.14.1", outdated))
+    assert result.exit_code == 0  # no real issues → clean exit despite outdated firmware
+    assert "no issues" in result.output
+    assert "behind latest v1.16.0" in result.output
+
+
 def test_fleet_issues_clean_exits_zero():
     result = _run(["fleet", "issues"], _status_resp())
     assert result.exit_code == 0
@@ -1015,8 +1144,6 @@ def _fleet_resp(nodes=None, plan=None):
         "issues": {
             "drifted": [],
             "bad_state": [],
-            "ghosts": [],
-            "unseen_nodes": [],
             "open_nodes": [],
         },
         "plan": plan or {"writes": [], "audits": [], "unknown": []},
@@ -1207,30 +1334,6 @@ def test_status_shows_bad_state_section():
     assert re.search(r"PUBKEY\s+LABEL", result.output)
     assert "configuring" in result.output
     assert "wip 07" in result.output
-
-
-def test_status_shows_ghosts_section():
-    result = _run(["fleet", "status"], _status_resp(ghosts=[
-        {
-            "pubkey": "deadbeef" * 8,
-            "label": "old-site",
-            "name": "Old Site",
-            "last_seen": None,
-        }
-    ]))
-    assert "ghost nodes" in result.output
-    assert "deadbeef" in result.output
-    assert "old-site" in result.output
-    assert "Old Site" in result.output
-
-
-def test_status_shows_unseen_config_nodes_section():
-    result = _run(["fleet", "status"], _status_resp(unseen_nodes=[
-        {"pubkey_prefix": "deadbeef", "label": "wrong"}
-    ]))
-    assert "unseen nodes" in result.output
-    assert "deadbeef" in result.output
-    assert "wrong" in result.output
 
 
 def test_status_shows_open_nodes_section():

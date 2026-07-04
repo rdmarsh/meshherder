@@ -120,20 +120,10 @@ async def test_legacy_node_includes_next_sync_at(db):
     assert detail["next_sync_at"] == next_sync_at.isoformat()
 
 
-async def test_fleet_report_has_no_unseen_nodes_after_sunset(db):
-    # Sunset: config.yaml no longer carries inventory, so there are no "declared but never
-    # seen" ghost nodes — even if a stray config node is passed in.
-    config = Config(nodes=[NodeConfig(pubkey_prefix="deadbeef", label="lost-site")])
-
-    report = await build_fleet_report(db, config)
-
-    assert report["summary"]["unseen_nodes"] == 0
-    assert report["unseen_nodes"] == []
-    assert report["issues"]["unseen_nodes"] == []
-
-
-async def test_fleet_report_treats_every_db_node_as_managed(db):
-    # The DB is the inventory now: a node it holds is always "configured", never a ghost.
+async def test_fleet_report_drops_dead_ghost_and_unseen_categories(db):
+    # RECOMMENDATIONS-2 S3.1: post-sunset every DB node is managed and there is no config
+    # inventory, so the ghost/unseen categories can never populate — they are removed entirely
+    # (schema, summary, and issues), not left as always-empty dead fields.
     node = Node(
         pubkey="aabbccdd" * 8,
         label="ridge",
@@ -144,9 +134,31 @@ async def test_fleet_report_treats_every_db_node_as_managed(db):
 
     report = await build_fleet_report(db, Config(nodes=[]))
 
-    assert report["nodes"][0]["configured"] is True
-    assert report["summary"]["ghost_nodes"] == 0
-    assert report["issues"]["ghosts"] == []
+    assert "unseen_nodes" not in report
+    assert "configured" not in report["nodes"][0]
+    assert "unseen_nodes" not in report["summary"]
+    assert "ghost_nodes" not in report["summary"]
+    assert "ghosts" not in report["issues"]
+    assert "unseen_nodes" not in report["issues"]
+    assert set(report["issues"]) == {"drifted", "bad_state", "open_nodes"}
+
+
+async def test_fleet_report_flags_outdated_firmware_as_advisory(db):
+    # RECOMMENDATIONS-2 S3.3: fleet-wide firmware currency is an advisory field, separate from the
+    # `issues` categories (firmware age is not a fault and must not drive exit-2 alerting).
+    old = Node(pubkey="aa" * 32, label="old", name="Old", state=NodeState.CONFIGURED)
+    await db.upsert_node(old)
+    await db.upsert_fact(NodeFact(node_pubkey=old.pubkey, key="ver", value="v1.14.1"))
+
+    report = await build_fleet_report(db, Config(nodes=[]))
+
+    firmware = report["firmware"]
+    assert firmware["latest"]  # catalogue's current version, e.g. v1.16.0
+    assert [n["label"] for n in firmware["outdated"]] == ["old"]
+    assert firmware["outdated"][0]["releases_behind"] >= 1
+    assert report["summary"]["outdated_firmware"] == 1
+    # Advisory, not a fault: the node is not pushed into any issue category.
+    assert report["issues"]["bad_state"] == []
 
 
 # ------------------------------------------------------------------

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from mch.command_catalog import OUTDATED, firmware_currency
 from mch.command_registry import write_command_for_key
 from mch.config import (
     Config,
@@ -39,9 +40,6 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
         # `mch fleet status`/`mch fleet plan` show DB-authored intent immediately after
         # `mch config set` and a node never listed in config.yaml still resolves fully.
         node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
-        # Sunset: the DB is the inventory, so every node it holds is a managed node.
-        # The old config-vs-DB "ghost" distinction is gone.
-        configured = True
         fact_records = await db.get_fact_records(node.pubkey)
         facts = {fact.key: fact.value for fact in fact_records}
         facts_collected_at = {fact.key: _iso(fact.collected_at) for fact in fact_records}
@@ -55,7 +53,6 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             "label": node.label,
             "name": node.name,
             "group": node.group,
-            "configured": configured,
             "state": node.state.value,
             "health": health,
             "issues": node_issues,
@@ -74,18 +71,17 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             "settings": settings,
         })
 
-    # Sunset: no config inventory means no "declared but never seen" ghost nodes.
-    unseen: list[dict[str, Any]] = []
-    plan = _plan_report(node_reports, unseen)
-    fleet_issues = _issues_report(node_reports, unseen)
-    summary = _summary(node_reports, unseen, fleet_issues)
+    plan = _plan_report(node_reports)
+    fleet_issues = _issues_report(node_reports)
+    firmware = _firmware_report(node_reports)
+    summary = _summary(node_reports, fleet_issues, firmware)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
         "summary": summary,
         "nodes": node_reports,
-        "unseen_nodes": unseen,
         "issues": fleet_issues,
+        "firmware": firmware,
         "plan": plan,
     }
 
@@ -289,23 +285,10 @@ def _node_health(node: Node, issues: list[dict[str, str]]) -> str:
 
 def _plan_report(
     nodes: list[dict[str, Any]],
-    unseen: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
     writes: list[dict[str, Any]] = []
     audits: list[dict[str, Any]] = []
-    unknown: list[dict[str, Any]] = [
-        {
-            "pubkey": item["pubkey_prefix"],
-            "label": item["label"],
-            "mesh_name": "",
-            "key": "",
-            "desired": None,
-            "known": None,
-            "policy": "",
-            "reason": "node not known to gateway/DB",
-        }
-        for item in unseen
-    ]
+    unknown: list[dict[str, Any]] = []
     for node in nodes:
         for setting in node["settings"]:
             base = {
@@ -321,32 +304,18 @@ def _plan_report(
                 writes.append({**base, "command": setting["command"]})
             elif setting["action"] == "report" and setting["desired"] is not None:
                 audits.append(base)
-            elif (
-                setting["action"] == "read"
-                and setting["desired"] is not None
-                and node["configured"]
-            ):
+            elif setting["action"] == "read" and setting["desired"] is not None:
                 unknown.append({**base, "reason": "not observed yet"})
     return {"writes": writes, "audits": audits, "unknown": unknown, "blocked": []}
 
 
 def _issues_report(
     nodes: list[dict[str, Any]],
-    unseen: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
     drifted: list[dict[str, Any]] = []
     bad_state: list[dict[str, Any]] = []
-    ghosts: list[dict[str, Any]] = []
     open_nodes: list[dict[str, Any]] = []
     for node in nodes:
-        if not node["configured"]:
-            ghosts.append({
-                "pubkey": node["pubkey"],
-                "label": node["label"],
-                "name": node["name"],
-                "state": node["state"],
-                "last_seen": node["last_seen"],
-            })
         if node["state"] in {state.value for state in _BAD_STATES}:
             bad_state.append({
                 "pubkey": node["pubkey"],
@@ -375,21 +344,42 @@ def _issues_report(
     return {
         "drifted": drifted,
         "bad_state": bad_state,
-        "ghosts": ghosts,
-        "unseen_nodes": unseen,
         "open_nodes": open_nodes,
     }
 
 
+def _firmware_report(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Advisory firmware-currency view: which nodes trail the latest known release.
+
+    Deliberately NOT part of `_issues_report` — firmware age is not a fault and must not drive
+    alerting (the `issues` categories do). It is a separate advisory surface, reusing the same
+    `command_catalog.firmware_currency()` as the per-node `ver` note. Silent (empty) when no node
+    reports a judgeable `ver`.
+    """
+    outdated: list[dict[str, Any]] = []
+    latest = ""
+    for node in nodes:
+        currency = firmware_currency(node["facts"].get("ver"))
+        latest = currency.latest or latest
+        if currency.status == OUTDATED:
+            outdated.append({
+                "pubkey": node["pubkey"],
+                "label": node["label"],
+                "name": node["name"],
+                "ver": node["facts"].get("ver"),
+                "releases_behind": currency.releases_behind,
+            })
+    return {"latest": latest, "outdated": outdated}
+
+
 def _summary(
     nodes: list[dict[str, Any]],
-    unseen: list[dict[str, Any]],
     issues: dict[str, list[dict[str, Any]]],
+    firmware: dict[str, Any],
 ) -> dict[str, int]:
     return {
         "known_nodes": len(nodes),
-        "unseen_nodes": len(unseen),
-        "ghost_nodes": len(issues["ghosts"]),
+        "outdated_firmware": len(firmware["outdated"]),
         "healthy_nodes": sum(node["health"] == "healthy" for node in nodes),
         "warning_nodes": sum(node["health"] == "warning" for node in nodes),
         "critical_nodes": sum(node["health"] == "critical" for node in nodes),

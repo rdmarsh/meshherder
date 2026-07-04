@@ -1122,9 +1122,10 @@ async def test_status_dispatch_returns_node_list_and_issue_arrays(db, wq, config
     assert data["nodes"][0]["state"] == "configured"
     assert data["drifted"] == []
     assert data["bad_state"] == []
-    assert data["ghosts"] == []
-    assert data["unseen_nodes"] == []
     assert data["open_nodes"] == []
+    # RECOMMENDATIONS-2 S3.1: the dead ghost/unseen categories are gone from the payload.
+    assert "ghosts" not in data
+    assert "unseen_nodes" not in data
 
 
 async def test_status_dispatch_returns_drifted_array(db, wq, config):
@@ -1361,8 +1362,6 @@ async def test_issues_dispatch_no_issues(db, wq, config):
     assert resp["ok"] is True
     assert resp["data"]["drifted"] == []
     assert resp["data"]["bad_state"] == []
-    assert resp["data"]["ghosts"] == []
-    assert resp["data"]["unseen_nodes"] == []
     assert resp["data"]["open_nodes"] == []
 
 
@@ -1407,19 +1406,8 @@ async def test_issues_dispatch_online_not_in_bad_state(db, wq, config):
     assert resp["data"]["bad_state"] == []
 
 
-async def test_issues_dispatch_has_no_unseen_config_nodes(db, wq, config):
-    """Sunset: config.yaml has no inventory, so issues never reports unseen config nodes."""
-    from mch.config import NodeConfig
-    config.nodes = [NodeConfig(pubkey_prefix="deadbeef", label="wrong")]
-
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
-
-    assert resp["data"]["ghosts"] == []
-    assert resp["data"]["unseen_nodes"] == []
-
-
-async def test_issues_dispatch_treats_db_nodes_as_managed_not_ghosts(db, wq, config):
-    """Sunset: every DB node is managed inventory, so none are reported as ghosts."""
+async def test_issues_dispatch_has_no_ghost_or_unseen_categories(db, wq, config):
+    """RECOMMENDATIONS-2 S3.1: the dead ghost/unseen categories are removed from the payload."""
     node = Node(
         pubkey="11223344" * 8,
         name="Managed",
@@ -1431,8 +1419,9 @@ async def test_issues_dispatch_treats_db_nodes_as_managed_not_ghosts(db, wq, con
 
     resp = await _dispatch({"cmd": "issues"}, wq, db, config)
 
-    assert resp["data"]["ghosts"] == []
-    assert resp["data"]["unseen_nodes"] == []
+    assert "ghosts" not in resp["data"]
+    assert "unseen_nodes" not in resp["data"]
+    assert set(resp["data"]) == {"drifted", "bad_state", "open_nodes"}
 
 
 async def test_dispatch_unknown_command_returns_error(db, wq, config):
@@ -1561,19 +1550,6 @@ async def test_commission_dispatch_disconnected_progress_cancels(db, wq, config)
     assert "client disconnected" in resp["error"]
     wq.operation.assert_called_once_with("commission", wait=False)
     writer.write.assert_called_once()
-
-
-async def test_issues_dispatch_no_ghost_when_node_exists(db, wq, config):
-    """A config node whose prefix matches a DB node is neither ghost nor unseen."""
-    from mch.config import NodeConfig
-    node = Node(pubkey="aabbccdd" * 8, name="N", label="n", state=NodeState.CONFIGURED)
-    await db.upsert_node(node)
-    config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="n")]
-
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
-
-    assert resp["data"]["ghosts"] == []
-    assert resp["data"]["unseen_nodes"] == []
 
 
 # ------------------------------------------------------------------

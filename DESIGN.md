@@ -286,6 +286,16 @@ map should consume this model rather than deriving status independently.
 HTTP paths follow the existing read-only command vocabulary (`/status`, `/plan`, `/issues`,
 `/logs`, and `/health`).
 
+The report's `issues` block (`drifted`/`bad_state`/`open_nodes`) carries only *faults* — the
+categories that drive alerting and the `mch fleet issues` exit code 2. Firmware currency is
+deliberately a **separate** advisory field (`firmware: {latest, outdated[]}`, plus
+`summary.outdated_firmware`): being behind the latest release is not a fault, so it must not set the
+alert code. The same report is emitted by every CLI read command's `--json` flag, bypassing the
+`_status_view`/`_node_detail_view` terminal-projection shims, so CLI `--json` and the HTTP API stay
+byte-for-byte identical for the same data (pinned by `tests/test_cli_api_contract.py` over a real
+socket). RECOMMENDATIONS-2 S3.1 removed the dead post-sunset `ghosts`/`unseen_nodes` categories that
+could never populate.
+
 The first implementation exposes a complete fleet report from `/status`, including facts and
 settings for every node. That is useful while proving the model, but it is not the intended
 dashboard polling contract. Before a map UI is built, `/status` should become a lightweight fleet

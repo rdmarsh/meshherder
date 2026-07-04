@@ -615,6 +615,8 @@ def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
     """Project the fleet API model into the existing terminal status renderer."""
     if "schema_version" not in fleet:
         return fleet
+    firmware = fleet.get("firmware", {"latest": "", "outdated": []})
+    outdated_pubkeys = {n["pubkey"] for n in firmware.get("outdated", [])}
     return {
         "nodes": [
             {
@@ -627,9 +629,11 @@ def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
                 "last_connected": node["last_connected"],
                 "neighbors": node["facts"].get("neighbors"),
                 "ver": node["facts"].get("ver"),
+                "firmware_outdated": node["pubkey"] in outdated_pubkeys,
             }
             for node in fleet["nodes"]
         ],
+        "firmware": firmware,
         **fleet["issues"],
     }
 
@@ -679,21 +683,60 @@ def _plan_view(fleet: dict[str, Any]) -> dict[str, Any]:
     return fleet["plan"] if "plan" in fleet else fleet
 
 
+def _emit_json(payload: Any) -> None:
+    """Print a report payload as indented JSON — the CLI's scripting/integration surface.
+
+    The shapes are the report model (`report.py`), the same objects the HTTP API serves, so
+    `mch fleet status --json` and the API `/status` body match for the same data.
+    """
+    click.echo(json.dumps(payload, indent=2, default=str))
+
+
+def _filter_report_by_query(report: dict[str, Any], query: str | None) -> dict[str, Any]:
+    """Filter a fleet report's nodes/issues/plan by QUERY, mirroring the terminal views.
+
+    With no query the report is returned unchanged, so `--json` output matches the API body.
+    """
+    if not query:
+        return report
+    filtered = dict(report)
+    filtered["nodes"] = _filter_nodes(report.get("nodes", []), query)
+    issues = report.get("issues", {})
+    filtered["issues"] = {
+        "drifted": _filter_drift(issues.get("drifted", []), query),
+        "bad_state": _filter_nodes(issues.get("bad_state", []), query),
+        "open_nodes": _filter_nodes(issues.get("open_nodes", []), query),
+    }
+    plan = report.get("plan", {})
+    filtered["plan"] = {
+        "writes": _filter_plan_items(plan.get("writes", []), query),
+        "audits": _filter_plan_items(plan.get("audits", []), query),
+        "unknown": _filter_plan_items(plan.get("unknown", []), query),
+        "blocked": plan.get("blocked", []),
+    }
+    return filtered
+
+
 @fleet_group.command("status")
 @click.argument("query", required=False, default=None)
+@click.option("--json", "as_json", is_flag=True, help="Emit the full report as JSON for scripting.")
 @click.pass_context
-def status(ctx: click.Context, query: str | None) -> None:
+def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
     """Show daemon and fleet status, or detail for a single matched node."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
     fleet = _check(resp)
+
+    if as_json:
+        # The report model verbatim (same shape as the HTTP API /status), not the table shim.
+        _emit_json(_filter_report_by_query(fleet, query))
+        return
+
     data = _status_view(fleet)
 
     all_nodes = data.get("nodes", [])
     nodes = _filter_nodes(all_nodes, query)
     drifted = _filter_drift(data.get("drifted", []), query)
     bad_state = _filter_nodes(data.get("bad_state", []), query)
-    ghosts = _filter_ghosts(data.get("ghosts", []), query)
-    unseen_nodes = _filter_unseen_nodes(data.get("unseen_nodes", []), query)
     open_nodes = _filter_nodes(data.get("open_nodes", []), query)
 
     filtered = bool(query and len(nodes) != len(all_nodes))
@@ -720,12 +763,19 @@ def status(ctx: click.Context, query: str | None) -> None:
                 return "-"
             return raw.split("-")[0]  # "v1.15.0-dee3e26..." → "v1.15.0"
 
+        def _ver_text(n: dict[str, Any]) -> str:
+            # Trailing "!" flags firmware behind the latest known release (advisory; see the
+            # footer line and `mch node show` for the detail). Kept in the raw text so the VER
+            # column width accounts for it.
+            base = _short_ver(n.get("ver"))
+            return f"{base}!" if n.get("firmware_outdated") and base != "-" else base
+
         state_w = max(len("STATE"), max((len(n["state"]) for n in nodes), default=0))
         group_w = max(len("GROUP"), max((len(n.get("group") or "-") for n in nodes), default=0))
         label_w = max(_wlen("LABEL"), max((_wlen(n.get("label") or "-") for n in nodes), default=0))
         name_w = max(_wlen("MESH NAME"), max((_wlen(n["name"]) for n in nodes), default=0))
         nbrs_w = max(len("NBRS"), max((len(n.get("neighbors") or "-") for n in nodes), default=0))
-        ver_w = max(len("VER"), max((len(_short_ver(n.get("ver"))) for n in nodes), default=0))
+        ver_w = max(len("VER"), max((len(_ver_text(n)) for n in nodes), default=0))
 
         row = "  {:<12}  {}  {}  {:<{gw}}  {}  {:<{nw}}  {:<{vw}}  {}"
         click.echo(row.format(
@@ -744,7 +794,7 @@ def status(ctx: click.Context, query: str | None) -> None:
             last  = _ago(n.get("last_seen"))
             group = (n.get("group") or "-")
             nbrs  = n.get("neighbors") or "-"
-            ver   = _short_ver(n.get("ver"))
+            ver   = _ver_text(n)
             click.echo(row.format(
                 _pk(n["pubkey"]),
                 _state_cell(n.get("state"), state_w),
@@ -764,13 +814,15 @@ def status(ctx: click.Context, query: str | None) -> None:
     else:
         click.echo(f"{len(all_nodes)} nodes")
 
-    _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
+    _render_issue_sections(drifted, bad_state, open_nodes)
+    _render_firmware_advisory(data.get("firmware"), query)
 
 
 @fleet_group.command("issues")
 @click.argument("query", required=False, default=None)
+@click.option("--json", "as_json", is_flag=True, help="Emit the issues as JSON for scripting.")
 @click.pass_context
-def issues(ctx: click.Context, query: str | None) -> None:
+def issues(ctx: click.Context, query: str | None, as_json: bool) -> None:
     """Show only the fleet issues (drift, problem states, open nodes).
 
     This is the same data as the footer of `mch fleet status`, on its own so a cron job or
@@ -780,19 +832,29 @@ def issues(ctx: click.Context, query: str | None) -> None:
     """
     resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
     fleet = _check(resp)
-    data = _status_view(fleet)
 
+    if as_json:
+        # Machine-readable output keeps the machine-readable exit code (2 = issues present).
+        issue_data = _filter_report_by_query(fleet, query).get("issues", {})
+        _emit_json(issue_data)
+        if any(issue_data.get(k) for k in ("drifted", "bad_state", "open_nodes")):
+            ctx.exit(2)
+        return
+
+    data = _status_view(fleet)
     drifted = _filter_drift(data.get("drifted", []), query)
     bad_state = _filter_nodes(data.get("bad_state", []), query)
-    ghosts = _filter_ghosts(data.get("ghosts", []), query)
-    unseen_nodes = _filter_unseen_nodes(data.get("unseen_nodes", []), query)
     open_nodes = _filter_nodes(data.get("open_nodes", []), query)
 
-    if not (drifted or bad_state or ghosts or unseen_nodes or open_nodes):
+    has_issues = bool(drifted or bad_state or open_nodes)
+    if not has_issues:
         click.echo("no issues")
-        return
-    _render_issue_sections(drifted, bad_state, ghosts, unseen_nodes, open_nodes)
-    ctx.exit(2)
+    else:
+        _render_issue_sections(drifted, bad_state, open_nodes)
+    # Firmware age is advisory, not a fault: shown here, but it never sets the exit-2 alert code.
+    _render_firmware_advisory(data.get("firmware"), query)
+    if has_issues:
+        ctx.exit(2)
 
 
 @node_group.command("path")
@@ -907,8 +969,9 @@ def sync(ctx: click.Context, node: str | None) -> None:
 # operators run them dozens of times a day. They forward verbatim to the `fleet` versions.
 @cli.command("status")
 @click.argument("query", required=False, default=None)
+@click.option("--json", "as_json", is_flag=True, help="Emit the full report as JSON for scripting.")
 @click.pass_context
-def status_shortcut(ctx: click.Context, query: str | None) -> None:
+def status_shortcut(ctx: click.Context, query: str | None, as_json: bool) -> None:
     """Shortcut for `mch fleet status`."""
     ctx.forward(status)
 
@@ -928,11 +991,16 @@ def sync_shortcut(ctx: click.Context, node: str | None) -> None:
 @fleet_group.command("logs")
 @click.argument("pubkey", required=False)
 @click.option("--limit", "-n", default=50, show_default=True, help="Max log lines")
+@click.option("--json", "as_json", is_flag=True, help="Emit the log entries as JSON for scripting.")
 @click.pass_context
-def logs(ctx: click.Context, pubkey: str | None, limit: int) -> None:
+def logs(ctx: click.Context, pubkey: str | None, limit: int, as_json: bool) -> None:
     """Show recent per-node activity log (optionally filtered to one node by pubkey prefix)."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "logs", "pubkey": pubkey, "limit": limit})
     data = _check(resp)
+
+    if as_json:
+        _emit_json(data or [])
+        return
 
     if not data:
         click.echo("no logs")
@@ -1214,15 +1282,31 @@ def _render_adopt_result(data: dict[str, Any]) -> None:
     click.echo(f"next: mch fleet status {(data.get('label') or data.get('pubkey') or '')[:12]}")
 
 
+def _render_firmware_advisory(firmware: dict[str, Any] | None, query: str | None) -> None:
+    """Print the advisory 'N nodes behind latest vX.Y.Z' footer. Advisory only — never exit 2.
+
+    Firmware age is not a fault (it does not go through the issue categories that drive alerting),
+    so this is a plain informational line. No-op when nothing trails the latest known release.
+    """
+    outdated = _filter_nodes((firmware or {}).get("outdated", []), query)
+    if not outdated:
+        return
+    latest = (firmware or {}).get("latest") or "?"
+    n = len(outdated)
+    click.echo("")
+    click.echo(
+        f"firmware: {n} node{'s' if n != 1 else ''} behind latest {latest} "
+        f"(advisory — `mch node show NODE` for detail)"
+    )
+
+
 def _render_issue_sections(
     drifted: list[dict[str, Any]],
     bad_state: list[dict[str, Any]],
-    ghosts: list[dict[str, Any]],
-    unseen_nodes: list[dict[str, Any]],
     open_nodes: list[dict[str, Any]],
 ) -> None:
     """Render issue sections below the fleet table. No-ops if all lists are empty."""
-    if not drifted and not bad_state and not ghosts and not unseen_nodes and not open_nodes:
+    if not drifted and not bad_state and not open_nodes:
         return
 
     click.echo("")
@@ -1279,51 +1363,6 @@ def _render_issue_sections(
                 _state_cell(n.get("state"), 12),
                 last,
             ))
-        click.echo("")
-
-    if ghosts:
-        click.echo("ghost nodes (in the local DB but no longer managed):")
-        label_w = max(
-            _wlen("LABEL"),
-            max((_wlen(g.get("label") or "-") for g in ghosts), default=0),
-        )
-        name_w = max(
-            _wlen("MESH NAME"),
-            max((_wlen(g.get("name") or "-") for g in ghosts), default=0),
-        )
-        fmt = "  {:<12}  {}  {}  {:<12}"
-        click.echo(fmt.format(
-            "PUBKEY",
-            _wpad("LABEL", label_w),
-            _wpad("MESH NAME", name_w),
-            "LAST SEEN",
-        ))
-        click.echo(fmt.format(
-            "------",
-            _wpad("-----", label_w),
-            _wpad("---------", name_w),
-            "---------",
-        ))
-        for g in ghosts:
-            click.echo(fmt.format(
-                _pk(g.get("pubkey")),
-                _wpad(g.get("label") or "-", label_w),
-                _wpad(g.get("name") or "-", name_w),
-                _ago(g.get("last_seen")),
-            ))
-        click.echo("")
-
-    if unseen_nodes:
-        click.echo("unseen nodes (in desired state but not known to the gateway/DB):")
-        label_w = max(
-            _wlen("LABEL"),
-            max((_wlen(n.get("label") or "-") for n in unseen_nodes), default=0),
-        )
-        fmt = "  {:<8}  {}"
-        click.echo(fmt.format("PREFIX", _wpad("LABEL", label_w)))
-        click.echo(fmt.format("------", _wpad("-----", label_w)))
-        for n in unseen_nodes:
-            click.echo(fmt.format(n["pubkey_prefix"][:8], _wpad(n.get("label") or "-", label_w)))
         click.echo("")
 
     if open_nodes:
@@ -1392,31 +1431,6 @@ def _filter_plan_items(items: list[dict[str, Any]], query: str | None) -> list[d
         or q in (item.get("label") or "").lower()
         or q in (item.get("mesh_name") or "").lower()
         or q in (item.get("key") or "").lower()
-    ]
-
-
-def _filter_ghosts(ghosts: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
-    """Filter DB-only ghost nodes by pubkey, label, or mesh name."""
-    if not query:
-        return ghosts
-    q = query.lower()
-    return [
-        g for g in ghosts
-        if (g.get("pubkey") or "").startswith(query)
-        or q in (g.get("label") or "").lower()
-        or q in (g.get("name") or "").lower()
-    ]
-
-
-def _filter_unseen_nodes(nodes: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
-    """Filter config-only unseen nodes by pubkey_prefix or label substring."""
-    if not query:
-        return nodes
-    q = query.lower()
-    return [
-        n for n in nodes
-        if n["pubkey_prefix"].startswith(query)
-        or q in (n.get("label") or "").lower()
     ]
 
 
@@ -1979,8 +1993,9 @@ def unretire_node(ctx: click.Context, node: str) -> None:
 
 @node_group.command("show")
 @click.argument("node")
+@click.option("--json", "as_json", is_flag=True, help="Emit the node report as JSON for scripting.")
 @click.pass_context
-def show_node(ctx: click.Context, node: str) -> None:
+def show_node(ctx: click.Context, node: str, as_json: bool) -> None:
     """Show full detail for one node: facts, all desired settings, schedule, and recent activity.
 
     NODE is a pubkey prefix, label, or mesh-name substring; it must match exactly one node. This
@@ -1988,8 +2003,12 @@ def show_node(ctx: click.Context, node: str) -> None:
     command.
     """
     detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": node})
-    detail = _node_detail_view(_check(detail_resp))
-    _render_node_detail(detail)
+    report = _check(detail_resp)
+    if as_json:
+        # The node report model verbatim (same shape the API serves), not the detail-view shim.
+        _emit_json(report)
+        return
+    _render_node_detail(_node_detail_view(report))
 
 
 @node_group.command("group")
@@ -2393,8 +2412,9 @@ def unset_setting(
 @config_group.command("show")
 @click.argument("node")
 @click.argument("key")
+@click.option("--json", "as_json", is_flag=True, help="Emit the resolution as JSON for scripting.")
 @click.pass_context
-def show_setting(ctx: click.Context, node: str, key: str) -> None:
+def show_setting(ctx: click.Context, node: str, key: str, as_json: bool) -> None:
     """Show why a setting has the value it does.
 
     \b
@@ -2405,6 +2425,9 @@ def show_setting(ctx: click.Context, node: str, key: str) -> None:
     Read-only: it sends no mesh traffic.
     """
     data = _check(_rpc(ctx.obj["socket"], {"cmd": "show_setting", "query": node, "key": key}))
+    if as_json:
+        _emit_json(data)
+        return
     target = data.get("label") or data.get("name") or data["pubkey"][:8]
     resolved = data["resolved"]
 
@@ -2437,11 +2460,18 @@ def show_setting(ctx: click.Context, node: str, key: str) -> None:
 
 @fleet_group.command("plan")
 @click.argument("query", required=False, default=None)
+@click.option("--json", "as_json", is_flag=True, help="Emit the plan as JSON for scripting.")
 @click.pass_context
-def plan(ctx: click.Context, query: str | None) -> None:
+def plan(ctx: click.Context, query: str | None, as_json: bool) -> None:
     """Show desired-vs-known changes without sending mesh commands."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
-    data = _plan_view(_check(resp))
+    fleet = _check(resp)
+
+    if as_json:
+        _emit_json(_filter_report_by_query(fleet, query).get("plan", _plan_view(fleet)))
+        return
+
+    data = _plan_view(fleet)
     writes = _filter_plan_items(data.get("writes", []), query)
     audits = _filter_plan_items(data.get("audits", []), query)
     unknown = _filter_plan_items(data.get("unknown", []), query)

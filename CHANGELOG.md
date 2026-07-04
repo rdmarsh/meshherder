@@ -5,6 +5,21 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **`--json` scripting surface + firmware-currency fleet views (RECOMMENDATIONS-2 slice 3).**
+  - **`--json` on the read commands** — `fleet status`, `fleet issues`, `fleet plan`, `fleet logs`,
+    `node show`, and `config show`. The output is the report model (`report.py`) verbatim, the same
+    shape the HTTP API serves, so `mch fleet status --json` and `GET /status` match for the same
+    fleet — no need to enable the API just to script. `fleet issues --json` keeps exit code 2. A new
+    contract test drives the real daemon socket and asserts CLI/API parity permanently.
+  - **Fleet-wide firmware currency.** `mch fleet status` flags an outdated node with a trailing `!`
+    in the VER column and prints a "N nodes behind latest vX.Y.Z" advisory footer (also on
+    `mch fleet issues`). It is **advisory, not a fault**: it lives in a separate `firmware` report
+    field, never the `issues` categories, so it never trips the exit-2 alert. Reuses
+    `command_catalog.firmware_currency()`.
+  - **Removed the dead `ghosts`/`unseen_nodes` issue categories.** Post-sunset every DB node is
+    managed and there is no config inventory, so these could never populate; the schema fields,
+    summary counts, render paths, and their tests are gone.
+
 - **CLI grammar unification (RECOMMENDATIONS-2 slice 2).**
   - **`mch node prune` now takes an optional NODE.** `mch node prune` still lists/purges every
     retired node; `mch node prune <label|prefix>` previews and (with `--yes`) hard-deletes just that

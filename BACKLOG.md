@@ -267,21 +267,14 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### CLI And Reporting
 
-- **Fleet-wide firmware-currency surfaces (extends the per-node note already shipped).** The
-  per-node signal exists (`command_catalog.firmware_currency()`, shown as the `ver` fact NOTE in
-  `mch node show`); the operator chose detail-note-only for the first cut. Two follow-ups, if the
-  fleet view needs them later:
-  - **`mch fleet status` VER-column marker** — flag outdated versions in the table (e.g. a trailing
-    `!` or a dimmed cell) so who's behind is visible at a glance without opening each node. Mind the
-    already-wide 8-column table and its width calc (`cli.py` `_short_ver`/`ver_w`); keep the marker
-    cheap and colour/again width-safe.
-  - **"Outdated firmware" issues section** — an advisory entry in `mch fleet issues` / the status
-    footer (e.g. "3 nodes behind latest v1.16.0"), so a cron/health check catches it. Must stay
-    advisory, **not** a bad-state (`report.py` issue categories drive alerting; firmware age is not
-    a fault). Reuses `firmware_currency()`; needs the fleet response to carry each node's `ver`
-    (already present in the summary rows).
-  Ties into CLAUDE.md "Future scope: firmware age reporting" (report nodes below a configurable
-  minimum version, or older than the newest seen across the fleet).
+- **Fleet-wide firmware-currency surfaces — DONE (Unreleased, RECOMMENDATIONS-2 S3.3).** The
+  per-node note already existed; the fleet views now ship too: `mch fleet status` flags outdated
+  nodes with a trailing `!` in the VER column (width-safe) and prints a "N nodes behind latest
+  vX.Y.Z" advisory footer, also on `mch fleet issues`. Advisory, **not** a bad-state — it lives in a
+  separate `report.firmware` field (`{latest, outdated[]}` + `summary.outdated_firmware`), never the
+  `issues` categories, so it never trips exit 2. Reuses `command_catalog.firmware_currency()`.
+  Satisfies CLAUDE.md "Future scope: firmware age reporting". Still open (later, if wanted): a
+  configurable *minimum* version floor rather than only "behind the newest seen".
 - Move toward DB-primary fleet inventory. Config should describe desired policy/defaults and remain
   exportable as a backup/import format, while DB owns discovered full pubkeys, labels, mesh names,
   observed radios, known paths, facts, and scheduling state.
@@ -314,12 +307,11 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 - Persist "configured node not visible to gateway" warnings in `mch logs`, not only the journal.
 - Make `mch suggest <node>` show differences from current configuration and consider geographic
   separation when suggesting settings for nearby nodes.
-- Remove the dead `ghosts`/`unseen_nodes` issue categories. Post-sunset `report.py` always sets
-  `configured=True` and `unseen=[]`, so these two issue sections can never populate; the CLI render
-  paths (`_render_issue_sections`, `_filter_ghosts`, `_filter_unseen_nodes`), the `legacy_status`
-  spread, the `_issues_report`/`_summary` fields, and their tests are all dead weight. Phase-1 doc
-  pass (2026-07-03) only reworded the never-printed strings off config.yaml; the schema/render
-  removal is the real cleanup. Fold into the issue-assembly dedup work (was SUGGEST #15).
+- Remove the dead `ghosts`/`unseen_nodes` issue categories. **DONE (Unreleased, RECOMMENDATIONS-2
+  S3.1):** removed the node-level `configured` field, the `unseen`/`ghosts` computation, the summary
+  counts (`ghost_nodes`/`unseen_nodes`), the CLI render paths (`_filter_ghosts`/`_filter_unseen_nodes`
+  and the ghost/unseen sections of `_render_issue_sections`), and their tests. The report `issues`
+  block is now exactly `{drifted, bad_state, open_nodes}`.
 
 ## Later
 
@@ -394,20 +386,23 @@ fetch). Open follow-ups:
 
 ### From the 2026-07-04 RECOMMENDATIONS sweep (deferred to re-review)
 
-- **CLI redesign, remaining steps.** DONE 2026-07-04 except `--json`: `node remove`→`node prune NODE`
-  convergence, scope-grammar + mutation-convention codification, `mch help selectors`, exit codes
-  0/1/2, and shell-completion docs all shipped in RECOMMENDATIONS-2 slices 1–2. **Still open:** add
-  `--json` output to the read commands (`fleet status/plan/issues/logs`, `node show`, `config show`)
-  — the report model already produces the JSON (RECOMMENDATIONS-2 S3.2).
+- **CLI redesign, remaining steps — DONE 2026-07-04 (RECOMMENDATIONS-2 slices 1–3).**
+  `node remove`→`node prune NODE` convergence, scope-grammar + mutation-convention codification,
+  `mch help selectors`/`concepts`, exit codes 0/1/2, shell-completion docs, and `--json` on the read
+  commands (`fleet status/plan/issues/logs`, `node show`, `config show`) all shipped. The only slice
+  deliberately deferred is S1.3 (drop the `fleet status` single-match magic switch), which is gated
+  on cutting a release that carries the `mch node show` hint (see "Sunset follow-ups").
 - **C2 module splits (dedicated PR).** `cli.py` (~3k lines) → package (`render`, `commission`, one
   module per noun group); `queue.py` (~2.4k) → `scheduler`/`node_processor`/`pathing` behind the
   `WorkQueue` facade; `daemon._dispatch` (huge `if cmd == …` chain) → a `dict[str, Handler]`.
   Mechanical, no operator-facing behaviour change, but large diff — keep test suites green at each
   step. (Was SUGGEST #14/#2.)
-- **M4 test gaps still open.** CLI↔daemon contract tests over a real Unix socket with a stub gateway
-  (the `_status_view`/`_node_detail_view` projection shims exist because this has drifted before),
-  and concurrency tests for scheduler vs manual sync vs exec vs commission ownership (the operation
-  lock is load-bearing and untested; was SUGGEST #19).
+- **M4 test gaps.** CLI↔daemon contract test over a real Unix socket — **DONE (Unreleased,
+  RECOMMENDATIONS-2 S3.2):** `tests/test_cli_api_contract.py` drives the real daemon socket and
+  asserts `mch fleet status --json` equals the API `/status` body for the same seeded DB, pinning the
+  `_status_view`/`_node_detail_view` projection shims against drift. **Still open:** concurrency tests
+  for scheduler vs manual sync vs exec vs commission ownership (the operation lock is load-bearing and
+  untested; was SUGGEST #19).
 - **`node add` onboarding pipeline (Phase 7 / ROADMAP Direction 1).** Unify the commission wizard
   modes (new/replace/adopt) under one `mch node add` entry point, aligned with the auth-first
   onboarding work. Design-heavy; the largest piece — its own design + PR.
@@ -505,6 +500,14 @@ fetch). Open follow-ups:
 
 ## Done Recently
 
+- 2026-07-04: **RECOMMENDATIONS-2 slice 3 (`--json` + firmware fleet views).** Added `--json` to the
+  read commands (`fleet status/issues/plan/logs`, `node show`, `config show`), emitting the report
+  model verbatim — identical to the HTTP API body, pinned by a real-socket CLI↔API contract test
+  (`tests/test_cli_api_contract.py`, the part-1 M4 remainder). Added fleet-wide firmware-currency
+  surfaces: a VER-column `!` marker in `mch fleet status` and an advisory "N nodes behind latest
+  vX.Y.Z" footer on status/issues, kept out of the `issues` categories so firmware age never trips
+  exit 2 (new `report.firmware` field + `summary.outdated_firmware`). Removed the dead
+  `ghosts`/`unseen_nodes` issue categories (schema, summary, render paths, tests).
 - 2026-07-04: **RECOMMENDATIONS-2 slice 2 (grammar unification).** `mch node prune [NODE]` gained a
   single-node form (previews, `--yes` deletes, refuses a still-managed node — "retire it first"),
   converging `mch node remove` into it; `remove` is now a hidden deprecated alias kept only as the
