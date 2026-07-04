@@ -87,6 +87,17 @@ class CommandCatalog:
             return SUPPORTED
         return UNSUPPORTED
 
+    def flags(self, command: str) -> set[str]:
+        """Return the upstream flags for a command (empty set if unknown/none).
+
+        Flags: ``serial`` (USB/serial-only — cannot run over the mesh), ``reboot`` (only takes
+        effect after the node reboots), ``build`` (compile-time gated), ``destructive``.
+        """
+        entry = self._match_command(command)
+        if entry is None:
+            return set()
+        return set(entry.get("flags", []))
+
 
 def _normalise_version(raw: str | None) -> str | None:
     """Extract a bare ``vX.Y.Z`` release from a firmware ``ver`` reply, or None if unparseable.
@@ -140,3 +151,16 @@ def command_support(
         log.debug("command catalogue unavailable, skipping compatibility check: %s", exc)
         return UNKNOWN
     return cat.support(command, node_ver)
+
+
+def command_flags(command: str, catalog: CommandCatalog | None = None) -> set[str]:
+    """Convenience wrapper: upstream flags for a command using the bundled catalogue.
+
+    Any load failure degrades to an empty set so an advisory check can never break the caller.
+    """
+    try:
+        cat = catalog or load_command_catalog()
+    except RuntimeError as exc:
+        log.debug("command catalogue unavailable, skipping flag check: %s", exc)
+        return set()
+    return cat.flags(command)

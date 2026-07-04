@@ -36,11 +36,18 @@
     },
     "erase": {
       "added_in": null,
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial",
+        "destructive"
+      ]
     },
     "get acl": {
       "added_in": "v1.9.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial"
+      ]
     },
     "get adc.multiplier": {
       "added_in": "v1.11.0",
@@ -64,31 +71,52 @@
     },
     "get bootloader.ver": {
       "added_in": "v1.14.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get bridge.baud": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get bridge.channel": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get bridge.delay": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get bridge.enabled": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get bridge.secret": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get bridge.source": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get bridge.type": {
       "added_in": "v1.10.0",
@@ -120,7 +148,11 @@
     },
     "get freq": {
       "added_in": null,
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial",
+        "reboot"
+      ]
     },
     "get guest.password": {
       "added_in": null,
@@ -160,11 +192,18 @@
     },
     "get powersaving": {
       "added_in": "v1.12.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get prv.key": {
       "added_in": "v1.8.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial",
+        "reboot"
+      ]
     },
     "get public.key": {
       "added_in": "v1.4.2",
@@ -172,27 +211,45 @@
     },
     "get pwrmgt.bootmv": {
       "added_in": "v1.12.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get pwrmgt.bootreason": {
       "added_in": "v1.12.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get pwrmgt.source": {
       "added_in": "v1.12.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get pwrmgt.support": {
       "added_in": "v1.12.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get radio": {
       "added_in": null,
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "reboot"
+      ]
     },
     "get radio.rxgain": {
       "added_in": "v1.14.1",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "get repeat": {
       "added_in": null,
@@ -216,31 +273,52 @@
     },
     "gps": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "gps advert": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "gps off": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "gps on": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "gps setloc": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "gps sync": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "log": {
       "added_in": null,
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial"
+      ]
     },
     "log erase": {
       "added_in": null,
@@ -268,7 +346,10 @@
     },
     "poweroff": {
       "added_in": "v1.14.1",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "destructive"
+      ]
     },
     "reboot": {
       "added_in": null,
@@ -356,27 +437,45 @@
     },
     "set bridge.baud": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set bridge.channel": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set bridge.delay": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set bridge.enabled": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set bridge.secret": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set bridge.source": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set direct.txdelay": {
       "added_in": null,
@@ -404,7 +503,11 @@
     },
     "set freq": {
       "added_in": null,
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial",
+        "reboot"
+      ]
     },
     "set guest.password": {
       "added_in": null,
@@ -444,19 +547,32 @@
     },
     "set powersaving": {
       "added_in": "v1.12.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set prv.key": {
       "added_in": "v1.8.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial",
+        "reboot"
+      ]
     },
     "set radio": {
       "added_in": null,
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "reboot"
+      ]
     },
     "set radio.rxgain": {
       "added_in": "v1.14.1",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "build"
+      ]
     },
     "set repeat": {
       "added_in": null,
@@ -480,7 +596,10 @@
     },
     "shutdown": {
       "added_in": "v1.14.1",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "destructive"
+      ]
     },
     "start ota": {
       "added_in": null,
@@ -488,15 +607,24 @@
     },
     "stats-core": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial"
+      ]
     },
     "stats-packets": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial"
+      ]
     },
     "stats-radio": {
       "added_in": "v1.10.0",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "flags": [
+        "serial"
+      ]
     },
     "tempradio": {
       "added_in": "v1.7.4",
@@ -512,7 +640,7 @@
     }
   },
   "current_version": "v1.16.0",
-  "generated_at": "2026-07-04T07:51:35+00:00",
+  "generated_at": "2026-07-04T08:20:54+00:00",
   "source_url": "https://raw.githubusercontent.com/meshcore-cz/meshcore-index/main/src/lib/repeaterCommands.js",
   "version_order": [
     "v1.0.0a",

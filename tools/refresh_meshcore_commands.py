@@ -89,10 +89,17 @@ def flatten_commands(command_groups: list[dict]) -> dict[str, dict]:
     commands: dict[str, dict] = {}
 
     def record(invocation: str, entry: dict) -> None:
-        commands[invocation] = {
+        record_entry: dict = {
             "added_in": entry.get("addedIn"),  # None => present since base_version
             "deprecated_at": entry.get("deprecatedAt"),
         }
+        # Carry the upstream flags (serial=USB-only, reboot=takes effect after reboot,
+        # build=compile-time gated, destructive). mch acts on serial/reboot; the rest are stored
+        # for completeness. Only when present, to keep the vendored file tidy.
+        flags = entry.get("flags")
+        if flags:
+            record_entry["flags"] = list(flags)
+        commands[invocation] = record_entry
 
     for group in command_groups:
         for entry in group.get("commands", []):
