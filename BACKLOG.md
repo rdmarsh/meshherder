@@ -405,7 +405,12 @@ fetch). Open follow-ups:
   untested; was SUGGEST #19).
 - **`node add` onboarding pipeline (Phase 7 / ROADMAP Direction 1).** Unify the commission wizard
   modes (new/replace/adopt) under one `mch node add` entry point, aligned with the auth-first
-  onboarding work. Design-heavy; the largest piece — its own design + PR.
+  onboarding work. Design-heavy; the largest piece — its own design + PR. **Deliverable 1 drafted
+  (Unreleased, 2026-07-04): `docs/onboarding-pipeline.md` — awaiting operator review before any
+  code.** One decision the doc surfaces for the operator: whether the interactive `mch` wizard may
+  write `secrets.yaml` itself (with guard rails) given the "Won't Do" rule against `mchd`
+  auto-editing secrets — if not approved, the wizard keeps printing the snippet and the rest of the
+  design proceeds. No implementation until the doc is approved (RECOMMENDATIONS-2 slice 4).
 
 - Add management path diagnostics and recovery controls: store/display the selected path, retain
   bounded successful-path history, and provide an explicit path-reset operation.

@@ -1,5 +1,27 @@
 # Recommendations Part 2 — CLI UX and workflow
 
+> ## Progress (updated 2026-07-04)
+>
+> All gates green throughout (`pytest` 970 passing, `ruff`, `mypy src`). Each slice on its own
+> branch, merged `--no-ff` to `main`.
+>
+> - **Slice 1 (operator-first UX) — DONE.** Help-text rewrite with a banned-jargon guard test;
+>   `mch help selectors`/`concepts`; top-level `mch status`/`mch sync`; exit codes documented +
+>   tested; shell-completion docs; daemon-down hint fixed. **Deferred: S1.3** (drop the `fleet status`
+>   single-match magic switch) — it requires a *released* version carrying the `mch node show` hint
+>   first, and everything is still Unreleased. Cut the pending release (or get an explicit OK to break
+>   early), then remove the switch.
+> - **Slice 2 (grammar unification) — DONE.** `node prune [NODE]` absorbs `node remove` (now a hidden
+>   deprecated alias, kept as the `--force` escape hatch); `node path --apply` previews by default;
+>   scope-flag and mutation conventions codified in `mch help concepts` + DESIGN.md. (No release was
+>   cut first, so `remove` was kept as an alias rather than deleted — revisit when a release ships.)
+> - **Slice 3 (`--json` + firmware fleet views) — DONE.** `--json` on the read commands (report model
+>   verbatim, API-parity pinned by a real-socket contract test); fleet-wide firmware currency (VER
+>   `!` marker + advisory footer, never a fault); dead `ghosts`/`unseen_nodes` categories removed.
+> - **Slice 4 (`mch node add` pipeline) — DESIGN DRAFTED, awaiting operator review.**
+>   `docs/onboarding-pipeline.md` is Deliverable 1; no code until it is approved. It surfaces one
+>   decision for the operator: whether the interactive wizard may write `secrets.yaml` itself.
+
 A follow-up review of Mesh Herder at **v0.20.1 + unreleased sweep work** (commit `d22ffd3`,
 2026-07-04), written — like part 1 (`RECOMMENDATIONS.md`) — as a work plan another AI model or
 human can execute item by item.
