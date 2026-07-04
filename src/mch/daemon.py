@@ -991,7 +991,9 @@ async def _dispatch(
             return {"ok": False, "error": str(exc)}
         if not dry_run:
             for candidate in candidates:
-                await db.delete_fact(candidate["pubkey"], candidate["key"])
+                # pubkey and key are always non-None strings here (node.pubkey / fact.key);
+                # the candidate dict's mixed value types widen to str | None, so pin them.
+                await db.delete_fact(str(candidate["pubkey"]), str(candidate["key"]))
         return {
             "ok": True,
             "data": {

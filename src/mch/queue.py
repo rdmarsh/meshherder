@@ -34,6 +34,7 @@ from mch.config import (
     NodeConfig,
     OperationConfig,
     RadioConfig,
+    SettingConfig,
     _parse_radio,
     resolve_desired,
     resolve_desired_configs,
@@ -293,6 +294,16 @@ def resolved_fact_keys(
     }
 
 
+def _desired_radio_value(settings: dict[str, SettingConfig]) -> str | None:
+    """Return the desired ``radio`` value from a settings map, or None if unset.
+
+    Binding ``.get("radio")`` to a local lets the type checker narrow the ``SettingConfig |
+    None``; two separate ``.get()`` calls in a conditional expression would not narrow.
+    """
+    sc = settings.get("radio")
+    return sc.desired if sc else None
+
+
 def _radio_from_setting(raw: str | None, source: str) -> _RadioCandidate | None:
     if raw is None:
         return None
@@ -390,22 +401,21 @@ def radio_recovery_candidates(
         _radio_from_config(config.gateway.radio, "gateway.radio"),
         _radio_from_config(global_cfg.via_radio if global_cfg else None, "global via_radio"),
         _radio_from_setting(
-            global_cfg.settings.get("radio").desired
-            if global_cfg and global_cfg.settings.get("radio") else None,
+            _desired_radio_value(global_cfg.settings) if global_cfg else None,
             "global desired radio",
         ),
     ]
     for group in config.groups:
         configured.append(_radio_from_config(group.via_radio, f"group {group.name} via_radio"))
         configured.append(_radio_from_setting(
-            group.settings.get("radio").desired if group.settings.get("radio") else None,
+            _desired_radio_value(group.settings),
             f"group {group.name} desired radio",
         ))
     for node in config.nodes:
         label = node.label or node.pubkey_prefix
         configured.append(_radio_from_config(node.via_radio, f"node {label} via_radio"))
         configured.append(_radio_from_setting(
-            node.settings.get("radio").desired if node.settings.get("radio") else None,
+            _desired_radio_value(node.settings),
             f"node {label} desired radio",
         ))
 

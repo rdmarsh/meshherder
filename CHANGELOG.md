@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Fixed the 7 mypy errors and pinned CI tool versions.** Narrowed the `SettingConfig | None`
+  radio-lookups in `queue.py` via a `_desired_radio_value` helper, typed the discovery
+  formatters' inputs, and pinned the `clean_facts` delete args to `str`; `mypy src` is clean again.
+  Added `ci-constraints.txt` (mypy/ruff/pytest/pytest-asyncio pins) applied in CI so an upstream
+  tool release can't silently redden `main` — the `dev` extra stays loose for local development.
 - **`mch node contacts` and commission replace/scan now use the DB inventory (sunset fix).**
   `mch node contacts` filtered gateway contacts against `config.nodes` — always empty under the
   strict daemon — so it listed every managed node as unmanaged and printed config.yaml snippets that

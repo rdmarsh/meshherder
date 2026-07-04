@@ -1011,7 +1011,7 @@ def _render_discovery(data: dict[str, Any]) -> None:
         ))
 
 
-def _discovery_type(value: object) -> str:
+def _discovery_type(value: Any) -> str:
     names = {1: "cli", 2: "repeater", 3: "room"}
     try:
         return names.get(int(value), str(value))
@@ -1019,7 +1019,7 @@ def _discovery_type(value: object) -> str:
         return "-"
 
 
-def _discovery_snr(value: object) -> str:
+def _discovery_snr(value: Any) -> str:
     try:
         return f"{float(value):.1f}"
     except (TypeError, ValueError):
