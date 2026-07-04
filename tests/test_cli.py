@@ -2205,6 +2205,56 @@ def test_exec_free_command_shows_output():
     assert "v1.14.1" in result.output
 
 
+def _node_resp_with_ver(ver):
+    data = dict(_NODE_RESP["data"])
+    data["facts"] = {"ver": ver}
+    return {"ok": True, "data": data}
+
+
+def test_exec_warns_when_command_newer_than_node_firmware():
+    """exec advises (but does not block) when a command predates the node's firmware."""
+    runner = CliRunner()
+    # poweroff was added in v1.14.1; a v1.13.0 node is too old.
+    with patch(
+        "mch.cli._rpc",
+        side_effect=[_node_resp_with_ver("v1.13.0"), {"ok": True, "data": "(sent)"}],
+    ):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "node", "exec", "site-a", "poweroff", "--yes"]
+        )
+    assert result.exit_code == 0  # advisory only — still runs
+    combined = result.output.lower() + (result.stderr or "").lower()
+    assert "warning" in combined and "firmware" in combined
+
+
+def test_exec_no_warning_when_command_supported():
+    """A command available on the node's firmware produces no compatibility warning."""
+    runner = CliRunner()
+    with patch(
+        "mch.cli._rpc",
+        side_effect=[_node_resp_with_ver("v1.15.0"), {"ok": True, "data": "(sent)"}],
+    ):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "node", "exec", "site-a", "poweroff", "--yes"]
+        )
+    assert result.exit_code == 0
+    assert "warning" not in (result.output.lower() + (result.stderr or "").lower())
+
+
+def test_exec_no_warning_when_node_version_unknown():
+    """No firmware fact -> stay silent (never warn on a guess)."""
+    runner = CliRunner()
+    with patch(
+        "mch.cli._rpc",
+        side_effect=[_NODE_RESP, {"ok": True, "data": "(sent)"}],  # facts: {} -> no ver
+    ):
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "node", "exec", "site-a", "poweroff", "--yes"]
+        )
+    assert result.exit_code == 0
+    assert "warning" not in (result.output.lower() + (result.stderr or "").lower())
+
+
 def test_exec_confirm_with_yes_skips_prompt():
     """exec with --yes on a confirm command (reboot) runs without prompting."""
     runner = CliRunner()

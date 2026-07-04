@@ -5,6 +5,16 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Advisory firmware/command compatibility warning in `mch node exec`.** Before sending, mch now
+  checks whether the command existed in the node's observed firmware version and, if the command is
+  *newer* than the node's `ver`, prints a one-line warning and still runs it — advisory only, never
+  a block (the node may have been upgraded past our snapshot, and the operator knows more than we
+  do). The command-availability data (first firmware version per command) is vendored into
+  `src/mch/data/repeater_commands.json` from the MeshCore Ninja cheat sheet
+  (`src/lib/repeaterCommands.js`, MIT), so **mch makes no network call at runtime** — a maintainer
+  refreshes it with `tools/refresh_meshcore_commands.py` and commits it (same vendoring pattern as
+  `networks.yaml`). New `mch.command_catalog` module (`load_command_catalog`, `command_support`).
+
 - **Commissioning radio presets from the MeshCore Ninja catalogue (vendored, offline).** `mch node
   new` now offers the official regional radio presets (Australia, New Zealand, EU/UK, USA/Canada, …)
   at the radio prompt, each mapped to a `freq,bw,sf,cr` tuple. The data is vendored into
