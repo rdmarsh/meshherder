@@ -8,11 +8,14 @@ from pathlib import Path
 import pytest
 
 from mch.command_catalog import (
+    CURRENT,
+    OUTDATED,
     SUPPORTED,
     UNKNOWN,
     UNSUPPORTED,
     command_flags,
     command_support,
+    firmware_currency,
     load_command_catalog,
 )
 
@@ -109,6 +112,46 @@ def test_command_with_no_flags_returns_empty() -> None:
 
 def test_flags_of_unknown_command_is_empty() -> None:
     assert command_flags("frobnicate") == set()
+
+
+# firmware_currency(node_ver) -> how a node's firmware compares to the latest known release
+
+def test_currency_latest_is_current() -> None:
+    cat = load_command_catalog()
+    cur = firmware_currency(cat.current_version)
+    assert cur.status == CURRENT
+    assert cur.releases_behind == 0
+    assert cur.latest == cat.current_version
+
+
+def test_currency_older_is_outdated_with_release_count() -> None:
+    cat = load_command_catalog()
+    # v1.15.0 is exactly one release behind v1.16.0 in the current snapshot.
+    cur = firmware_currency("v1.15.0")
+    assert cur.status == OUTDATED
+    assert cur.releases_behind == 1
+    assert cur.latest == cat.current_version
+
+
+def test_currency_counts_multiple_releases_behind() -> None:
+    # v1.14.0 -> v1.14.1 -> v1.15.0 -> v1.16.0 == 3 releases behind.
+    assert firmware_currency("v1.14.0").releases_behind == 3
+
+
+def test_currency_strips_build_suffix() -> None:
+    cat = load_command_catalog()
+    assert firmware_currency(f"{cat.current_version}-abc123 (Build: x)").status == CURRENT
+
+
+def test_currency_unknown_when_unparseable_or_untracked() -> None:
+    assert firmware_currency(None).status == UNKNOWN
+    assert firmware_currency("???").status == UNKNOWN
+    assert firmware_currency("v9.9.9").status == UNKNOWN  # newer than the catalogue knows
+
+
+def test_currency_with_explicit_catalog() -> None:
+    cat = load_command_catalog()
+    assert cat.firmware_currency("v1.15.0").status == OUTDATED
 
 
 def test_load_from_explicit_path(tmp_path: Path) -> None:

@@ -29,8 +29,27 @@ SUPPORTED = "supported"
 UNSUPPORTED = "unsupported"
 UNKNOWN = "unknown"
 
+# firmware_currency() statuses (UNKNOWN is shared).
+CURRENT = "current"
+OUTDATED = "outdated"
+
 # A firmware `ver` reply looks like "v1.14.1-467959c (Build: Jun 6 2026)"; we want the release only.
 _VERSION_RE = re.compile(r"^v?(\d+(?:\.\d+)*[a-z]?)")
+
+
+@dataclass
+class FirmwareCurrency:
+    """How a node's firmware compares to the latest release the catalogue knows.
+
+    ``status`` is CURRENT / OUTDATED / UNKNOWN; ``releases_behind`` is how many tracked releases
+    older the node is (0 unless OUTDATED); ``latest`` is the reference release (the catalogue's
+    ``current_version``). UNKNOWN covers an unparseable/absent ``ver`` and a version newer than the
+    vendored snapshot knows — in which case a maintainer should refresh the catalogue.
+    """
+
+    status: str
+    latest: str
+    releases_behind: int = 0
 
 
 @dataclass
@@ -98,6 +117,22 @@ class CommandCatalog:
             return set()
         return set(entry.get("flags", []))
 
+    def firmware_currency(self, node_ver: str | None) -> FirmwareCurrency:
+        """Compare a node's firmware ``ver`` against the latest known release (read-only signal).
+
+        Advisory only — it never gates enforcement. UNKNOWN whenever we cannot judge: unparseable
+        ``ver``, or a version not in our vendored ``version_order`` (including one *newer* than the
+        catalogue, which means the snapshot wants refreshing).
+        """
+        latest = self.current_version
+        release = _normalise_version(node_ver)
+        if release not in self.version_order or latest not in self.version_order:
+            return FirmwareCurrency(UNKNOWN, latest)
+        behind = self.version_order.index(latest) - self.version_order.index(release)
+        if behind <= 0:
+            return FirmwareCurrency(CURRENT, latest)
+        return FirmwareCurrency(OUTDATED, latest, behind)
+
 
 def _normalise_version(raw: str | None) -> str | None:
     """Extract a bare ``vX.Y.Z`` release from a firmware ``ver`` reply, or None if unparseable.
@@ -164,3 +199,18 @@ def command_flags(command: str, catalog: CommandCatalog | None = None) -> set[st
         log.debug("command catalogue unavailable, skipping flag check: %s", exc)
         return set()
     return cat.flags(command)
+
+
+def firmware_currency(
+    node_ver: str | None, catalog: CommandCatalog | None = None
+) -> FirmwareCurrency:
+    """Convenience wrapper: firmware-currency signal for a node using the bundled catalogue.
+
+    Any load failure degrades to UNKNOWN so an advisory check can never break the caller.
+    """
+    try:
+        cat = catalog or load_command_catalog()
+    except RuntimeError as exc:
+        log.debug("command catalogue unavailable, skipping currency check: %s", exc)
+        return FirmwareCurrency(UNKNOWN, "")
+    return cat.firmware_currency(node_ver)
