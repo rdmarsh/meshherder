@@ -10,7 +10,8 @@
 > - **P1 CLI redesign (partial).** M2 `mch fleet issues`, M3 `mch node group`/`mch node label`,
 >   `mch node show` (+ hint from the fleet-status magic switch), and the low-risk moves
 >   `config suggest`→`fleet suggest`, `config validate`→`daemon validate`,
->   `node contacts`/`node admin`→`gateway …` (new `gateway` group, hidden back-compat aliases).
+>   `node contacts`/`node admin`→`gateway …` (new `gateway` group; old paths removed, no aliases —
+>   alpha software).
 > - **P2/P3 cleanup+missing (partial).** C1 (7 mypy errors fixed + `ci-constraints.txt` pinning),
 >   C3 (named DB migrations via `PRAGMA user_version`), C4 (retired `SUGGEST.md`), M1 (scheduled
 >   backup systemd unit + script), M5 (docs-drift guard test).

@@ -673,10 +673,6 @@ mch daemon status                    Show service status (mirror of systemctl st
 mch daemon logs [-n N] [-f]          Show the daemon process log from journald (not per-node activity)
 ```
 
-A few commands moved to the noun they act on: `config suggest` → `fleet suggest`, `config validate`
-→ `daemon validate`, `node contacts` → `gateway contacts`, and `node admin` → `gateway admin`. The
-old paths still work as hidden aliases for now but are deprecated — prefer the new names.
-
 `mch daemon validate` checks whatever it can read. On a production install, an ordinary operator account
 can validate the group-readable config file but may need `sudo mch daemon validate` to validate the
 mode-600 secrets file as well.

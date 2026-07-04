@@ -437,29 +437,6 @@ def gateway_group() -> None:
     """Operate the locally attached gateway node (admin console, contacts)."""
 
 
-def _register_moved_alias(
-    old_group: click.Group, target: click.Command, help_hint: str
-) -> None:
-    """Keep a moved command reachable under its old noun as a hidden deprecated alias.
-
-    The noun-group cleanup relocated a few commands to the noun they act on (e.g. `node admin`
-    → `gateway admin`). Per the "breaking CLI changes need aliases" rule the old path keeps
-    working for at least one minor release. The alias reuses the moved command's params and
-    callback verbatim — no duplicated option decorators to drift — and is hidden so only the
-    new path shows in `--help`. The deprecation itself is recorded in CHANGELOG.
-    """
-    old_group.add_command(
-        click.Command(
-            target.name,
-            params=list(target.params),
-            callback=target.callback,
-            help=help_hint,
-            hidden=True,
-            context_settings=dict(target.context_settings),
-        )
-    )
-
-
 # ---------------------------------------------------------------------------
 # validate
 # ---------------------------------------------------------------------------
@@ -530,10 +507,6 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
         click.echo(f"warning: {warning}", err=True)
     for warning in secrets_identity_warnings(cfg):
         click.echo(f"warning: {warning}", err=True)
-
-
-# `config validate` moved to `daemon validate` (it checks the daemon's YAML). Keep the old path.
-_register_moved_alias(config_group, validate_config, "Deprecated alias for `mch daemon validate`.")
 
 
 # ---------------------------------------------------------------------------
@@ -1376,10 +1349,6 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
 
 
-# `node contacts` moved to `gateway contacts` (it reads the gateway's contact store).
-_register_moved_alias(node_group, contacts, "Deprecated alias for `mch gateway contacts`.")
-
-
 @node_group.command("discover")
 @click.option(
     "--radio",
@@ -1904,10 +1873,6 @@ def suggest(ctx: click.Context, query: str | None) -> None:
     --policy fact) and at least one completed sync cycle to populate the count.
     """
     _show_suggestions(ctx, query)
-
-
-# `config suggest` moved to `fleet suggest` (it reports fleet state, does not touch config).
-_register_moved_alias(config_group, suggest, "Deprecated alias for `mch fleet suggest`.")
 
 
 def _show_suggestions(ctx: click.Context, query: str | None) -> None:
@@ -3126,10 +3091,6 @@ def admin(
         restart=restart,
         extra_args=meshcore_args,
     )
-
-
-# `node admin` moved to `gateway admin` (it operates the gateway serial port, not a managed node).
-_register_moved_alias(node_group, admin, "Deprecated alias for `mch gateway admin`.")
 
 
 # ---------------------------------------------------------------------------

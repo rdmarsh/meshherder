@@ -110,8 +110,7 @@ nodes). Exits 0 when clean and 2 when any issue is present, for cron alerting.
 Show suggested settings based on each node's neighbour count. With a match, shows
 detailed suggestions and the ready-to-run
 .B "mch config set"
-commands to apply them. (Moved from
-.BR "config suggest" .)
+commands to apply them.
 .TP
 .B fleet plan
 Show desired-versus-known changes without sending mesh commands or writing to
@@ -277,8 +276,7 @@ or require confirmation.
 Show repeater contacts visible to the gateway that are not yet managed in the DB,
 printing the
 .B "mch node adopt"
-command to bring each under management. (Moved from
-.BR "node contacts" .)
+command to bring each under management.
 .TP
 .B gateway admin \fR[\fICLI ARGS...\fR]
 Stop
@@ -287,8 +285,7 @@ run
 .B meshcore-cli
 against the configured gateway serial device, then restart
 .B mchd
-after the admin session. (Moved from
-.BR "node admin" .)
+after the admin session.
 .SS config \(em desired state and backup
 .TP
 .B config set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]

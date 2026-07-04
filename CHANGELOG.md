@@ -21,12 +21,12 @@ and backlog history. Dates use the project repository's commit dates.
   `mch config import <snapshot> --yes`. See INSTALL.md.
 - **Retired `SUGGEST.md`.** Its still-open items were confirmed already tracked in `BACKLOG.md`;
   the historical file and its README docs-table row were removed.
-- **Moved four commands to the noun they act on (with hidden back-compat aliases).**
-  `config suggest` → `fleet suggest`, `config validate` → `daemon validate`, `node contacts` →
-  `gateway contacts`, and `node admin` → `gateway admin` (a new `gateway` noun group operates the
-  locally attached gateway node). The old paths keep working as hidden, deprecated aliases for at
-  least one minor release; prefer the new names. README, the `mch.1` man page, and the website were
-  updated (the site's "minimal config" also dropped its daemon-bricking `nodes:`/`global:` block).
+- **Breaking: moved four commands to the noun they act on.** `config suggest` → `fleet suggest`,
+  `config validate` → `daemon validate`, `node contacts` → `gateway contacts`, and `node admin` →
+  `gateway admin` (a new `gateway` noun group operates the locally attached gateway node). The old
+  paths are removed (no aliases — alpha software); update any scripts. README, the `mch.1` man page,
+  and the website were updated (the site's "minimal config" also dropped its daemon-bricking
+  `nodes:`/`global:` block).
 - **New `mch node show NODE` command.** The single-node detail view (facts, settings, schedule,
   activity) is now an explicit command instead of only the "magic" single-match behaviour of
   `mch fleet status NODE`. That magic switch still works but now prints a one-line tip pointing at
