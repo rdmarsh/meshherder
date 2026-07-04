@@ -22,6 +22,7 @@ from typing import Any
 import click
 
 from mch import __version__
+from mch.command_catalog import UNSUPPORTED, command_support
 from mch.command_registry import (
     MAX_NODE_NAME_BYTES,
     parse_radio_tuple,
@@ -2004,6 +2005,16 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
     data = node_resp["data"]
     pubkey = data["pubkey"]
     label = data.get("label") or data["name"]
+
+    # Advisory only: warn (never block) if the command predates the node's known firmware. The node
+    # may have been upgraded past our vendored catalogue, so an unknown result stays silent.
+    node_ver = (data.get("facts") or {}).get("ver")
+    if command_support(cmd_str, node_ver) == UNSUPPORTED:
+        click.echo(
+            f"warning: '{cmd_str}' is newer than {label}'s firmware ({node_ver}); "
+            "it may not be supported",
+            err=True,
+        )
 
     if confirm_exec_command(cmd_str) and not yes:
         click.echo(f"  {cmd_str}  {label}  ({pubkey[:8]})")

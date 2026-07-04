@@ -360,13 +360,15 @@ fetch). Open follow-ups:
     is newer than the node's observed `ver`, warn (and let the operator proceed).
 
   **Suggested slices:**
-  1. Data only (no behaviour): refresh tool → vendored `repeater_commands.json`;
-     `load_command_catalog()` + `command_support(command, node_ver) -> supported|unsupported|unknown`
-     handling the `ver` fact's build suffix (`"v1.14.1-467959c (Build: …)"` → `v1.14.1`) and mch's
-     `get x`/`set x` forms; tests offline.
-  2. Advisory **warn in `mch exec`** when `command_support` is `unsupported` for the node's `ver`
-     (never blocks; `unknown` stays silent).
-  3. (Separate, needs UX design) firmware-currency signal per node (`up-to-date`/`needs-updating`)
+  1. DONE (Unreleased): `tools/refresh_meshcore_commands.py` (Node imports the MIT
+     `repeaterCommands.js` and flattens it) → vendored `src/mch/data/repeater_commands.json`;
+     `mch.command_catalog.load_command_catalog()` + `command_support(command, node_ver) ->
+     supported|unsupported|unknown` handling the `ver` build suffix and `get x`/`set x` forms;
+     matches by longest catalogue-key prefix; offline tests (`tests/test_command_catalog.py`).
+  2. DONE (Unreleased): `mch node exec` warns (never blocks) when `command_support` is `unsupported`
+     for the node's observed `ver`; `unknown` stays silent.
+  3. (Separate, needs UX design — still open) firmware-currency signal per node
+     (`up-to-date`/`needs-updating`)
      from `CURRENT_VERSION`/newest-seen vs the node's `ver` — ties into CLAUDE.md "Future scope:
      firmware age reporting" and a possible read-only reporting column. Not a policy state.
 

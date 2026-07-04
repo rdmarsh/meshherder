@@ -11,6 +11,19 @@ python tools/refresh_meshcore_networks.py                 # fetch upstream and r
 python tools/refresh_meshcore_networks.py --from data.json # regenerate from a local copy
 ```
 
+## `refresh_meshcore_commands.py`
+
+Regenerate `src/mch/data/repeater_commands.json` (the per-command "first firmware version"
+data that powers the advisory `mch node exec` compatibility warning) from the
+[MeshCore Ninja](https://meshcore.ninja) cheat sheet's `src/lib/repeaterCommands.js` (MIT — attribute
+MeshCore Ninja). Requires Node (the module is imported, not parsed). mch never fetches this at
+runtime — run the tool occasionally and commit the refreshed file:
+
+```bash
+python tools/refresh_meshcore_commands.py                # fetch upstream and rewrite the file
+python tools/refresh_meshcore_commands.py --from cmds.js # regenerate from a local copy
+```
+
 ## `query_node_info.py`
 
 Query a MeshCore repeater using anonymous request types.
