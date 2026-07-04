@@ -327,8 +327,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   known-good cached profile.
 - Add concurrency coverage for scheduled sync, manual sync, `exec`, and commissioning ownership.
 - Add compact per-sync outcome counters for contacts, writes attempted, and settings changed.
-- Add named DB migrations, typed MeshCore contact data, and smaller ownership-focused modules as
-  persistence and queue behavior grow.
+- Add typed MeshCore contact data and smaller ownership-focused modules as persistence and queue
+  behavior grow. (Named DB migrations DONE Unreleased: `PRAGMA user_version` + ordered
+  `_MIGRATIONS` list in `db.py`, adopting the former ad-hoc ALTERs as migration 1.)
 - Reduce duplicated status/issue assembly and continue converging terminology on `mch status`
   rather than legacy node-detail command wording.
 - Polish `mch validate` output ordering and revisit whether `mch remove` and `mch prune` should

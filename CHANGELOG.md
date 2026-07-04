@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Named DB migrations.** Schema evolution now runs through an ordered `_MIGRATIONS` list gated by
+  SQLite's `PRAGMA user_version`, replacing the ad-hoc `try: ALTER TABLE … except` patches in
+  `Database.open()`. Since the DB is the only copy of desired state, versioned migrations make
+  schema changes auditable and each run exactly once; the former column additions are adopted as
+  migration 1 (tolerant of a pre-versioning DB that already has them).
 - **Docs-drift guard.** A new test parses every `mch <group> <command>` out of README, the man
   page, and the website and asserts each resolves in the real CLI (hidden aliases count), so a
   renamed or removed command can't silently outlive its documentation — the class of drift that

@@ -118,6 +118,28 @@ CREATE TABLE IF NOT EXISTS setting_history (
 """
 
 
+# Named, ordered schema migrations tracked by SQLite's PRAGMA user_version (the DB is now the only
+# copy of desired state — post-sunset — so unversioned ad-hoc ALTERs are a real operator risk;
+# RECOMMENDATIONS C3). `_SCHEMA` above is the base (CREATE TABLE IF NOT EXISTS, always applied);
+# each migration below upgrades user_version n-1 -> n. Append new migrations; never edit a released
+# one. Migration 1 adopts the columns that were previously added by ad-hoc ALTERs in open(): a
+# legacy DB from before versioning sits at user_version 0 with those columns already present, so the
+# apply step tolerates a duplicate-column error for this one-time adoption. Later migrations rely on
+# the version gate running them exactly once and need no such guard.
+_MIGRATIONS: list[tuple[int, list[str]]] = [
+    (1, [
+        # add label column to existing databases
+        "ALTER TABLE nodes ADD COLUMN label TEXT NOT NULL DEFAULT ''",
+        # count write attempts for each setting's current desired value
+        "ALTER TABLE settings ADD COLUMN update_attempts INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE logs ADD COLUMN display_pubkey TEXT",
+        "ALTER TABLE logs ADD COLUMN display_label TEXT",
+    ]),
+]
+
+_CURRENT_SCHEMA_VERSION = _MIGRATIONS[-1][0] if _MIGRATIONS else 0
+
+
 class Database:
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -127,30 +149,31 @@ class Database:
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
-        # migration: add label column to existing databases
-        try:
-            await self._db.execute(
-                "ALTER TABLE nodes ADD COLUMN label TEXT NOT NULL DEFAULT ''"
-            )
-        except aiosqlite.OperationalError:
-            pass  # column already exists
-        # migration: count write attempts for each setting's current desired value
-        try:
-            await self._db.execute(
-                "ALTER TABLE settings ADD COLUMN update_attempts INTEGER NOT NULL DEFAULT 0"
-            )
-        except aiosqlite.OperationalError:
-            pass  # column already exists
-        try:
-            await self._db.execute("ALTER TABLE logs ADD COLUMN display_pubkey TEXT")
-        except aiosqlite.OperationalError:
-            pass  # column already exists
-        try:
-            await self._db.execute("ALTER TABLE logs ADD COLUMN display_label TEXT")
-        except aiosqlite.OperationalError:
-            pass  # column already exists
+        await self._run_migrations()
         await self._db.commit()
         log.debug("database opened: %s", self._path)
+
+    async def _run_migrations(self) -> None:
+        """Apply any schema migrations newer than the DB's recorded user_version."""
+        db = self._db_required()
+        async with db.execute("PRAGMA user_version") as cur:
+            row = await cur.fetchone()
+        version = int(row[0]) if row else 0
+        for target, statements in _MIGRATIONS:
+            if version >= target:
+                continue
+            for sql in statements:
+                try:
+                    await db.execute(sql)
+                except aiosqlite.OperationalError as exc:
+                    # Tolerate a column a pre-versioning (ad-hoc ALTER) DB already carries; this
+                    # only matters for the one-time adoption in migration 1 (see _MIGRATIONS).
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            # PRAGMA cannot be parameterised; target is an int literal we control.
+            await db.execute(f"PRAGMA user_version = {target}")
+            version = target
+            log.info("applied DB migration → schema version %d", target)
 
     async def close(self) -> None:
         if self._db:
