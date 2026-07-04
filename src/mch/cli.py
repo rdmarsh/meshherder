@@ -37,7 +37,7 @@ from mch.config import (
 )
 from mch.config import load as load_config
 from mch.meshkey import derive_public_key, generate_private_key
-from mch.recommend import load_radio_presets
+from mch.recommend import fetch_community_radio_presets, load_radio_presets
 
 DEFAULT_SOCKET = "/run/meshherder/mchd.sock"
 DEFAULT_CONFIG = Path("/etc/meshherder/config.yaml")
@@ -2584,15 +2584,23 @@ def _validate_radio_tuple(raw: str) -> tuple[str, str, str, str] | None:
 
 
 def _profile_radio_options() -> list[tuple[str, str]]:
-    try:
-        presets = load_radio_presets()
-    except RuntimeError:
-        return []
-    return [
-        (preset.name, preset.value)
-        for preset in presets
-        if _validate_radio_tuple(preset.value)
-    ]
+    # Prefer the live community presets (api.meshcore.nz — what the MeshCore app shows); fall back
+    # to the bundled profiles.yaml presets when offline so commissioning still works without
+    # internet. Both are validated so a malformed tuple never reaches the prompt.
+    presets = fetch_community_radio_presets()
+    if not presets:
+        try:
+            presets = load_radio_presets()
+        except RuntimeError:
+            return []
+    seen: set[str] = set()
+    options: list[tuple[str, str]] = []
+    for preset in presets:
+        if preset.value in seen or not _validate_radio_tuple(preset.value):
+            continue
+        seen.add(preset.value)
+        options.append((preset.name, preset.value))
+    return options
 
 
 def _prompt_radio_all(

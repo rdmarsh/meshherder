@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import io
+import json
+from contextlib import contextmanager
+from unittest.mock import patch
+
 import pytest
 
 from mch.recommend import (
     Profile,
     RadioPreset,
     UniversalSetting,
+    community_radio_presets_url,
+    fetch_community_radio_presets,
     get_profile,
     load_profiles,
     load_radio_presets,
@@ -170,3 +177,81 @@ def test_load_radio_presets_falls_back_to_universal_radio(tmp_path):
     )
     presets = load_radio_presets(profiles_file=custom)
     assert presets == [RadioPreset("Profile radio", "915.075,125,9,5", "Old schema radio")]
+
+
+# ---------------------------------------------------------------------------
+# fetch_community_radio_presets (api.meshcore.nz)
+# ---------------------------------------------------------------------------
+
+# A trimmed sample of the real api.meshcore.nz/api/v1/config payload.
+_MESHCORE_NZ_SAMPLE = {
+    "config": {
+        "suggested_radio_settings": {
+            "entries": [
+                {
+                    "title": "Australia",
+                    "description": "915.800MHz / SF10 / BW250 / CR5",
+                    "frequency": "915.800",
+                    "spreading_factor": "10",
+                    "bandwidth": "250",
+                    "coding_rate": "5",
+                },
+                {
+                    "title": "New Zealand (Narrow)",
+                    "description": "917.375MHz / SF7 / BW62.5 / CR5",
+                    "frequency": "917.375",
+                    "spreading_factor": "7",
+                    "bandwidth": "62.5",
+                    "coding_rate": "5",
+                },
+            ]
+        }
+    }
+}
+
+
+def _fake_urlopen(payload):
+    @contextmanager
+    def _cm(url, timeout):
+        yield io.BytesIO(json.dumps(payload).encode())
+    return _cm
+
+
+def test_fetch_community_radio_presets_maps_entries_to_radio_tuples():
+    with patch("mch.recommend._urlopen", _fake_urlopen(_MESHCORE_NZ_SAMPLE)):
+        presets = fetch_community_radio_presets()
+    assert presets == [
+        RadioPreset("Australia", "915.800,250,10,5", "915.800MHz / SF10 / BW250 / CR5"),
+        RadioPreset("New Zealand (Narrow)", "917.375,62.5,7,5", "917.375MHz / SF7 / BW62.5 / CR5"),
+    ]
+
+
+def test_fetch_community_radio_presets_skips_incomplete_entries():
+    payload = {"config": {"suggested_radio_settings": {"entries": [
+        {"title": "Good", "frequency": "915.075", "bandwidth": "125",
+         "spreading_factor": "9", "coding_rate": "5"},
+        {"title": "Missing CR", "frequency": "915.075", "bandwidth": "125",
+         "spreading_factor": "9"},
+    ]}}}
+    with patch("mch.recommend._urlopen", _fake_urlopen(payload)):
+        presets = fetch_community_radio_presets()
+    assert [p.name for p in presets] == ["Good"]
+
+
+def test_fetch_community_radio_presets_unexpected_shape_returns_empty():
+    with patch("mch.recommend._urlopen", _fake_urlopen({"unexpected": True})):
+        assert fetch_community_radio_presets() == []
+
+
+def test_fetch_community_radio_presets_offline_returns_empty():
+    def _boom(url, timeout):
+        raise OSError("offline")
+    with patch("mch.recommend._urlopen", _boom):
+        assert fetch_community_radio_presets() == []
+
+
+def test_community_radio_presets_url_env_override(monkeypatch):
+    monkeypatch.setenv("MCH_RADIO_PRESETS_URL", "https://example.test/config")
+    assert community_radio_presets_url() == "https://example.test/config"
+    monkeypatch.delenv("MCH_RADIO_PRESETS_URL")
+    assert community_radio_presets_url() == "https://api.meshcore.nz/api/v1/config"

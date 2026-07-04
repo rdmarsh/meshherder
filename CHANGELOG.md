@@ -5,6 +5,14 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Commissioning radio presets from the MeshCore app config API.** `mch node new` now offers the
+  community region presets from `https://api.meshcore.nz/api/v1/config` (the same list the MeshCore
+  app shows — Australia, New Zealand, EU/UK, USA/Canada, …) at the radio prompt, mapping each to a
+  `freq,bw,sf,cr` tuple. It falls back to the bundled `profiles.yaml` presets when offline so
+  commissioning still works without internet, and the source is overridable via
+  `MCH_RADIO_PRESETS_URL`. Outbound fetches now send an explicit User-Agent (some upstreams 403 the
+  default `Python-urllib` one).
+
 - **Named DB migrations.** Schema evolution now runs through an ordered `_MIGRATIONS` list gated by
   SQLite's `PRAGMA user_version`, replacing the ad-hoc `try: ALTER TABLE … except` patches in
   `Database.open()`. Since the DB is the only copy of desired state, versioned migrations make
