@@ -1,5 +1,9 @@
 # Recommendations — project review, todo, missing, cleanup
 
+> **Part 2 exists:** `RECOMMENDATIONS-2.md` (2026-07-04) sequences the remaining CLI-UX and
+> workflow work — the deferred items below plus new findings — into four executable slices.
+> Start there; this file is the historical record of the first sweep.
+
 > ## Progress (updated 2026-07-04, branch `recommendations-sweep`)
 >
 > **Done and committed** (all gates green: `pytest` 916 passed, `ruff`, `mypy src`):
