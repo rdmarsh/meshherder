@@ -396,11 +396,11 @@ fetch). Open follow-ups:
 
 - **CLI redesign, remaining steps.** Converge `node remove` into `node prune` (single retired-node
   vocabulary); unify the scope grammar (`config set/unset` use `--global`, `clean` uses `--all` —
-  pick one) and the mutation convention (preview-by-default + `--yes` everywhere). Add `--json`
+  decision in RECOMMENDATIONS-2 S2.1: keep both, codify the rule) and the mutation convention
+  (preview-by-default + `--yes` everywhere; `node path --apply` still prompts). Add `--json`
   output to the read commands (`fleet status/plan/issues/logs`, `node show`, `config show`) — the
-  report model already produces the JSON. Write the NODE selector grammar once (a `mch help
-  selectors` topic) and reference it. Document exit codes (0/1, and 2 = issues for
-  `fleet status`/`issues`). Document click shell completion (`_MCH_COMPLETE`) in INSTALL.
+  report model already produces the JSON. (DONE 2026-07-04: the `mch help selectors` topic, exit
+  codes 0/1/2 documented + tested, and shell-completion docs — RECOMMENDATIONS-2 slice 1.)
 - **C2 module splits (dedicated PR).** `cli.py` (~3k lines) → package (`render`, `commission`, one
   module per noun group); `queue.py` (~2.4k) → `scheduler`/`node_processor`/`pathing` behind the
   `WorkQueue` facade; `daemon._dispatch` (huge `if cmd == …` chain) → a `dict[str, Handler]`.
@@ -507,6 +507,15 @@ fetch). Open follow-ups:
 
 ## Done Recently
 
+- 2026-07-04: **RECOMMENDATIONS-2 slice 1 (operator-first UX).** Rewrote every command's `--help`
+  in operator language (jargon-banned, regression-tested); added `mch help selectors` /
+  `mch help concepts` topics; added top-level `mch status` / `mch sync` shortcuts; documented exit
+  codes (0/1/2) in README + man page + `mch help concepts` with pinning tests; documented shell
+  completion in INSTALL; fixed the daemon-down hint to point at `mch daemon status` / `mch daemon
+  logs`. Deferred within the slice: **S1.3 (drop the `fleet status` single-match magic switch)** —
+  it needs one *released* version carrying the `mch node show` hint first, and everything is still
+  Unreleased. Cut a release (see "Sunset follow-ups") or get explicit OK to break early, then remove
+  the switch.
 - 2026-07-04: Retired `SUGGEST.md` (historical review notes). Confirmed every still-open item it
   tracked (#12 migrations, #13 profile-cache path, #14 module split, #15 issue-assembly dedup,
   #16 typed contacts, #19 concurrency tests, #33 partial-commission retry, #35 wizard sentinels,

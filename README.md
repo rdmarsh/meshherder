@@ -628,6 +628,10 @@ man mchd
 ```
 
 ```
+mch status                          Shortcut for `mch fleet status` (the daily loop)
+mch sync                            Shortcut for `mch fleet sync`
+mch help selectors                  How to name a node on the command line
+mch help concepts                   Desired vs reported, policy, scope, sync, exit codes
 mch fleet status                    Fleet overview: state, label, group, firmware, neighbours, last seen
 mch fleet status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
                               Detail view: facts, all desired settings (config + group, including
@@ -675,6 +679,22 @@ mch daemon restart                   Restart mchd via systemd
 mch daemon status                    Show service status (mirror of systemctl status mchd)
 mch daemon logs [-n N] [-f]          Show the daemon process log from journald (not per-node activity)
 ```
+
+New to the vocabulary? `mch help selectors` explains how to name a node, and `mch help concepts`
+covers desired-vs-reported values, policy (enforce/audit/fact/skip), scope precedence, what a sync
+cycle does, and the exit codes below.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `1` | error (bad usage, daemon unreachable, command failed) |
+| `2` | issues present — **`mch fleet issues` only** |
+
+`mch fleet issues` exits `2` when any issue (drift, a problem state, an open node) is present, so a
+cron job can alert on it: `mch fleet issues >/dev/null || notify-me`. `mch fleet status` is a
+viewing command and always exits `0` — use `mch fleet issues` for health checks.
 
 `mch daemon validate` checks whatever it can read. On a production install, an ordinary operator account
 can validate the group-readable config file but may need `sudo mch daemon validate` to validate the

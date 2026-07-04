@@ -55,6 +55,45 @@ def _check(doc: str, pattern: re.Pattern[str]) -> None:
     )
 
 
+# Words that speak implementer, not operator. They stay fine in DESIGN.md and code comments, but
+# must not appear in any command's --help output (RECOMMENDATIONS-2 S1.1). \bDB\b catches the bare
+# abbreviation while allowing "database".
+_BANNED = re.compile(
+    r"\bDB\b|source of truth|sunset|eviction|policy-only override|projection",
+    re.IGNORECASE,
+)
+
+
+def _all_commands(
+    group: click.Group, prefix: tuple[str, ...] = ()
+) -> list[tuple[tuple[str, ...], click.Command]]:
+    """Every (path, command) pair in the tree, groups included, deduping hidden aliases by id."""
+    found: list[tuple[tuple[str, ...], click.Command]] = []
+    seen: set[int] = set()
+    for name, cmd in group.commands.items():
+        path = (*prefix, name)
+        if id(cmd) not in seen:
+            seen.add(id(cmd))
+            found.append((path, cmd))
+        if isinstance(cmd, click.Group):
+            found.extend(_all_commands(cmd, path))
+    return found
+
+
+def test_no_operator_jargon_in_help_output():
+    """No banned implementer jargon in any command's --help output (the S1.1 rewrite)."""
+    from click.testing import CliRunner
+
+    runner = CliRunner()
+    offenders: list[str] = []
+    for path, _cmd in _all_commands(cli):
+        result = runner.invoke(cli, [*path, "--help"])
+        assert result.exit_code == 0, f"mch {' '.join(path)} --help failed"
+        for match in _BANNED.finditer(result.output):
+            offenders.append(f"mch {' '.join(path)}: {match.group(0)!r}")
+    assert not offenders, "operator jargon leaked into --help output:\n" + "\n".join(offenders)
+
+
 def test_readme_cli_references_exist():
     _check("README.md", _MCH_RE)
 

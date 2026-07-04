@@ -435,6 +435,24 @@ def test_daemon_connection_failure_reports_config_ok(tmp_path):
     assert "config ok:" in result.output
 
 
+def test_daemon_down_hint_points_at_daemon_commands(tmp_path):
+    """The daemon-down hint suggests the real diagnostics, not the removed `mchd --help` (S1.7)."""
+    config = tmp_path / "config.yaml"
+    config.write_text("nodes: []\n")
+
+    async def fake_open_conn(*a, **kw):
+        raise ConnectionRefusedError
+
+    runner = CliRunner()
+    with patch("asyncio.open_unix_connection", fake_open_conn), \
+         patch("mch.cli.DEFAULT_CONFIG", config):
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "fleet", "status"])
+
+    assert "mch daemon status" in result.output
+    assert "mch daemon logs" in result.output
+    assert "mchd --help" not in result.output
+
+
 def test_path_command_shows_stored_route_metadata():
     result = _run(["node", "path", "site-a"], {"ok": True, "data": {
         "pubkey": "aabbccdd11223344",
@@ -886,6 +904,50 @@ def test_moved_commands_available_under_new_nouns():
     for path in (["node", "admin"], ["node", "contacts"],
                  ["config", "suggest"], ["config", "validate"]):
         assert runner.invoke(cli, [*path, "--help"]).exit_code != 0
+
+
+def test_fleet_status_with_issues_still_exits_zero():
+    """`fleet status` is a viewing command: it stays exit 0 even when issues are present.
+
+    The cron/alerting surface is `fleet issues` (exit 2), not `fleet status` (S1.5).
+    """
+    result = _run(["fleet", "status"], _status_resp(bad_state=[{
+        "pubkey": "aabbccdd" * 8, "label": "wip 07",
+        "name": "wip 07", "state": "configuring", "last_seen": None,
+    }]))
+    assert result.exit_code == 0
+
+
+def test_top_level_status_shortcut_forwards_to_fleet_status():
+    """`mch status` is a bare alias for `mch fleet status` (RECOMMENDATIONS-2 S1.4)."""
+    fleet = _run(["fleet", "status"], _status_resp())
+    shortcut = _run(["status"], _status_resp())
+    assert shortcut.exit_code == 0
+    assert shortcut.output == fleet.output
+
+
+def test_top_level_sync_shortcut_forwards_to_fleet_sync():
+    shortcut = _run(["sync"], {"ok": True, "data": "sync started"})
+    assert shortcut.exit_code == 0
+    assert "sync started" in shortcut.output
+
+
+def test_top_level_shortcuts_listed_in_help():
+    result = CliRunner().invoke(cli, ["--help"])
+    assert "Shortcut for `mch fleet status`" in result.output
+    assert "Shortcut for `mch fleet sync`" in result.output
+
+
+def test_help_topics_teach_vocabulary():
+    """`mch help selectors` / `mch help concepts` exist and cover the core vocabulary (S1.2)."""
+    runner = CliRunner()
+    selectors = runner.invoke(cli, ["help", "selectors"])
+    assert selectors.exit_code == 0
+    assert "pubkey prefix" in selectors.output and "mesh name" in selectors.output
+    concepts = runner.invoke(cli, ["help", "concepts"])
+    assert concepts.exit_code == 0
+    for word in ("enforce", "audit", "fact", "skip", "Exit codes"):
+        assert word in concepts.output
 
 
 def test_fleet_issues_clean_exits_zero():
@@ -1556,7 +1618,7 @@ def test_remove_prompt_can_decline_delete():
         )
     assert result.exit_code == 0
     mock_rpc.assert_called_once()
-    assert "Delete this local DB state?" in result.output
+    assert "Delete this node?" in result.output
     assert "not deleted" in result.output
 
 
@@ -1565,7 +1627,7 @@ def test_remove_yes_deletes_without_prompt():
         ["node", "remove", "old-site", "--yes"], _remove_resp(), _remove_resp(deleted=1)
     )
     assert result.exit_code == 0
-    assert "local DB node state" in result.output
+    assert "node to delete" in result.output
     assert "deleted 1 node(s)" in result.output
     assert "secrets.yaml is left unchanged" in result.output
 
@@ -3539,7 +3601,7 @@ def test_export_empty_reports_nothing_to_export():
         result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "config", "export"])
 
     assert result.exit_code == 0
-    assert "no desired state" in result.output.lower()
+    assert "nothing to export" in result.output.lower()
 
 
 def test_clean_settings_lists_candidates_without_deleting():

@@ -5,6 +5,23 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Operator-first CLI pass (RECOMMENDATIONS-2 slice 1).** A round of usability work aimed at the
+  "the UI is confusing" feedback, with no behaviour changes to existing commands:
+  - **Help text rewritten for operators.** Every command's `--help` now leads with what you get,
+    action-first, and drops implementer jargon (`config set` explains enforce/audit/fact/skip in
+    plain terms; `config export` says "disaster-recovery backup" out loud). A new test asserts no
+    jargon leaks back into any command's `--help`.
+  - **`mch help selectors` and `mch help concepts`** teach the vocabulary once — how to name a node,
+    and desired-vs-reported / policy / scope / sync / exit codes — so other commands can point at
+    them instead of restating it.
+  - **Top-level `mch status` and `mch sync`** shortcuts for the two highest-frequency commands
+    (aliases for `mch fleet status` / `mch fleet sync`).
+  - **Exit codes documented** (0 ok, 1 error, 2 = issues present for `mch fleet issues` only), in
+    README, the man page, and `mch help concepts`, with tests pinning them.
+  - **Shell completion documented** in INSTALL (`_MCH_COMPLETE=bash_source mch`, plus zsh/fish).
+  - **Better daemon-down hint:** points at `mch daemon status` / `mch daemon logs` instead of the
+    removed `mchd --help`.
+
 - **Firmware-currency note in node detail.** `mch node show` (and the `mch fleet status` single-node
   view) now annotates the `ver` fact with how the node's firmware compares to the latest release the
   vendored catalogue knows — `up to date` or `N releases behind (latest vX.Y.Z)`. Read-only and

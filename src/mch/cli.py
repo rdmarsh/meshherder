@@ -229,7 +229,8 @@ async def _request(
         reader, writer = await asyncio.open_unix_connection(socket_path, limit=2**22)
     except (FileNotFoundError, ConnectionRefusedError):
         click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
-        click.echo("  is mchd running?  try: mchd --help", err=True)
+        click.echo("  is mchd running?  check: mch daemon status", err=True)
+        click.echo("  recent daemon log: mch daemon logs", err=True)
         _check_default_config_when_daemon_unavailable()
         raise SystemExit(1) from None
 
@@ -451,12 +452,77 @@ def node_group() -> None:
 
 @cli.group("config")
 def config_group() -> None:
-    """Edit and back up desired state (the DB source of truth)."""
+    """Set desired values for nodes, groups, or the whole fleet, and back them up."""
 
 
 @cli.group("gateway")
 def gateway_group() -> None:
     """Operate the locally attached gateway node (admin console, contacts)."""
+
+
+@cli.group("help")
+def help_group() -> None:
+    """Learn mch's vocabulary: `mch help selectors`, `mch help concepts`."""
+
+
+# The two topics teach the words every other command's --help assumes. Sourced from DESIGN.md,
+# compressed to operator wording — keep them free of internal jargon (see the banned-words test).
+_SELECTORS_TOPIC = """\
+NODE — how to name a node
+
+Almost every command takes a NODE. You can point at one three ways:
+
+  label          the local name you gave it (`mch node label`)
+  pubkey prefix  the first few characters of its public key
+  mesh name      part of the name it advertises on the mesh
+
+What you type must match exactly one node, or mch asks you to be more
+specific. The public key is the node's permanent identity — its label
+and mesh name can change, its public key cannot."""
+
+_CONCEPTS_TOPIC = """\
+How mch thinks about your fleet
+
+Desired vs reported
+  You set a desired value for a setting; the node reports back the value
+  it actually has. mch compares the two on every sync and, where you asked
+  it to, brings the node into line.
+
+Policy — what mch does about a setting
+  enforce   write your desired value to the node
+  audit     report drift, but don't change the node
+  fact      just collect and show the node's current value
+  skip      ignore this key
+
+Scope — who a setting applies to
+  Set a value on one node, on a group, or on the whole fleet. A node's own
+  value beats its group's, which beats the fleet-wide value.
+
+A sync cycle
+  mch works through the nodes one at a time, reads the settings it cares
+  about, and applies changes for anything under enforce. It is paced to be
+  gentle on the mesh. `mch fleet sync` runs one now.
+
+Where your data lives
+  mch keeps its inventory and desired settings in a local database.
+  `mch config export` is your backup — keep it somewhere safe.
+
+Exit codes
+  0  success
+  1  error
+  2  issues present (`mch fleet issues` only) — for cron and alerting"""
+
+
+@help_group.command("selectors")
+def help_selectors() -> None:
+    """How to name a node on the command line."""
+    click.echo(_SELECTORS_TOPIC)
+
+
+@help_group.command("concepts")
+def help_concepts() -> None:
+    """Desired vs reported, policy, scope, sync, and exit codes."""
+    click.echo(_CONCEPTS_TOPIC)
 
 
 # ---------------------------------------------------------------------------
@@ -819,6 +885,25 @@ def sync(ctx: click.Context, node: str | None) -> None:
         resp = _rpc(ctx.obj["socket"], payload)
     data = _check(resp)
     click.echo(data)
+
+
+# Top-level shortcuts for the two highest-frequency commands (the daily loop). The noun tree
+# (daemon/fleet/node/config/gateway) stays the model; only these two get a bare alias because
+# operators run them dozens of times a day. They forward verbatim to the `fleet` versions.
+@cli.command("status")
+@click.argument("query", required=False, default=None)
+@click.pass_context
+def status_shortcut(ctx: click.Context, query: str | None) -> None:
+    """Shortcut for `mch fleet status`."""
+    ctx.forward(status)
+
+
+@cli.command("sync")
+@click.argument("node", required=False)
+@click.pass_context
+def sync_shortcut(ctx: click.Context, node: str | None) -> None:
+    """Shortcut for `mch fleet sync`."""
+    ctx.forward(sync)
 
 
 # ---------------------------------------------------------------------------
@@ -1324,16 +1409,16 @@ def _filter_unseen_nodes(nodes: list[dict[str, Any]], query: str | None) -> list
 @click.argument("query", required=False, default=None)
 @click.pass_context
 def contacts(ctx: click.Context, query: str | None) -> None:
-    """Show gateway repeater contacts not yet managed in the DB.
+    """Show repeaters the gateway can see that mch isn't managing yet.
 
+    \b
     Optionally filter by pubkey prefix or name substring:
+      mch gateway contacts 4e       # pubkeys starting with 4e
+      mch gateway contacts mill     # names containing "mill"
 
-      mch node contacts 4e       # pubkeys starting with 4e
-      mch node contacts mill     # names containing "mill"
-
-    For each contact it prints the ready-to-run `mch node adopt` command that brings the
-    node under management (the DB is the inventory now — there is nothing to paste into
-    config.yaml), plus the matching secrets.yaml snippet if the node needs a login password.
+    For each contact it prints the ready-to-run `mch node adopt` command that starts
+    managing the node, plus the matching secrets.yaml snippet if the node needs a login
+    password.
     """
     resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
     data = _check(resp)
@@ -1347,9 +1432,9 @@ def contacts(ctx: click.Context, query: str | None) -> None:
         return
 
     if query:
-        click.echo(f"# Repeater contacts matching '{query}' not yet managed in the DB.")
+        click.echo(f"# Repeater contacts matching '{query}' that mch isn't managing yet.")
     else:
-        click.echo("# Repeater contacts visible to the gateway but not yet managed in the DB.")
+        click.echo("# Repeater contacts the gateway can see that mch isn't managing yet.")
     click.echo("# Bring one under management by running its `mch node adopt` command below.\n")
 
     for c in data:
@@ -1367,7 +1452,7 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
         # `mch node adopt` needs the radio the contact was discovered on; the gateway home
         # radio is the safe default, so prompt the operator to confirm/replace it.
-        click.echo("# adopt this node into the DB inventory (set --radio to where it was heard):")
+        click.echo("# start managing this node (set --radio to where it was heard):")
         click.echo(
             f'  mch node adopt {pubkey} --radio FREQ,BW,SF,CR --label "{name}"\n'
         )
@@ -1393,14 +1478,14 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 @click.option(
     "--unknown-only",
     is_flag=True,
-    help="Hide fully managed nodes; keep config-only, DB-only, and unmanaged results.",
+    help="Hide nodes mch already manages; show only unmanaged ones.",
 )
 @click.pass_context
 def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -> None:
     """Actively discover MeshCore nodes on a temporary gateway radio.
 
     This sends a bounded discovery request, restores the gateway radio, and
-    prints responses. It does not add nodes to the DB or gateway contacts.
+    prints responses. It does not start managing anything or add gateway contacts.
     """
     error = validate_radio_tuple(radio)
     if error:
@@ -1432,16 +1517,16 @@ def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -
     metavar="FREQ,BW,SF,CR",
     help="Radio where this node was discovered, e.g. 915.800,250,11,5.",
 )
-@click.option("--label", default=None, help="Local label to store in the DB.")
+@click.option("--label", default=None, help="Local label to file the node under.")
 @click.option("--yes", "-y", is_flag=True, help="Adopt without interactive confirmation.")
 @click.pass_context
 def adopt(ctx: click.Context, pubkey: str, radio: str, label: str | None, yes: bool) -> None:
-    """Adopt an already-running discovered repeater into local inventory.
+    """Start managing an already-running node you've discovered.
 
-    This adds a DB node and a gateway contact, installs a direct (zero-hop)
-    route on that contact, then sends one directed `ver` on the discovered
-    radio to confirm the route carries a command. It does not edit config.yaml,
-    secrets.yaml, or hardware settings.
+    This adds the node to your inventory and a gateway contact, installs a direct
+    (zero-hop) route to it, then sends one directed `ver` on the discovered radio to
+    confirm the route carries a command. It does not edit secrets.yaml or hardware
+    settings.
     """
     error = validate_radio_tuple(radio)
     if error:
@@ -1460,7 +1545,7 @@ def adopt(ctx: click.Context, pubkey: str, radio: str, label: str | None, yes: b
         click.echo(f"  label:  {clean_label or '-'}")
         click.echo(f"  radio:  {radio}")
         click.echo("")
-        click.echo("This adds local DB state, a gateway contact with a direct route,")
+        click.echo("This adds the node locally, a gateway contact with a direct route,")
         click.echo("and sends one directed `ver` on the radio above to confirm it.")
         click.echo("It does not prove the physical device identity beyond the pubkey.")
         click.confirm("Adopt this node?", abort=True)
@@ -1547,10 +1632,10 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
 
 
 @node_group.command("prune")
-@click.option("--yes", "-y", is_flag=True, help="Delete the listed local DB state.")
+@click.option("--yes", "-y", is_flag=True, help="Delete the listed nodes (default: preview only).")
 @click.pass_context
 def prune(ctx: click.Context, yes: bool) -> None:
-    """List or hard-delete retired nodes (the purge step after `mch node retire`)."""
+    """Permanently delete retired nodes (the cleanup step after `mch node retire`)."""
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
     candidates = data.get("candidates", [])
@@ -1597,16 +1682,16 @@ def prune(ctx: click.Context, yes: bool) -> None:
 
     if yes:
         click.echo("")
-        click.echo(f"deleted {data.get('deleted', 0)} retired node(s) from local DB state")
+        click.echo(f"deleted {data.get('deleted', 0)} retired node(s)")
     else:
         click.echo("")
-        click.echo("run 'mch node prune --yes' to delete these local DB rows")
+        click.echo("run 'mch node prune --yes' to delete these nodes")
     click.echo("secrets.yaml entries are left unchanged")
 
 
 @node_group.group("clean")
 def clean() -> None:
-    """Clean reviewed stale local DB state."""
+    """Delete stale cached values a node no longer reports (facts or settings)."""
 
 
 def _render_stale_table(
@@ -1762,11 +1847,11 @@ def clean_settings(
 @click.option(
     "--force",
     is_flag=True,
-    help="Allow deleting local DB state for a node that is still managed (not retired).",
+    help="Allow deleting a node that is still managed (not retired).",
 )
 @click.pass_context
 def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
-    """Delete one node's local DB state (prefer `mch node retire` to stop managing a node)."""
+    """Permanently delete one node locally (prefer `mch node retire` to stop managing a node)."""
     resp = _rpc(
         ctx.obj["socket"],
         {"cmd": "remove", "query": node, "dry_run": True, "force": force},
@@ -1775,7 +1860,7 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
 
     label = data.get("label") or "-"
     name = data.get("name") or "-"
-    click.echo("local DB node state:")
+    click.echo("node to delete:")
     click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
     click.echo(f"  label:     {label}")
     click.echo(f"  mesh name: {name}")
@@ -1784,10 +1869,10 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
     if not data.get("retired"):
         click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
     click.echo("")
-    click.echo("This deletes local facts, settings, operations, logs, and the DB node row.")
+    click.echo("This deletes the node's facts, settings, operations, logs, and inventory row.")
     click.echo("secrets.yaml is left unchanged.")
 
-    if not yes and not click.confirm("Delete this local DB state?"):
+    if not yes and not click.confirm("Delete this node?"):
         click.echo("not deleted")
         return
 
@@ -1796,7 +1881,7 @@ def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
         {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": force},
     )
     deleted = _check(delete_resp).get("deleted", 0)
-    click.echo(f"deleted {deleted} node(s) from local DB state")
+    click.echo(f"deleted {deleted} node(s)")
 
 
 @node_group.command("retire")
@@ -1845,12 +1930,12 @@ def show_node(ctx: click.Context, node: str) -> None:
 @click.argument("group", required=False, default=None)
 @click.pass_context
 def set_group(ctx: click.Context, node: str, group: str | None) -> None:
-    """Assign NODE to a group (inventory metadata), or clear it.
+    """Put NODE in a group, or take it out of one.
 
-    Post-sunset group membership lives in the DB. Pass a GROUP name to set it; omit GROUP (or
-    pass an empty string) to remove the node from its group. The node then inherits global
-    defaults directly. This only changes inventory metadata — run `mch fleet sync NODE` to
-    re-converge under the new group's desired settings.
+    Pass a GROUP name to set it; omit GROUP (or pass an empty string) to remove the node
+    from its group, after which it inherits the fleet-wide defaults directly. This only
+    changes which group the node belongs to — run `mch fleet sync NODE` to apply the new
+    group's settings.
     """
     data = _check(_rpc(
         ctx.obj["socket"], {"cmd": "set_group", "query": node, "value": group}
@@ -2120,8 +2205,9 @@ def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) 
     "--policy",
     type=click.Choice(["enforce", "audit", "fact", "skip"]),
     default=None,
-    help="Override this setting's policy (default: inherit). 'fact' collects a "
-         "read-only observation with no desired value.",
+    help="How mch treats this setting: enforce = write it to the node; "
+         "audit = report drift but don't change the node; fact = just collect and "
+         "show the node's current value; skip = ignore this key. Default: inherit.",
 )
 @click.pass_context
 def set_setting(
@@ -2131,22 +2217,23 @@ def set_setting(
     global_scope: bool,
     policy: str | None,
 ) -> None:
-    """Record a desired setting in the DB (the source of truth).
+    """Set a desired value for a node, a group, or the whole fleet.
 
     \b
-    Node scope:   mch config set NODE KEY [VALUE]
-    Group scope:  mch config set --group NAME KEY [VALUE]
-    Global scope: mch config set --global KEY [VALUE]
+    One node:    mch config set NODE KEY [VALUE]
+    A group:     mch config set --group NAME KEY [VALUE]
+    Every node:  mch config set --global KEY [VALUE]
 
-    NODE: pubkey prefix, label substring, or name substring.
-    KEY:  a writable setting (e.g. name, txdelay), or a read-only fact key
-          (e.g. ver, board, neighbors) when collecting it with --policy fact.
-    VALUE: the desired value (omit for a policy-only override with --policy;
-           --policy fact/skip take no value).
-    Node wins over group wins over global at resolution time.
+    \b
+    NODE   see `mch help selectors`.
+    KEY    a writable setting (e.g. name, txdelay), or a read-only fact
+           (e.g. ver, board, neighbors) when collecting it with --policy fact.
+    VALUE  the value you want the node to have. Omit it to set only the
+           policy with --policy; --policy fact/skip never take a value.
 
-    Writing is synchronous, so `mch fleet status` shows the new intent immediately. Nodes
-    converge on the next sync cycle, or run `mch fleet sync` to converge now.
+    A node's own value beats its group's, which beats the fleet-wide value.
+    The change is saved at once (`mch fleet status` shows it immediately);
+    nodes catch up on the next sync, or run `mch fleet sync` to catch up now.
     """
     scope = _scope_from_flags(group_name, global_scope)
     # With nargs the positionals shift: group/global drop the NODE arg, so KEY is first.
@@ -2205,12 +2292,12 @@ def unset_setting(
     group_name: str | None,
     global_scope: bool,
 ) -> None:
-    """Remove a DB-set desired setting (leaves observed state alone).
+    """Clear a desired value you set earlier (leaves the node's reported value alone).
 
     \b
-    Node scope:   mch config unset NODE KEY
-    Group scope:  mch config unset --group NAME KEY
-    Global scope: mch config unset --global KEY
+    One node:    mch config unset NODE KEY
+    A group:     mch config unset --group NAME KEY
+    Every node:  mch config unset --global KEY
     """
     scope = _scope_from_flags(group_name, global_scope)
     if scope == "node":
@@ -2241,14 +2328,14 @@ def unset_setting(
 @click.argument("key")
 @click.pass_context
 def show_setting(ctx: click.Context, node: str, key: str) -> None:
-    """Explain one KEY for one NODE: per-scope config, what resolves, what's observed.
+    """Show why a setting has the value it does.
 
     \b
     mch config show NODE KEY
 
-    Shows the desired/policy row at each scope (global, the node's group, the node),
-    the resolved policy and desired value (Node > Group > Global), and the value mch
-    has observed. Read-only: it sends no mesh traffic.
+    Lists what you set at each level (whole fleet, the node's group, the node
+    itself), which one wins, and the value the node last reported back.
+    Read-only: it sends no mesh traffic.
     """
     data = _check(_rpc(ctx.obj["socket"], {"cmd": "show_setting", "query": node, "key": key}))
     target = data.get("label") or data.get("name") or data["pubkey"][:8]
@@ -2398,7 +2485,8 @@ def plan(ctx: click.Context, query: str | None) -> None:
     required=False,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
-@click.option("--yes", "-y", is_flag=True, help="Write the imported rows to the DB.")
+@click.option("--yes", "-y", is_flag=True,
+              help="Write the imported settings (default: preview only).")
 @click.option(
     "--retired",
     type=click.Choice(["keep", "skip"]),
@@ -2410,18 +2498,17 @@ def plan(ctx: click.Context, query: str | None) -> None:
 def import_config(
     ctx: click.Context, config_file: Path | None, yes: bool, retired: str | None
 ) -> None:
-    """Seed the DB's desired state from a config.yaml (the migration on-ramp).
+    """Load desired settings from a YAML file — restore a backup, or migrate an old config.yaml.
 
-    Flattens config.yaml settings and directives (name_prefix/default_policy/via_radio) at
-    node/group/global scope into desired_settings rows. Dry-run by default; --yes writes.
-    Idempotent - re-running upserts the same rows. A node not yet seen by the gateway is
-    skipped with a warning until it appears in the DB.
+    Reads settings and directives (name_prefix/default_policy/via_radio) at node, group,
+    and global scope. Previews by default; --yes writes. Safe to re-run — it just
+    re-applies the same values. A node the gateway hasn't seen yet is skipped with a
+    warning until it appears.
 
-    Pass an explicit CONFIG_FILE (a legacy or `mch config export`-ed file) to import from it instead
-    of the daemon's loaded config. This is the migration path once config.yaml no longer holds
-    desired state — the daemon process must be able to read the file. A full `mch config export`
-    backup also restores nodes the gateway has not seen yet; use --retired to choose what
-    happens to any retired nodes it carries.
+    Pass a CONFIG_FILE (an old config.yaml or a `mch config export` backup) to load from
+    it; the daemon process must be able to read the file. Restoring a full backup also
+    recreates nodes the gateway hasn't seen yet; use --retired to choose what happens to
+    any retired nodes it carries.
     """
     cmd: dict[str, Any] = {"cmd": "import", "dry_run": not yes}
     if config_file is not None:
@@ -2438,7 +2525,7 @@ def import_config(
     retired_mode = data.get("retired_mode")
     if yes:
         click.echo(
-            f"imported {data['written']} desired item(s) into the DB "
+            f"imported {data['written']} desired item(s) "
             f"(global {counts['global']}, groups {counts['group']}, nodes {counts['node']}, "
             f"operations {operations})"
         )
@@ -2465,7 +2552,7 @@ def import_config(
             fg="yellow",
         ))
     if not yes and total:
-        click.echo("run again with --yes to write these to the DB")
+        click.echo("run again with --yes to save these")
 
 
 # ---------------------------------------------------------------------------
@@ -2475,14 +2562,16 @@ def import_config(
 @config_group.command("export")
 @click.pass_context
 def export_config(ctx: click.Context) -> None:
-    """Dump the DB's desired state as config.yaml-shaped YAML (the inverse of import).
+    """Back up all your desired settings to YAML — this is your disaster-recovery snapshot.
 
-    Prints to stdout - redirect to save (`mch config export > desired.yaml`). Round-trips with
-    `mch config import`. Observed state and operations are not included.
+    Prints to stdout — redirect to save (`mch config export > backup.yaml`). Restore it
+    later with `mch config import`. Since mch keeps your inventory and settings in one
+    local database, this backup is the only copy; keep it somewhere safe. The node's
+    reported values and its history are not included.
     """
     data = _check(_rpc(ctx.obj["socket"], {"cmd": "export"}))
     if not data.get("total"):
-        click.echo("no desired state in the DB to export")
+        click.echo("nothing to export yet — no desired settings have been set")
         return
     click.echo(data["yaml"], nl=False)
 
