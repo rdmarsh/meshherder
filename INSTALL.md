@@ -99,6 +99,25 @@ mch fleet status
 > **Note:** the systemd unit is named `mchd` - always use `systemctl ... mchd`, not `mch`.
 > The `mch daemon start`, `mch daemon stop`, and `mch daemon restart` CLI commands are shortcuts to the same thing.
 
+### Scheduled desired-state backups (recommended)
+
+The SQLite database is now the only live copy of desired state, so keep automated `mch config
+export` snapshots. A systemd timer writes a dated, restorable snapshot each day and rotates to the
+newest N:
+
+```bash
+sudo install -D -m 755 systemd/mch-backup.sh /usr/local/bin/mch-backup
+sudo cp systemd/mch-backup.service systemd/mch-backup.timer /etc/systemd/system/
+sudo install -d -o mch -g mch -m 750 /var/lib/meshherder/backups
+sudo systemctl daemon-reload
+sudo systemctl enable --now mch-backup.timer
+```
+
+Snapshots land in `/var/lib/meshherder/backups/backup-YYYY-MM-DD.yaml`. Change the location or
+retention with a drop-in — `sudo systemctl edit mch-backup.service` — setting `MCH_BACKUP_DIR`
+and/or `MCH_BACKUP_KEEP` (default 14). Run one on demand with `sudo systemctl start
+mch-backup.service`, and restore after a loss with `mch config import <snapshot> --yes`.
+
 ## udev rule
 
 By default a MeshCore node appears as `/dev/ttyACM0` or similar, and that path can change between

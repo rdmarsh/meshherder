@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Scheduled desired-state backup unit.** New `systemd/mch-backup.{service,timer}` +
+  `mch-backup.sh` write a dated `mch config export` snapshot daily to
+  `/var/lib/meshherder/backups` with keep-N rotation (`MCH_BACKUP_KEEP`, default 14). Since the DB
+  is the only live copy of desired state, this is the disaster-recovery mechanism; restore with
+  `mch config import <snapshot> --yes`. See INSTALL.md.
+- **Retired `SUGGEST.md`.** Its still-open items were confirmed already tracked in `BACKLOG.md`;
+  the historical file and its README docs-table row were removed.
 - **Moved four commands to the noun they act on (with hidden back-compat aliases).**
   `config suggest` → `fleet suggest`, `config validate` → `daemon validate`, `node contacts` →
   `gateway contacts`, and `node admin` → `gateway admin` (a new `gateway` noun group operates the

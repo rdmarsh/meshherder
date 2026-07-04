@@ -46,7 +46,6 @@ Think Ansible for your nodes, running continuously in the background.
 | [`MANUAL_TESTS.md`](MANUAL_TESTS.md) | Luna live-test worksheet with commands and result fields. |
 | [`JOURNAL.md`](JOURNAL.md) | Dated implementation decisions and lessons learned. |
 | [`tools/`](tools/README.md) | Standalone MeshCore protocol test tools. |
-| [`SUGGEST.md`](SUGGEST.md) | Historical codebase review notes; move active items to `BACKLOG.md`. |
 
 ## Features
 

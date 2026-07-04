@@ -27,11 +27,10 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### Sunset follow-ups and release
 
-- **Installable scheduled-backup unit.** The DB is now the only copy of desired state, so an
-  automated `mch export` backup matters. Ship a systemd timer + service (and an INSTALL note) that
-  writes a dated `mch export > .../backup-YYYY-MM-DD.yaml`, with simple rotation (keep N days). The
-  export is already a complete, restorable backup (full pubkeys + inventory + retired tags); this
-  just automates capturing it. A bare cron line works today as a stopgap.
+- DONE (Unreleased): shipped `systemd/mch-backup.{service,timer}` + `systemd/mch-backup.sh` (dated
+  `mch config export` snapshots to `/var/lib/meshherder/backups`, keep-N rotation via
+  `MCH_BACKUP_KEEP`, temp-file-then-rename so a failed export never truncates a good snapshot) plus
+  an INSTALL section. Restore with `mch config import <snapshot> --yes`.
 - **Cut a release with a version bump.** The sunset is a breaking change (the daemon refuses to
   start on a config.yaml that still carries desired state), so bump `0.9.35` -> `0.10.0` in
   `pyproject.toml` and `src/mch/__init__.py`, and move the `## Unreleased` CHANGELOG block under a
@@ -305,7 +304,7 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   paths (`_render_issue_sections`, `_filter_ghosts`, `_filter_unseen_nodes`), the `legacy_status`
   spread, the `_issues_report`/`_summary` fields, and their tests are all dead weight. Phase-1 doc
   pass (2026-07-03) only reworded the never-printed strings off config.yaml; the schema/render
-  removal is the real cleanup. Fold into the issue-assembly dedup work (SUGGEST #15).
+  removal is the real cleanup. Fold into the issue-assembly dedup work (was SUGGEST #15).
 
 ## Later
 
@@ -401,6 +400,11 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Done Recently
 
+- 2026-07-04: Retired `SUGGEST.md` (historical review notes). Confirmed every still-open item it
+  tracked (#12 migrations, #13 profile-cache path, #14 module split, #15 issue-assembly dedup,
+  #16 typed contacts, #19 concurrency tests, #33 partial-commission retry, #35 wizard sentinels,
+  #37–39 field-aware validation) is already represented in this backlog, then deleted the file and
+  its README docs-table row.
 - 2026-07-03: Nested the flat 26-command `mch` menu under four noun groups — `daemon`, `fleet`,
   `node`, `config` — so the top-level menu lists only the groups. Breaking change to invocation
   paths only (e.g. `mch set` → `mch config set`); all behaviour, options, and output preserved.
