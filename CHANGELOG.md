@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Removed the `mch fleet status` single-match magic switch (RECOMMENDATIONS-2 S1.3).** A query that
+  matched exactly one node used to silently switch to the full detail view; it now always renders the
+  (filtered) table and prints a one-line hint pointing at `mch node show NODE`, which has been the
+  explicit detail command since 0.21.0. `mch fleet status` is now purely a table/overview command.
+
 ## 0.21.0 - 2026-07-05
 
 - **`--json` scripting surface + firmware-currency fleet views (RECOMMENDATIONS-2 slice 3).**

@@ -105,10 +105,12 @@ Show the fleet table, including state, label, group, firmware, neighbour count,
 and last seen time.
 .TP
 .B fleet status \fILABEL_OR_PREFIX\fR
-Show one matching node in detail, or a filtered table if more than one node
-matches. The detail view shows facts, settings (desired vs observed, including
-settings from config not yet synced), last seen timestamp with relative time,
-and recent activity logs.
+Show the fleet table filtered to matching nodes. A single match prints a hint
+pointing at
+.B "node show"
+for the full detail view. Add
+.B \-\-json
+to emit the report model for scripting.
 .TP
 .B fleet sync
 Start an immediate full sync cycle in the background. Rate limiting still
@@ -146,10 +148,12 @@ Show recent activity for one node.
 Interactively add a fresh or replacement MeshCore node.
 .TP
 .B node show \fILABEL_OR_PREFIX\fR
-Show full detail for one node (facts, all desired settings, schedule, and recent
-activity) \(em the detail view that
+Show full detail for one node: facts, all desired settings, schedule, and recent
+activity. This is the detail view (formerly reached by a single
 .B "fleet status"
-shows for a single match, as an explicit command.
+match); add
+.B \-\-json
+to emit the node report for scripting.
 .TP
 .B node group \fILABEL_OR_PREFIX\fR \fR[\fINAME\fR]
 Set the node's DB group membership, or clear it when

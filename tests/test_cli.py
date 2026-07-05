@@ -66,7 +66,7 @@ def test_ago_with_timestamp_is_not_padded_in_prose_output():
     seen = (datetime.now(UTC) - timedelta(minutes=7)).isoformat()
     detail = _detail()
     detail["data"]["last_seen"] = seen
-    result = _run_multi(["fleet", "status", "site-a"], _status_resp(nodes=[_summary()]), detail)
+    result = _run(["node", "show", "site-a"], detail)
 
     assert "(7m ago)" in result.output
     assert "(  7m ago)" not in result.output
@@ -1181,41 +1181,31 @@ def test_status_renders_canonical_fleet_api_response():
     assert "4" in result.output
 
 
-def test_status_node_renders_known_path_from_detail_response():
+def test_node_show_renders_known_path_from_detail_response():
     detail = _detail()
     detail["data"]["management_path"] = {
         "cached_path": "stored (out_path=e260; out_path_len=1; hash-mode=1)",
         "path_repair_needed": False,
     }
-    result = _run_multi(["fleet", "status", "site-a"], _status_resp(nodes=[_summary()]), detail)
+    result = _run(["node", "show", "site-a"], detail)
 
     assert result.exit_code == 0
     assert "known path:  stored (out_path=e260; out_path_len=1; hash-mode=1)" in result.output
 
 
-def test_status_node_marks_known_path_repair_needed():
+def test_node_show_marks_known_path_repair_needed():
     detail = _detail()
     detail["data"]["management_path"] = {
         "cached_path": "flood",
         "path_repair_needed": True,
     }
-    result = _run_multi(["fleet", "status", "site-a"], _status_resp(nodes=[_summary()]), detail)
+    result = _run(["node", "show", "site-a"], detail)
 
     assert result.exit_code == 0
     assert "known path:  flood (path repair needed)" in result.output
 
 
-def test_status_detail_renders_canonical_node_api_unknown_fact():
-    fleet = _fleet_resp(nodes=[{
-        "pubkey": "aabbccdd" * 8,
-        "name": "Tower",
-        "label": "site-a",
-        "group": None,
-        "state": "configured",
-        "last_seen": None,
-        "last_connected": None,
-        "facts": {},
-    }])
+def test_node_show_renders_canonical_node_api_unknown_fact():
     detail = {"ok": True, "data": {
         "pubkey": "aabbccdd" * 8,
         "name": "Tower",
@@ -1231,7 +1221,7 @@ def test_status_detail_renders_canonical_node_api_unknown_fact():
         "logs": [],
     }}
 
-    result = _run_multi(["fleet", "status", "site-a"], fleet, detail)
+    result = _run(["node", "show", "site-a"], detail)
 
     assert result.exit_code == 0
     assert "ver" in result.output
@@ -1370,14 +1360,11 @@ def test_status_multiple_matches_filters_issues():
     assert "ridge" not in result.output
 
 
-def test_status_single_match_shows_detail():
-    # query matching 1 of 2 nodes → node detail view (two RPC calls)
-    status = _status_resp(nodes=[
-        _summary(),  # pubkey "aabbccdd"*8, matches query "aabb"
-        _summary("11223344" * 8, name="Other", label="other"),
-    ])
+def test_node_show_full_detail_fields():
+    # The detail view (facts, identity, auth) is `mch node show` — the `fleet status` magic switch
+    # that used to show it on a single match was dropped after 0.21.0.
     detail = _detail(facts={"ver": "v1.14.1", "board": "T-Beam"})
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
     assert result.exit_code == 0
     assert "Tower" in result.output
     assert "site-a" in result.output
@@ -1432,28 +1419,32 @@ def test_node_show_unknown_firmware_has_no_currency_note():
     assert "behind" not in result.output and "up to date" not in result.output
 
 
-def test_status_single_match_hints_node_show():
+def test_status_single_match_shows_table_and_hints_node_show():
+    """A single match now renders the (1-row) table and points at `mch node show`, not detail.
+
+    The magic detail switch was dropped after 0.21.0 shipped its deprecation hint (S1.3). Only one
+    RPC (the fleet report) is made — no second detail call.
+    """
     status = _status_resp(nodes=[_summary()])
-    detail = _detail()
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["fleet", "status", "aabb"], status)
     assert result.exit_code == 0
+    assert "PUBKEY" in result.output  # the table header, not the detail view
+    assert "pubkey full:" not in result.output  # detail-only field
     assert "mch node show aabb" in result.output
 
 
-def test_status_single_match_shows_next_sync_estimate():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_shows_next_sync_estimate():
     detail = _detail()
     detail["data"]["next_sync_at"] = (datetime.now(UTC) + timedelta(hours=19)).isoformat()
 
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "next sync:" in result.output
     assert "(in ~" in result.output
 
 
-def test_status_single_match_facts_show_observed_time_and_clock_drift():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_facts_show_observed_time_and_clock_drift():
     detail = _detail(
         facts={"clock": "12:08 - 25/5/2026 UTC", "ver": "v1.14.1"},
         fact_times={
@@ -1462,7 +1453,7 @@ def test_status_single_match_facts_show_observed_time_and_clock_drift():
         },
     )
 
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "KEY" in result.output
@@ -1472,54 +1463,50 @@ def test_status_single_match_facts_show_observed_time_and_clock_drift():
     assert "slow by 7d 11h" in result.output
 
 
-def test_status_single_match_clock_within_one_minute_is_not_called_drift():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_clock_within_one_minute_is_not_called_drift():
     detail = _detail(
         facts={"clock": "12:08 - 25/5/2026 UTC"},
         fact_times={"clock": "2026-05-25T12:08:30+00:00"},
     )
 
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "within ±1m" in result.output
     assert "drift <1m" not in result.output
 
 
-def test_status_single_match_clock_ahead_is_reported_as_fast():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_clock_ahead_is_reported_as_fast():
     detail = _detail(
         facts={"clock": "12:08 - 25/5/2026 UTC"},
         fact_times={"clock": "2026-05-25T12:04:00+00:00"},
     )
 
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "fast by 4m" in result.output
 
 
-def test_status_single_match_activity_newest_at_bottom():
-    """Single-match detail: oldest activity entry first, newest last."""
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_activity_newest_at_bottom():
+    """Detail view: oldest activity entry first, newest last."""
     detail = _detail(logs=[
         {"level": "INFO", "timestamp": "2026-05-19T12:00:00", "message": "second event"},
         {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "first event"},
     ])
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
     assert result.exit_code == 0
     assert result.output.index("first event") < result.output.index("second event")
 
 
-def test_status_single_match_shows_settings_drift_status():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_shows_settings_drift_status():
     detail = _detail(settings=[{
         "key": "owner.info", "desired": "Managed by mch",
         "observed": "wrong", "policy": "enforce", "drift": True,
         "update_attempts": 20,
         "last_checked": None, "last_set": None,
     }])
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
     assert "STATUS" in result.output
     assert "drifted" in result.output
     assert "owner.info" in result.output
@@ -1527,19 +1514,17 @@ def test_status_single_match_shows_settings_drift_status():
     assert "20" in result.output
 
 
-def test_status_single_match_shows_unobserved_settings_in_yellow():
+def test_node_show_shows_unobserved_settings_in_yellow():
     runner = CliRunner()
-    status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{
         "key": "owner.info", "desired": "Managed by mch",
         "observed": None, "policy": "enforce", "drift": True,
         "update_attempts": 0,
     }])
-    responses = [status, detail]
-    with patch("mch.cli._rpc", side_effect=responses):
+    with patch("mch.cli._rpc", side_effect=[detail]):
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "--color", "fleet", "status", "aabb"],
+            ["--socket", "/fake.sock", "--color", "node", "show", "aabb"],
             color=True,
         )
 
@@ -1551,28 +1536,26 @@ def test_status_single_match_shows_unobserved_settings_in_yellow():
     )
 
 
-def test_status_single_match_shows_tries_as_not_applicable_for_audit():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_shows_tries_as_not_applicable_for_audit():
     detail = _detail(settings=[{
         "key": "owner.info", "desired": "Managed by mch",
         "observed": "wrong", "policy": "audit", "drift": True,
         "update_attempts": 0,
     }])
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
     assert re.search(
         r"audit\s+owner\.info\s+Managed by mch\s+wrong\s+-\s+drifted", result.output
     )
 
 
-def test_status_single_match_shows_approximate_settings_status():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_shows_approximate_settings_status():
     detail = _detail(settings=[{
         "key": "radio", "desired": "915.075,125,9,5",
         "observed": "915.0750122,125,9,5", "policy": "enforce",
         "drift": False, "approximate": True,
         "last_checked": None, "last_set": None,
     }])
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
     assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
@@ -1581,20 +1564,18 @@ def test_status_single_match_shows_approximate_settings_status():
     )
 
 
-def test_status_single_match_shows_ok_settings_in_green():
+def test_node_show_shows_ok_settings_in_green():
     runner = CliRunner()
-    status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{
         "key": "owner.info", "desired": "Managed by mch",
         "observed": "Managed by mch", "policy": "enforce",
         "drift": False, "approximate": False,
         "update_attempts": 0,
     }])
-    responses = [status, detail]
-    with patch("mch.cli._rpc", side_effect=responses):
+    with patch("mch.cli._rpc", side_effect=[detail]):
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "--color", "fleet", "status", "aabb"],
+            ["--socket", "/fake.sock", "--color", "node", "show", "aabb"],
             color=True,
         )
 
@@ -2033,20 +2014,18 @@ def test_logs_newest_at_bottom():
     assert result.output.index("first event") < result.output.index("second event")
 
 
-def test_status_single_match_activity_includes_relative_age():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_activity_includes_relative_age():
     detail = _detail(logs=[
         {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "event"},
     ])
 
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
 
     assert "recent activity:" in result.output
     assert "ago)" in result.output
 
 
-def test_status_single_match_activity_uses_logs_shape_without_node_columns():
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_activity_uses_logs_shape_without_node_columns():
     detail = _detail(logs=[
         {"node_pubkey": "aabbccdd" * 8, "label": "site-a", "level": "WARNING",
          "timestamp": "2026-05-19T12:00:00", "message": "second event"},
@@ -2055,7 +2034,7 @@ def test_status_single_match_activity_uses_logs_shape_without_node_columns():
     ])
 
     with patch("mch.cli._ago", side_effect=["6h ago", "26m ago", "26m ago", "6h ago"]):
-        result = _run_multi(["fleet", "status", "aabb"], status, detail)
+        result = _run(["node", "show", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "(26m ago) [INFO   ] first event" in result.output
@@ -3582,9 +3561,8 @@ def test_unset_global_scope_sends_global_request():
     assert "all managed nodes" in result.output
 
 
-def test_status_single_match_settings_table_has_no_source_column():
-    # Sunset: the DB is the only desired-state source, so the SOURCE column is dropped.
-    status = _status_resp(nodes=[_summary()])
+def test_node_show_settings_table_has_no_source_column():
+    # The DB is the only desired-state source, so the SOURCE column is dropped.
     detail = _detail(settings=[
         {
             "key": "txdelay", "desired": "14", "observed": "14",
@@ -3592,7 +3570,7 @@ def test_status_single_match_settings_table_has_no_source_column():
             "approximate": False, "update_attempts": 0,
         },
     ])
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "SOURCE" not in result.output
@@ -3602,15 +3580,14 @@ def test_status_single_match_settings_table_has_no_source_column():
     assert re.search(r"txdelay\s+14\s+14\s+0\s+ok", result.output)
 
 
-def test_status_single_match_settings_show_desired_before_observed():
+def test_node_show_settings_show_desired_before_observed():
     """The detail settings table must read DESIRED then OBSERVED (matches drift table)."""
-    status = _status_resp(nodes=[_summary()])
     detail = _detail(settings=[{
         "key": "txdelay", "desired": "14", "observed": "20",
         "policy": "enforce", "source": "db", "drift": True,
         "approximate": False, "update_attempts": 1,
     }])
-    result = _run_multi(["fleet", "status", "aabb"], status, detail)
+    result = _run(["node", "show", "aabb"], detail)
 
     assert result.exit_code == 0
     # desired (14) appears before observed (20) on the row

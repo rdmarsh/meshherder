@@ -393,9 +393,9 @@ fetch). Open follow-ups:
 - **CLI redesign, remaining steps — DONE 2026-07-04 (RECOMMENDATIONS-2 slices 1–3).**
   `node remove`→`node prune NODE` convergence, scope-grammar + mutation-convention codification,
   `mch help selectors`/`concepts`, exit codes 0/1/2, shell-completion docs, and `--json` on the read
-  commands (`fleet status/plan/issues/logs`, `node show`, `config show`) all shipped. The only slice
-  deliberately deferred is S1.3 (drop the `fleet status` single-match magic switch), which is gated
-  on cutting a release that carries the `mch node show` hint (see "Sunset follow-ups").
+  commands (`fleet status/plan/issues/logs`, `node show`, `config show`) all shipped. S1.3 (drop the
+  `fleet status` single-match magic switch) shipped too, on 2026-07-05, once 0.21.0 had released the
+  `mch node show` hint. Nothing from slices 1–3 remains deferred.
 - **C2 module splits (dedicated PR).** `cli.py` (~3k lines) → package (`render`, `commission`, one
   module per noun group); `queue.py` (~2.4k) → `scheduler`/`node_processor`/`pathing` behind the
   `WorkQueue` facade; `daemon._dispatch` (huge `if cmd == …` chain) → a `dict[str, Handler]`.
@@ -531,10 +531,9 @@ fetch). Open follow-ups:
   `mch help concepts` topics; added top-level `mch status` / `mch sync` shortcuts; documented exit
   codes (0/1/2) in README + man page + `mch help concepts` with pinning tests; documented shell
   completion in INSTALL; fixed the daemon-down hint to point at `mch daemon status` / `mch daemon
-  logs`. Deferred within the slice: **S1.3 (drop the `fleet status` single-match magic switch)** —
-  it needs one *released* version carrying the `mch node show` hint first, and everything is still
-  Unreleased. Cut a release (see "Sunset follow-ups") or get explicit OK to break early, then remove
-  the switch.
+  logs`. **S1.3 (drop the `fleet status` single-match magic switch)** was deferred within the slice
+  and is now **DONE (2026-07-05)**: after cutting 0.21.0 with the `mch node show` hint, the switch was
+  removed — a single match renders the table and hints `mch node show`.
 - 2026-07-04: Retired `SUGGEST.md` (historical review notes). Confirmed every still-open item it
   tracked (#12 migrations, #13 profile-cache path, #14 module split, #15 issue-assembly dedup,
   #16 typed contacts, #19 concurrency tests, #33 partial-commission retry, #35 wizard sentinels,
