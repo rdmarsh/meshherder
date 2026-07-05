@@ -1301,38 +1301,61 @@ def test_status_no_issues_no_sections():
     assert "unseen" not in result.output
 
 
-def test_status_shows_drifted_section():
+def test_status_summarizes_drift_without_the_table():
+    # S2.1: `status` summarises; the full drift table moved to `fleet issues`.
     result = _run(["fleet", "status"], _status_resp(drifted=[{
         "node_pubkey": "aabbccdd" * 8, "label": "site-a",
         "key": "owner.info", "desired": "Managed by mch",
         "observed": "wrong", "policy": "enforce", "update_attempts": 20,
     }]))
-    assert "drifted settings" in result.output
-    assert re.search(r"PUBKEY\s+LABEL", result.output)
-    assert "owner.info" in result.output
-    assert "site-a" in result.output
-    assert "TRIES" in result.output
-    assert "20" in result.output
+    assert "issues: 1 drifted setting on 1 node" in result.output
+    assert "(`mch fleet issues` for detail)" in result.output
+    assert "owner.info" not in result.output  # the table itself is not repeated here
 
 
-def test_status_shows_bad_state_section():
+def test_status_summarizes_bad_state_without_the_table():
     result = _run(["fleet", "status"], _status_resp(bad_state=[{
         "pubkey": "aabbccdd" * 8, "label": "wip 07",
         "name": "wip 07", "state": "configuring", "last_seen": None,
     }]))
-    assert "problem states" in result.output
-    assert re.search(r"PUBKEY\s+LABEL", result.output)
-    assert "configuring" in result.output
-    assert "wip 07" in result.output
+    assert "1 node in problem states" in result.output
+    assert "problem states:" not in result.output  # section heading only in `fleet issues`
 
 
-def test_status_shows_open_nodes_section():
+def test_status_summarizes_open_nodes_as_one_line():
     result = _run(["fleet", "status"], _status_resp(open_nodes=[{
         "pubkey": "aabbccdd" * 8, "label": "wip 06", "name": "wip 06",
     }]))
-    assert "open node" in result.output
-    assert re.search(r"PUBKEY\s+LABEL", result.output)
-    assert "wip 06" in result.output
+    assert "open nodes: 1 with no ACL" in result.output
+
+
+def test_issues_shows_full_drift_table():
+    result = _run(["fleet", "issues"], _status_resp(drifted=[{
+        "node_pubkey": "aabbccdd" * 8, "label": "site-a",
+        "key": "owner.info", "desired": "Managed by mch",
+        "observed": "wrong", "policy": "enforce", "update_attempts": 20,
+    }]))
+    assert result.exit_code == 2
+    assert "drifted settings" in result.output
+    assert "owner.info" in result.output
+    assert "TRIES" in result.output
+    assert "20" in result.output
+
+
+def test_status_outage_advisory_when_most_nodes_down():
+    # S2.5: ≥3 and ≥half of non-retired nodes down → gateway advisory.
+    nodes = [_summary(pubkey=f"{i:02d}" + "aa" * 31, label=f"n{i}", state="unreachable")
+             for i in range(3)] + [_summary(pubkey="ff" * 32, label="up", state="configured")]
+    result = _run(["fleet", "status"], _status_resp(nodes=nodes))
+    assert "note: 3 of 4 nodes unreachable" in result.output
+    assert "check the gateway" in result.output
+
+
+def test_status_no_outage_advisory_when_fleet_healthy():
+    nodes = [_summary(pubkey=f"{i:02d}" + "aa" * 31, label=f"n{i}", state="configured")
+             for i in range(4)]
+    result = _run(["fleet", "status"], _status_resp(nodes=nodes))
+    assert "check the gateway" not in result.output
 
 
 def test_status_multi_match_shows_table():

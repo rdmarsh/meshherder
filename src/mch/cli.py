@@ -734,7 +734,7 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
     data = _status_view(fleet)
 
     all_nodes = data.get("nodes", [])
-    nodes = _filter_nodes(all_nodes, query)
+    nodes = _sorted_fleet_nodes(_filter_nodes(all_nodes, query))
     drifted = _filter_drift(data.get("drifted", []), query)
     bad_state = _filter_nodes(data.get("bad_state", []), query)
     open_nodes = _filter_nodes(data.get("open_nodes", []), query)
@@ -809,7 +809,14 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
     if query and len(nodes) == 1:
         click.echo(f"(tip: `mch node show {query}` shows full detail for this node)", err=True)
 
-    _render_issue_sections(drifted, bad_state, open_nodes)
+    # `fleet status` summarises issues; `fleet issues` keeps the full drift/problem-state
+    # tables (S2.1). The STATE column already marks every problem node above.
+    _render_issue_summary(drifted, bad_state, open_nodes)
+    # Fleet-wide-outage hint: most of the fleet down is likelier one gateway/radio fault
+    # than many node faults (S2.5). Computed over the whole fleet, so it is suppressed under
+    # a query — an "N of M" line would contradict a filtered table.
+    if not query:
+        _render_outage_advisory(all_nodes)
     _render_firmware_advisory(data.get("firmware"), query)
 
 
@@ -1292,6 +1299,72 @@ def _render_firmware_advisory(firmware: dict[str, Any] | None, query: str | None
     click.echo(
         f"firmware: {n} node{'s' if n != 1 else ''} behind latest {latest} "
         f"(advisory — `mch node show NODE` for detail)"
+    )
+
+
+def _plural(n: int) -> str:
+    return "" if n == 1 else "s"
+
+
+def _sorted_fleet_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort the fleet table by group, then label (empty groups last, case-insensitive).
+
+    Sorted in the renderer, not the DB query: `get_all_nodes` also feeds the scheduler and
+    changing work-queue iteration order is out of scope for a display fix (S2.2). Grouping
+    the rows also makes near-duplicate group names (e.g. `rdm_test` vs `rdmtest`) stand out.
+    """
+    def key(n: dict[str, Any]) -> tuple[bool, str, str]:
+        group = n.get("group") or ""
+        return (group == "", group.lower(), (n.get("label") or "").lower())
+    return sorted(nodes, key=key)
+
+
+def _render_issue_summary(
+    drifted: list[dict[str, Any]],
+    bad_state: list[dict[str, Any]],
+    open_nodes: list[dict[str, Any]],
+) -> None:
+    """Summarise fleet issues under the table (S2.1) — the tables live in `mch fleet issues`.
+
+    The STATE column already marks every problem node in the main table, so repeating the
+    full drift and problem-state tables in the `status` footer was pure repetition. The
+    open-nodes line stays prominent — it is the one security-critical category — but as a
+    one-liner.
+    """
+    if not (drifted or bad_state or open_nodes):
+        return
+    click.echo("")
+    parts: list[str] = []
+    if drifted:
+        n_nodes = len({s["node_pubkey"] for s in drifted})
+        parts.append(
+            f"{len(drifted)} drifted setting{_plural(len(drifted))} "
+            f"on {n_nodes} node{_plural(n_nodes)}"
+        )
+    if bad_state:
+        parts.append(f"{len(bad_state)} node{_plural(len(bad_state))} in problem states")
+    if parts:
+        click.echo(f"issues: {' · '.join(parts)}  (`mch fleet issues` for detail)")
+    if open_nodes:
+        n = len(open_nodes)
+        click.echo(
+            f"open nodes: {n} with no ACL — anyone on the mesh can send them commands  "
+            "(`mch fleet issues`)"
+        )
+
+
+def _render_outage_advisory(nodes: list[dict[str, Any]]) -> None:
+    """Advisory when most of the fleet is down (S2.5): likelier one gateway/radio fault than
+    many independent node faults. Advisory only — never an issue category, never exit 2.
+    """
+    non_retired = [n for n in nodes if n.get("state") != "retired"]
+    down = [n for n in non_retired if n.get("state") in ("unreachable", "offline")]
+    if len(down) < 3 or len(down) * 2 < len(non_retired):
+        return
+    click.echo("")
+    click.echo(
+        f"note: {len(down)} of {len(non_retired)} nodes unreachable — if unexpected, "
+        "check the gateway (`mch daemon logs`, `mch gateway contacts`)"
     )
 
 

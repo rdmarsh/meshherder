@@ -102,7 +102,10 @@ Unrecognised fact names are reported as warnings with close-match suggestions.
 .TP
 .B fleet status
 Show the fleet table, including state, label, group, firmware, neighbour count,
-and last seen time.
+and last seen time. Rows are sorted by group then label. Below the table it
+prints a short issue summary (drift, problem-state, and open-node counts) and,
+when most of the fleet is down, a gateway advisory; the full issue tables live in
+.BR "fleet issues" .
 .TP
 .B fleet status \fILABEL_OR_PREFIX\fR
 Show the fleet table filtered to matching nodes. A single match prints a hint
