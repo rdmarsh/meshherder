@@ -99,6 +99,17 @@ async def build_node_report(
     result = next(entry for entry in fleet["nodes"] if entry["pubkey"] == node.pubkey)
     result = dict(result)
     result["logs"] = await db.get_logs(node.pubkey, limit=log_limit)
+    # Scheduled operations and their last outcome (S3.2): corbin's `clock sync` failed three
+    # days running, visible only by reading the log lines. Surface it as its own section.
+    result["operations"] = [
+        {
+            "command": op.command,
+            "run_at": _iso(op.run_at),
+            "status": op.status.value,
+            "response": op.response,
+        }
+        for op in await db.get_operations(node.pubkey)
+    ]
     return result
 
 

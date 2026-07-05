@@ -6,6 +6,18 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## >>> RESUME HERE (updated 2026-07-03) - update or clear this block when you pick up <<<
 
+**RECOMMENDATIONS-3 in progress (2026-07-05).** Slices 1–3 implemented on `main` (each merged
+`--no-ff`): S1 `mch config show` grew a whole-node table + `--group`/`--global` scope listing; S2
+turned the `fleet status` footer into a summary (tables stay in `fleet issues`), sorted the fleet
+table, added `help states`, a fleet-outage advisory, the `gateway contacts` table, `nodes.last_attempt_at`
+(schema v2) with a TRIED column, and output polish; S3 refreshes the clock fact after a *failed*
+`clock sync` and adds an `operations:` section to `node show`. **Bench-confirm owed (S3.1):** the
+failed-`clock sync` clock re-read is unit-tested but not yet verified against real firmware on the
+luna bench node (test frequency 915.800 only). Confirm one failing `clock sync` re-reads the clock
+and the facts NOTE flips direction, then record the observation here. Slices 4 (complexity pay-down)
+and 5 (docs) still pending.
+
+
 **Status (2026-07-03): 0.20.0 RELEASED.** Noun-grouped CLI (`daemon`/`fleet`/`node`/`config`)
 merged and shipped: `main` at `97d0d3e`, annotated tag `v0.20.0` pushed, GitHub Release object
 published. 888 tests pass (rebuilt `.venv` on homebrew python3.13 this session - the old venv

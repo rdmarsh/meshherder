@@ -5,6 +5,14 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Stale observations no longer contradict reality (RECOMMENDATIONS-3 slice 3).** A failed
+  `clock sync` now re-reads the clock too (not only a successful one), so a node whose sync keeps
+  failing can't keep showing a stale drift direction — corbin showed "slow by 51m" while the failure
+  (`ERR: clock cannot go backwards`) proved the clock was now fast. And `mch node show` gained an
+  `operations:` section between settings and recent activity, showing each scheduled operation's last
+  run, status, and response, so a repeatedly failing `clock sync` is visible without reading the log
+  lines.
+
 - **High-volume views stopped drowning the signal (RECOMMENDATIONS-3 slice 2).** `mch fleet status`
   now prints a short issue *summary* (drift/problem-state counts and a one-line open-nodes warning)
   instead of repeating the full drift and problem-state tables — those stay in `mch fleet issues`, the

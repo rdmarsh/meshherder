@@ -377,6 +377,16 @@ async def test_upsert_and_get_pending_operations(db):
     assert pending[0].status == OperationStatus.PENDING
 
 
+async def test_get_operations_returns_latest_per_command(db):
+    # S3.2: node show needs the latest record per command.
+    await db.upsert_node(Node(pubkey="aabbcc", name="N"))
+    await db.upsert_operation(OperationRecord(node_pubkey="aabbcc", command="clock sync"))
+    await db.upsert_operation(OperationRecord(node_pubkey="aabbcc", command="reboot"))
+
+    ops = await db.get_operations("aabbcc")
+    assert {o.command for o in ops} == {"clock sync", "reboot"}
+
+
 # ------------------------------------------------------------------
 # logs
 # ------------------------------------------------------------------

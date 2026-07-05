@@ -2422,6 +2422,16 @@ class WorkQueue:
                 await self._db.write_log(
                     pubkey, "ERROR", f"operation failed: {op.command!r}: {error}"
                 )
+                # A failed `clock sync` (e.g. `ERR: clock cannot go backwards`) is exactly when
+                # the stored clock fact is most misleading: it only ever refreshed on success, so
+                # a node whose sync keeps failing would show a stale drift direction (corbin
+                # showed "slow by 51m" while the error proved the clock was now fast). Read the
+                # clock now — one extra read on the already-open authed session — so the facts
+                # NOTE recomputes and agrees with the failure (S3.1).
+                if op.command == "clock sync":
+                    await self._refresh_clock_fact_after_sync(
+                        pubkey, contact, node, node_cfg, progress=progress
+                    )
 
             await self._db.update_operation(op)
 

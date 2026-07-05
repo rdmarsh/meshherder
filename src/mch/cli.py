@@ -708,6 +708,7 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
             for setting in node["settings"]
             if setting["status"] != "ignored"
         ],
+        "operations": node.get("operations", []),
         "logs": node.get("logs", []),
     }
 
@@ -1175,6 +1176,37 @@ def _render_node_detail(data: dict[str, Any]) -> None:
                 _tries(s),
                 status,
             ))
+        click.echo("")
+
+    operations = data.get("operations", [])
+    if operations:
+        click.echo("operations:")
+        cmd_w = max(len("COMMAND"), max(len(o["command"]) for o in operations))
+        run_w = max(
+            len("LAST RUN"),
+            max(len(_ago_with_ts(o.get("run_at"))) for o in operations),
+        )
+        stat_w = max(len("STATUS"), max(len(o.get("status") or "-") for o in operations))
+        orow = "  {}  {}  {}  {}"
+        click.echo(orow.format(
+            _wpad("COMMAND", cmd_w), _wpad("LAST RUN", run_w),
+            _wpad("STATUS", stat_w), "RESPONSE",
+        ))
+        click.echo(orow.format(
+            _wpad("-------", cmd_w), _wpad("--------", run_w),
+            _wpad("------", stat_w), "--------",
+        ))
+        for o in operations:
+            status = o.get("status") or "-"
+            color = {"failed": "red", "success": "green"}.get(status)
+            status_cell = click.style(_wpad(status, stat_w), fg=color) if color \
+                else _wpad(status, stat_w)
+            click.echo(orow.format(
+                _wpad(o["command"], cmd_w),
+                _wpad(_ago_with_ts(o.get("run_at")), run_w),
+                status_cell,
+                (o.get("response") or "").splitlines()[0] if o.get("response") else "-",
+            ).rstrip())
         click.echo("")
 
     logs = data.get("logs", [])
