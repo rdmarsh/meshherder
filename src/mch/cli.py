@@ -462,7 +462,7 @@ def gateway_group() -> None:
 
 @cli.group("help")
 def help_group() -> None:
-    """Learn mch's vocabulary: `mch help selectors`, `mch help concepts`."""
+    """Learn mch's vocabulary: `mch help selectors`, `mch help concepts`, `mch help states`."""
 
 
 # The two topics teach the words every other command's --help assumes. Sourced from DESIGN.md,
@@ -520,7 +520,34 @@ Where your data lives
 Exit codes
   0  success
   1  error
-  2  issues present (`mch fleet issues` only) — for cron and alerting"""
+  2  issues present (`mch fleet issues`) — for cron and alerting.
+     2 also = command-line usage error (bad arguments)."""
+
+# The STATE column and the problem-states section carry a lot of meaning in one word each.
+# Sourced from the NodeState docstrings (models.py), in operator wording — keep it free of
+# internal jargon (see the banned-words test).
+_STATES_TOPIC = """\
+What the STATE column means
+
+mch shows a state per node. The mesh is not a datacenter — one missed reply
+does not mean a node is gone — so several states are just "we haven't heard
+back yet", not faults.
+
+  configured   reached, and everything you asked for matches.
+  partial      reached, but some settings are still pending or failed.
+  configuring  a sync is in flight — commands are on their way to the node.
+  online       answered this cycle.
+  offline      not seen for a while; no recent advert on the mesh.
+  unreachable  mch tried to reach it on its last turn and got no answer. A
+               solar node sleeping overnight shows unreachable until its next
+               successful sync. `mch fleet issues` shows when it was last TRIED.
+  unknown      never contacted yet — usually a freshly discovered node.
+  retired      deliberately removed from management, kept for history.
+               Bring it back with `mch node unretire`.
+
+TRIES (in the drift table) counts write attempts for an enforced setting.
+An unreachable node shows 0 tries because mch could not write yet; the drift
+is corrected on the node's next successful sync."""
 
 
 @help_group.command("selectors")
@@ -533,6 +560,12 @@ def help_selectors() -> None:
 def help_concepts() -> None:
     """Desired vs reported, policy, scope, sync, and exit codes."""
     click.echo(_CONCEPTS_TOPIC)
+
+
+@help_group.command("states")
+def help_states() -> None:
+    """What each node STATE means (configured, partial, unreachable, …)."""
+    click.echo(_STATES_TOPIC)
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +687,7 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
         "state": node["state"],
         "last_seen": node["last_seen"],
         "last_connected": node["last_connected"],
+        "last_attempt_at": node.get("last_attempt_at"),
         "next_sync_at": node.get("next_sync_at"),
         "auth_cached": node["auth"]["cached"],
         "passwd_known": node["auth"]["password_known"],
@@ -734,17 +768,18 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
     data = _status_view(fleet)
 
     all_nodes = data.get("nodes", [])
-    nodes = _filter_nodes(all_nodes, query)
+    nodes = _sorted_fleet_nodes(_filter_nodes(all_nodes, query))
     drifted = _filter_drift(data.get("drifted", []), query)
     bad_state = _filter_nodes(data.get("bad_state", []), query)
     open_nodes = _filter_nodes(data.get("open_nodes", []), query)
 
     filtered = bool(query and len(nodes) != len(all_nodes))
 
-    # Zero matches with a query
+    # Zero matches with a query: fail loudly (stderr + exit 1) like `node show`, so a typo
+    # in a script does not look like success (S2.7).
     if query and not nodes:
-        click.echo(f"  no nodes matching '{query}'")
-        return
+        click.echo(f"no nodes matching '{query}'", err=True)
+        raise SystemExit(1)
 
     # Fleet table
     if nodes:
@@ -809,7 +844,14 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
     if query and len(nodes) == 1:
         click.echo(f"(tip: `mch node show {query}` shows full detail for this node)", err=True)
 
-    _render_issue_sections(drifted, bad_state, open_nodes)
+    # `fleet status` summarises issues; `fleet issues` keeps the full drift/problem-state
+    # tables (S2.1). The STATE column already marks every problem node above.
+    _render_issue_summary(drifted, bad_state, open_nodes)
+    # Fleet-wide-outage hint: most of the fleet down is likelier one gateway/radio fault
+    # than many node faults (S2.5). Computed over the whole fleet, so it is suppressed under
+    # a query — an "N of M" line would contradict a filtered table.
+    if not query:
+        _render_outage_advisory(all_nodes)
     _render_firmware_advisory(data.get("firmware"), query)
 
 
@@ -1027,10 +1069,11 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     """Render the full per-node detail view."""
     click.echo(f"label:       {data.get('label') or '-'}")
     click.echo(f"group:       {data.get('group') or '-'}")
-    click.echo(f"mesh name:   {data['name']}")
+    click.echo(f"mesh name:   {data['name'] or '-'}")
     click.echo(f"state:       {_state_text(data.get('state'))}")
     click.echo(f"last seen:   {_ago_with_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ago_with_ts(data.get('last_connected'))}")
+    click.echo(f"last tried:  {_ago_with_ts(data.get('last_attempt_at'))}")
     click.echo(f"next sync:   {_next_sync_text(data.get('next_sync_at'))}")
     click.echo(f"pubkey:      {_pk(data.get('pubkey'))}")
     click.echo(f"pubkey full: {data['pubkey']}")
@@ -1295,6 +1338,72 @@ def _render_firmware_advisory(firmware: dict[str, Any] | None, query: str | None
     )
 
 
+def _plural(n: int) -> str:
+    return "" if n == 1 else "s"
+
+
+def _sorted_fleet_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort the fleet table by group, then label (empty groups last, case-insensitive).
+
+    Sorted in the renderer, not the DB query: `get_all_nodes` also feeds the scheduler and
+    changing work-queue iteration order is out of scope for a display fix (S2.2). Grouping
+    the rows also makes near-duplicate group names (e.g. `rdm_test` vs `rdmtest`) stand out.
+    """
+    def key(n: dict[str, Any]) -> tuple[bool, str, str]:
+        group = n.get("group") or ""
+        return (group == "", group.lower(), (n.get("label") or "").lower())
+    return sorted(nodes, key=key)
+
+
+def _render_issue_summary(
+    drifted: list[dict[str, Any]],
+    bad_state: list[dict[str, Any]],
+    open_nodes: list[dict[str, Any]],
+) -> None:
+    """Summarise fleet issues under the table (S2.1) — the tables live in `mch fleet issues`.
+
+    The STATE column already marks every problem node in the main table, so repeating the
+    full drift and problem-state tables in the `status` footer was pure repetition. The
+    open-nodes line stays prominent — it is the one security-critical category — but as a
+    one-liner.
+    """
+    if not (drifted or bad_state or open_nodes):
+        return
+    click.echo("")
+    parts: list[str] = []
+    if drifted:
+        n_nodes = len({s["node_pubkey"] for s in drifted})
+        parts.append(
+            f"{len(drifted)} drifted setting{_plural(len(drifted))} "
+            f"on {n_nodes} node{_plural(n_nodes)}"
+        )
+    if bad_state:
+        parts.append(f"{len(bad_state)} node{_plural(len(bad_state))} in problem states")
+    if parts:
+        click.echo(f"issues: {' · '.join(parts)}  (`mch fleet issues` for detail)")
+    if open_nodes:
+        n = len(open_nodes)
+        click.echo(
+            f"open nodes: {n} with no ACL — anyone on the mesh can send them commands  "
+            "(`mch fleet issues`)"
+        )
+
+
+def _render_outage_advisory(nodes: list[dict[str, Any]]) -> None:
+    """Advisory when most of the fleet is down (S2.5): likelier one gateway/radio fault than
+    many independent node faults. Advisory only — never an issue category, never exit 2.
+    """
+    non_retired = [n for n in nodes if n.get("state") != "retired"]
+    down = [n for n in non_retired if n.get("state") in ("unreachable", "offline")]
+    if len(down) < 3 or len(down) * 2 < len(non_retired):
+        return
+    click.echo("")
+    click.echo(
+        f"note: {len(down)} of {len(non_retired)} nodes unreachable — if unexpected, "
+        "check the gateway (`mch daemon logs`, `mch gateway contacts`)"
+    )
+
+
 def _render_issue_sections(
     drifted: list[dict[str, Any]],
     bad_state: list[dict[str, Any]],
@@ -1338,6 +1447,11 @@ def _render_issue_sections(
                              _sv(s.get("desired")), _sv(s.get("observed")),
                              _tries(s),
                              s["policy"]))
+        # 0 TRIES on an enforce row reads as "mch isn't doing anything" — explain that the fix
+        # waits for the node's next successful sync, and what TRIES actually counts (S2.4).
+        if any(s["policy"] == "enforce" and _tries(s) == "0" for s in drifted):
+            click.echo("  enforce drift is corrected on the node's next successful sync; "
+                       "TRIES counts write attempts")
         click.echo("")
 
     if bad_state:
@@ -1346,17 +1460,24 @@ def _render_issue_sections(
             _wlen("LABEL"),
             max((_wlen(n.get("label") or "-") for n in bad_state), default=0),
         )
-        fmt = "  {:<12}  {}  {}  {:<16}"
-        click.echo(fmt.format("PUBKEY", _wpad("LABEL", name_w), f"{'STATE':<12}", "LAST SEEN"))
-        click.echo(fmt.format("------", _wpad("-----", name_w), f"{'-----':<12}", "---------"))
+        # TRIED = when mch last tried to reach the node (any outcome). It answers the apparent
+        # contradiction "unreachable … LAST SEEN 2h ago": the advert is 2h old, but the failed
+        # probe that set unreachable may have been much later (S2.4).
+        fmt = "  {:<12}  {}  {}  {:<16}  {}"
+        click.echo(fmt.format(
+            "PUBKEY", _wpad("LABEL", name_w), f"{'STATE':<12}", "LAST SEEN", "TRIED"))
+        click.echo(fmt.format(
+            "------", _wpad("-----", name_w), f"{'-----':<12}", "---------", "-----"))
         for n in bad_state:
             label = n.get("label") or "-"
             last = _ago(n.get("last_seen"))
+            tried = _ago(n.get("last_attempt_at"))
             click.echo(fmt.format(
                 _pk(n.get("pubkey")),
                 _wpad(label, name_w),
                 _state_cell(n.get("state"), 12),
                 last,
+                tried,
             ))
         click.echo("")
 
@@ -1429,39 +1550,35 @@ def _filter_plan_items(items: list[dict[str, Any]], query: str | None) -> list[d
     ]
 
 
-@gateway_group.command("contacts")
-@click.argument("query", required=False, default=None)
-@click.pass_context
-def contacts(ctx: click.Context, query: str | None) -> None:
-    """Show repeaters the gateway can see that mch isn't managing yet.
+# Above a handful of matches the per-contact adopt recipe (~10 lines each) drowns the
+# terminal — on luna the gateway sees 337 unmanaged repeaters (~3,400 lines). So the recipe
+# is reserved for a small QUERY result; everything else is a compact table (S2.6).
+_MAX_CONTACT_RECIPES = 5
 
-    \b
-    Optionally filter by pubkey prefix or name substring:
-      mch gateway contacts 4e       # pubkeys starting with 4e
-      mch gateway contacts mill     # names containing "mill"
 
-    For each contact it prints the ready-to-run `mch node adopt` command that starts
-    managing the node, plus the matching secrets.yaml snippet if the node needs a login
-    password.
-    """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
-    data = _check(resp)
-    data = _filter_contacts(data or [], query)
-
-    if not data:
-        if query:
-            click.echo(f"no unmanaged repeater contacts matching '{query}'")
-        else:
-            click.echo("no unmanaged repeater contacts found")
-        return
-
+def _render_contacts_table(contacts: list[dict[str, Any]], query: str | None) -> None:
+    """Compact PUBKEY/NAME table of unmanaged repeaters, sorted by name."""
+    rows = sorted(contacts, key=lambda c: (c.get("adv_name") or "").lower())
+    name_w = max(
+        _wlen("NAME"), max((_wlen(c.get("adv_name") or "-") for c in rows), default=0)
+    )
+    click.echo(f"  {'PUBKEY':<12}  {_wpad('NAME', name_w)}".rstrip())
+    click.echo(f"  {'------':<12}  {_wpad('----', name_w)}".rstrip())
+    for c in rows:
+        click.echo(f"  {c.get('public_key', '')[:12]:<12}  {c.get('adv_name') or '-'}".rstrip())
+    n = len(rows)
     if query:
-        click.echo(f"# Repeater contacts matching '{query}' that mch isn't managing yet.")
+        click.echo(f"{n} unmanaged repeater{_plural(n)} matching '{query}'")
     else:
-        click.echo("# Repeater contacts the gateway can see that mch isn't managing yet.")
-    click.echo("# Bring one under management by running its `mch node adopt` command below.\n")
+        click.echo(f"{n} unmanaged repeater{_plural(n)} visible to the gateway")
+    click.echo("(`mch gateway contacts NAME` prints the adopt recipe for matches)")
 
-    for c in data:
+
+def _render_contact_recipes(contacts: list[dict[str, Any]]) -> None:
+    """Per-contact `mch node adopt` recipe + secrets.yaml stanza (small result sets only)."""
+    click.echo("# Repeater contacts that mch isn't managing yet.")
+    click.echo("# Bring one under management by running its `mch node adopt` command below.\n")
+    for c in contacts:
         pubkey = c.get("public_key", "")
         prefix = pubkey[:12]
         name = c.get("adv_name", "") or "unknown"
@@ -1483,6 +1600,46 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
         click.echo("# if the node requires a login, add its password to secrets.yaml:")
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
+
+
+@gateway_group.command("contacts")
+@click.argument("query", required=False, default=None)
+@click.option("--json", "as_json", is_flag=True,
+              help="Emit the contact list as JSON for scripting.")
+@click.pass_context
+def contacts(ctx: click.Context, query: str | None, as_json: bool) -> None:
+    """Show repeaters the gateway can see that mch isn't managing yet.
+
+    \b
+    Without a filter it prints a compact table (at mesh scale the gateway can see
+    hundreds of contacts). Filter by pubkey prefix or name substring:
+      mch gateway contacts 4e       # pubkeys starting with 4e
+      mch gateway contacts mill     # names containing "mill"
+
+    When a filter matches only a handful of contacts, each is shown as a ready-to-run
+    `mch node adopt` command plus its secrets.yaml snippet; a larger match stays a table.
+    """
+    resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
+    data = _check(resp)
+    data = _filter_contacts(data or [], query)
+
+    if as_json:
+        _emit_json(data)
+        return
+
+    if not data:
+        if query:
+            click.echo(f"no unmanaged repeater contacts matching '{query}'")
+        else:
+            click.echo("no unmanaged repeater contacts found")
+        return
+
+    # The adopt recipe is reserved for a small, deliberate QUERY result; everything else
+    # (no query, or a broad match) is the compact table.
+    if query and len(data) <= _MAX_CONTACT_RECIPES:
+        _render_contact_recipes(data)
+    else:
+        _render_contacts_table(data, query)
 
 
 @node_group.command("discover")
@@ -2277,7 +2434,7 @@ def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) 
 
 
 @config_group.command("set")
-@click.argument("args", nargs=-1, required=True)
+@click.argument("args", nargs=-1, required=True, metavar="[NODE] KEY [VALUE]")
 @click.option("--group", "group_name", default=None,
               help="Set at group scope: applies to every node in the group.")
 @click.option("--global", "global_scope", is_flag=True,
@@ -2361,7 +2518,7 @@ def set_setting(
 
 
 @config_group.command("unset")
-@click.argument("args", nargs=-1, required=True)
+@click.argument("args", nargs=-1, required=True, metavar="[NODE] KEY")
 @click.option("--group", "group_name", default=None,
               help="Unset at group scope.")
 @click.option("--global", "global_scope", is_flag=True,

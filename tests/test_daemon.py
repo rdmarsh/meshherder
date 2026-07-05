@@ -1393,7 +1393,7 @@ async def test_issues_dispatch_returns_bad_state_nodes(db, wq, config):
 
     assert resp["data"]["bad_state"] == [{"pubkey": bad.pubkey, "label": "b",
                                            "name": "Bad", "state": "configuring",
-                                           "last_seen": None}]
+                                           "last_seen": None, "last_attempt_at": None}]
 
 
 async def test_issues_dispatch_online_not_in_bad_state(db, wq, config):

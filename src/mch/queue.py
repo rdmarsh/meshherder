@@ -1962,6 +1962,14 @@ class WorkQueue:
         a re-login failure raises _ReloginFailed, which the caller treats as
         offline (we cannot manage a node we cannot authenticate to).
         """
+        # Record that we are trying to reach the node *now*, before the outcome is known, so
+        # an eventual "unreachable" row can honestly say when the verdict was reached rather
+        # than implying it just happened (S2.4). Persisted directly so it survives even if the
+        # pass returns early; the in-memory node is updated to match.
+        attempt_at = datetime.now(UTC)
+        node.last_attempt_at = attempt_at
+        await self._db.set_node_last_attempt(node.pubkey, attempt_at)
+
         stored_path_failed = False
         for attempt in range(1, _PROBE_ATTEMPTS + 1):
             await _progress(

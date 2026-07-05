@@ -624,6 +624,8 @@ async def test_probe_failure_skips_sync_and_marks_unreachable(db):
     assert results[0].reachable is False
     node = await db.get_node("aabbccdd1122")
     assert node.state == NodeState.UNREACHABLE
+    # S2.4: the probe records when it *tried*, even though the node never answered.
+    assert node.last_attempt_at is not None
     logs = await db.get_logs("aabbccdd1122")
     assert any("node unreachable" in entry["message"] for entry in logs)
 

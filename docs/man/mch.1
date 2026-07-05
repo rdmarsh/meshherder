@@ -64,6 +64,10 @@ Explain how to name a node on the command line (label, pubkey prefix, or mesh na
 .B help concepts
 Explain desired vs reported values, policy (enforce/audit/fact/skip), scope
 precedence, what a sync cycle does, and the exit codes.
+.TP
+.B help states
+Explain what each node STATE means (configured, partial, unreachable, offline,
+and the rest) and how TRIES relates to unreachable nodes.
 .SS daemon \(em process lifecycle
 .TP
 .B daemon start
@@ -102,7 +106,10 @@ Unrecognised fact names are reported as warnings with close-match suggestions.
 .TP
 .B fleet status
 Show the fleet table, including state, label, group, firmware, neighbour count,
-and last seen time.
+and last seen time. Rows are sorted by group then label. Below the table it
+prints a short issue summary (drift, problem-state, and open-node counts) and,
+when most of the fleet is down, a gateway advisory; the full issue tables live in
+.BR "fleet issues" .
 .TP
 .B fleet status \fILABEL_OR_PREFIX\fR
 Show the fleet table filtered to matching nodes. A single match prints a hint
@@ -285,10 +292,15 @@ or require confirmation.
 .SS gateway \(em operate the locally attached gateway node
 .TP
 .B gateway contacts \fR[\fILABEL_OR_PREFIX\fR]
-Show repeater contacts visible to the gateway that are not yet managed in the DB,
-printing the
+Show repeater contacts visible to the gateway that are not yet managed. Without a
+filter it prints a compact table (the gateway can see hundreds of contacts). When
+a filter matches only a handful, each is shown as a ready-to-run
 .B "mch node adopt"
-command to bring each under management.
+command plus its
+.I secrets.yaml
+snippet; a larger match stays a table. Add
+.B \-\-json
+to emit the contact list for scripting.
 .TP
 .B gateway admin \fR[\fICLI ARGS...\fR]
 Stop

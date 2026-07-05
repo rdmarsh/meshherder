@@ -603,6 +603,7 @@ mch status                          Shortcut for `mch fleet status` (the daily l
 mch sync                            Shortcut for `mch fleet sync`
 mch help selectors                  How to name a node on the command line
 mch help concepts                   Desired vs reported, policy, scope, sync, exit codes
+mch help states                     What each node STATE means (configured, partial, unreachable, …)
 mch fleet status                    Fleet overview: state, label, group, firmware (VER, ! = outdated), neighbours, last seen
 mch fleet status <label|prefix>     Filtered table; a single match hints `mch node show`
                               (add --json to fleet status/issues/plan/logs, node show, config show for scripting)

@@ -58,6 +58,7 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
             "issues": node_issues,
             "last_seen": _iso(node.last_seen),
             "last_connected": _iso(node.last_connected),
+            "last_attempt_at": _iso(node.last_attempt_at),
             "next_sync_at": _iso(node.next_sync_at),
             "auth": {
                 "required": node.auth_required,
@@ -323,6 +324,7 @@ def _issues_report(
                 "name": node["name"],
                 "state": node["state"],
                 "last_seen": node["last_seen"],
+                "last_attempt_at": node["last_attempt_at"],
             })
         if node["auth"]["open"]:
             open_nodes.append({

@@ -963,6 +963,21 @@ def test_help_topics_teach_vocabulary():
         assert word in concepts.output
 
 
+def test_help_states_topic_explains_the_state_column():
+    """`mch help states` teaches the STATE words, including the honest unreachable line (S2.3)."""
+    import re as _re
+    runner = CliRunner()
+    result = runner.invoke(cli, ["help", "states"])
+    assert result.exit_code == 0
+    for word in ("unreachable", "partial", "configured", "retired", "TRIES"):
+        assert word in result.output
+    # Same banned-jargon rule as --help output (RECOMMENDATIONS-2 S1.1).
+    assert not _re.search(
+        r"\bDB\b|source of truth|sunset|eviction|policy-only override|projection",
+        result.output, _re.IGNORECASE,
+    )
+
+
 # ------ --json scripting surface (RECOMMENDATIONS-2 S3.2) ------
 
 def _report_resp(nodes=None, issues=None, plan=None):
@@ -1181,6 +1196,20 @@ def test_status_renders_canonical_fleet_api_response():
     assert "4" in result.output
 
 
+def test_node_show_blank_mesh_name_renders_dash():
+    # S2.7: a never-contacted node has no mesh name; render '-' not emptiness.
+    result = _run(["node", "show", "9635"], _detail(name=""))
+    assert "mesh name:   -" in result.output
+
+
+def test_config_set_usage_shows_positional_metavar():
+    # S2.7: usage reads with the real positionals, not the nargs `ARGS...` hack.
+    runner = CliRunner()
+    result = runner.invoke(cli, ["config", "set"])
+    assert "[NODE] KEY [VALUE]" in result.output
+    assert "ARGS..." not in result.output
+
+
 def test_node_show_renders_known_path_from_detail_response():
     detail = _detail()
     detail["data"]["management_path"] = {
@@ -1301,38 +1330,91 @@ def test_status_no_issues_no_sections():
     assert "unseen" not in result.output
 
 
-def test_status_shows_drifted_section():
+def test_status_summarizes_drift_without_the_table():
+    # S2.1: `status` summarises; the full drift table moved to `fleet issues`.
     result = _run(["fleet", "status"], _status_resp(drifted=[{
         "node_pubkey": "aabbccdd" * 8, "label": "site-a",
         "key": "owner.info", "desired": "Managed by mch",
         "observed": "wrong", "policy": "enforce", "update_attempts": 20,
     }]))
-    assert "drifted settings" in result.output
-    assert re.search(r"PUBKEY\s+LABEL", result.output)
-    assert "owner.info" in result.output
-    assert "site-a" in result.output
-    assert "TRIES" in result.output
-    assert "20" in result.output
+    assert "issues: 1 drifted setting on 1 node" in result.output
+    assert "(`mch fleet issues` for detail)" in result.output
+    assert "owner.info" not in result.output  # the table itself is not repeated here
 
 
-def test_status_shows_bad_state_section():
+def test_status_summarizes_bad_state_without_the_table():
     result = _run(["fleet", "status"], _status_resp(bad_state=[{
         "pubkey": "aabbccdd" * 8, "label": "wip 07",
         "name": "wip 07", "state": "configuring", "last_seen": None,
     }]))
-    assert "problem states" in result.output
-    assert re.search(r"PUBKEY\s+LABEL", result.output)
-    assert "configuring" in result.output
-    assert "wip 07" in result.output
+    assert "1 node in problem states" in result.output
+    assert "problem states:" not in result.output  # section heading only in `fleet issues`
 
 
-def test_status_shows_open_nodes_section():
+def test_status_summarizes_open_nodes_as_one_line():
     result = _run(["fleet", "status"], _status_resp(open_nodes=[{
         "pubkey": "aabbccdd" * 8, "label": "wip 06", "name": "wip 06",
     }]))
-    assert "open node" in result.output
-    assert re.search(r"PUBKEY\s+LABEL", result.output)
-    assert "wip 06" in result.output
+    assert "open nodes: 1 with no ACL" in result.output
+
+
+def test_issues_problem_states_shows_tried_column():
+    # S2.4: TRIED says when mch last tried to reach the node, resolving the apparent
+    # "unreachable … LAST SEEN 2h ago" contradiction.
+    result = _run(["fleet", "issues"], _status_resp(bad_state=[{
+        "pubkey": "aabbccdd" * 8, "label": "corbin", "name": "Corb",
+        "state": "unreachable", "last_seen": "2026-07-05T00:00:00+00:00",
+        "last_attempt_at": "2026-07-05T00:00:00+00:00",
+    }]))
+    assert result.exit_code == 2
+    assert "TRIED" in result.output
+
+
+def test_issues_drift_footer_explains_zero_tries():
+    result = _run(["fleet", "issues"], _status_resp(drifted=[{
+        "node_pubkey": "aabbccdd" * 8, "label": "corbin",
+        "key": "owner.info", "desired": "x", "observed": "y",
+        "policy": "enforce", "update_attempts": 0,
+    }]))
+    assert result.exit_code == 2
+    assert "next successful sync" in result.output
+    assert "TRIES counts write attempts" in result.output
+
+
+def test_node_show_renders_last_tried_line():
+    detail = _detail()
+    detail["data"]["last_attempt_at"] = "2026-07-05T00:00:00+00:00"
+    result = _run(["node", "show", "site-a"], detail)
+    assert "last tried:" in result.output
+
+
+def test_issues_shows_full_drift_table():
+    result = _run(["fleet", "issues"], _status_resp(drifted=[{
+        "node_pubkey": "aabbccdd" * 8, "label": "site-a",
+        "key": "owner.info", "desired": "Managed by mch",
+        "observed": "wrong", "policy": "enforce", "update_attempts": 20,
+    }]))
+    assert result.exit_code == 2
+    assert "drifted settings" in result.output
+    assert "owner.info" in result.output
+    assert "TRIES" in result.output
+    assert "20" in result.output
+
+
+def test_status_outage_advisory_when_most_nodes_down():
+    # S2.5: ≥3 and ≥half of non-retired nodes down → gateway advisory.
+    nodes = [_summary(pubkey=f"{i:02d}" + "aa" * 31, label=f"n{i}", state="unreachable")
+             for i in range(3)] + [_summary(pubkey="ff" * 32, label="up", state="configured")]
+    result = _run(["fleet", "status"], _status_resp(nodes=nodes))
+    assert "note: 3 of 4 nodes unreachable" in result.output
+    assert "check the gateway" in result.output
+
+
+def test_status_no_outage_advisory_when_fleet_healthy():
+    nodes = [_summary(pubkey=f"{i:02d}" + "aa" * 31, label=f"n{i}", state="configured")
+             for i in range(4)]
+    result = _run(["fleet", "status"], _status_resp(nodes=nodes))
+    assert "check the gateway" not in result.output
 
 
 def test_status_multi_match_shows_table():
@@ -1587,8 +1669,9 @@ def test_node_show_shows_ok_settings_in_green():
 
 
 def test_status_no_match():
+    # S2.7: a zero-match filter fails loudly (stderr + exit 1), like `node show`.
     result = _run(["fleet", "status", "zzzz"], _status_resp())
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "no nodes matching" in result.output
 
 
@@ -2079,16 +2162,44 @@ def test_contacts_no_contacts():
     assert "no unmanaged repeater contacts" in result.output
 
 
-def test_contacts_shows_adopt_command():
+def test_contacts_no_query_is_a_table_not_recipes():
+    # S2.6: the default view is a compact table — no per-contact adopt recipe.
     result = _run(["gateway", "contacts"], {"ok": True, "data": [
         {"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2},
     ]})
     assert result.exit_code == 0
-    # Post-sunset: print the runnable adopt command with the full pubkey, not a config.yaml block.
+    assert "PUBKEY" in result.output and "NAME" in result.output
+    assert "Millbrook" in result.output
+    assert "1 unmanaged repeater visible to the gateway" in result.output
+    assert "mch node adopt" not in result.output  # recipe is query-only
+
+
+def test_contacts_query_small_match_shows_adopt_recipe():
+    result = _run(["gateway", "contacts", "mill"], {"ok": True, "data": [
+        {"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2},
+    ]})
+    assert result.exit_code == 0
     assert "mch node adopt" in result.output
     assert "aabbccdd" * 8 in result.output
     assert "Millbrook" in result.output
     assert "config.yaml" not in result.output
+
+
+def test_contacts_query_large_match_stays_a_table():
+    # Above the recipe cap even a query result stays a table (S2.6).
+    data = [{"public_key": f"{i:02d}" + "aa" * 31, "adv_name": f"rep {i}", "type": 2}
+            for i in range(8)]
+    result = _run(["gateway", "contacts", "rep"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert "mch node adopt" not in result.output
+    assert "8 unmanaged repeaters matching 'rep'" in result.output
+
+
+def test_contacts_json_emits_list():
+    data = [{"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2}]
+    result = _run(["gateway", "contacts", "--json"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == data
 
 
 # ------ sync ------
