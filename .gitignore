@@ -14,3 +14,8 @@ secrets.yaml
 SKILLS_USED.md
 *.sock
 .claude/
+
+# UI survey artifacts: contain real fleet node names/pubkeys, never commit
+# (see RECOMMENDATIONS-3.md "Evidence")
+mch-ui-survey.txt
+tools/ui-survey.sh

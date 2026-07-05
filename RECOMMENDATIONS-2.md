@@ -1,5 +1,10 @@
 # Recommendations Part 2 — CLI UX and workflow
 
+> **Part 3 exists:** `RECOMMENDATIONS-3.md` (2026-07-05, at v0.22.0) reviews the *output* UX
+> against a live operator transcript and sequences the complexity pay-down (the C2 splits).
+> Slice 4 below (`mch node add` pipeline) is still owned by this file and still awaits operator
+> review of `docs/onboarding-pipeline.md`.
+
 > ## Progress (updated 2026-07-04)
 >
 > All gates green throughout (`pytest` 970 passing, `ruff`, `mypy src`). Each slice on its own
