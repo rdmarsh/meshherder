@@ -1388,6 +1388,20 @@ def test_node_show_renders_last_tried_line():
     assert "last tried:" in result.output
 
 
+def test_node_show_renders_operations_section():
+    # S3.2: scheduled operations and their last outcome get their own section.
+    detail = _detail()
+    detail["data"]["operations"] = [
+        {"command": "clock sync", "run_at": "2026-07-04T00:00:00+00:00",
+         "status": "failed", "response": "ERR: clock cannot go backwards"},
+    ]
+    result = _run(["node", "show", "site-a"], detail)
+    assert "operations:" in result.output
+    assert "clock sync" in result.output
+    assert "failed" in result.output
+    assert "ERR: clock cannot go backwards" in result.output
+
+
 def test_issues_shows_full_drift_table():
     result = _run(["fleet", "issues"], _status_resp(drifted=[{
         "node_pubkey": "aabbccdd" * 8, "label": "site-a",

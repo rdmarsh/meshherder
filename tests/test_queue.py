@@ -1620,6 +1620,36 @@ async def test_failed_config_operations_reseeded_when_retry_due(db):
     assert results[0].operations_run == 1
 
 
+async def test_failed_clock_sync_still_refreshes_clock_fact(db):
+    """S3.1: a failed `clock sync` reads the clock anyway, so the stored fact can't lie.
+
+    Without this, the clock fact only refreshes on a successful sync, so a node whose sync
+    keeps failing keeps a stale drift direction forever (corbin showed "slow" while the
+    failure proved it was now fast).
+    """
+    op_cfg = OperationConfig(command="clock sync", every_hours=24)
+    node_cfg = _node(pubkey="aabbcc", label="TestNode", operations=[op_cfg])
+    cfg = _make_config(node_cfgs=[node_cfg])
+    cfg.facts = []
+    await db.upsert_node(Node(pubkey="aabbccdd1122", name="TestNode"))
+    await db.upsert_operation(OperationRecord(node_pubkey="aabbccdd1122", command="clock sync"))
+
+    gw = _make_gateway(contacts=[_contact("aabbccdd1122")])
+    gw.send_command = AsyncMock(side_effect=[
+        CommandResult(success=True, text="v1.14.1"),                        # reachability probe
+        CommandResult(success=False, error="ERR: clock cannot go backwards"),  # clock sync fails
+        CommandResult(success=True, text="12:00 - 5/7/2026 UTC"),           # clock read refresh
+    ])
+    wq = WorkQueue(cfg, gw, db)
+    await _seed_desired(db, cfg, await gw.get_contacts())
+
+    results = await wq.run_cycle()
+
+    assert results[0].operations_failed == 1
+    # the clock read after the failure landed in the facts store
+    assert (await db.get_facts("aabbccdd1122")).get("clock") == "12:00 - 5/7/2026 UTC"
+
+
 async def test_operation_row_updated_not_duplicated(db):
     """Running a pending op updates the original row in-place — no duplicate INSERT."""
     node_cfg = _node(pubkey="aabbcc", label="TestNode")
@@ -1687,6 +1717,7 @@ async def test_fire_and_forget_false_still_fails_on_timeout(db):
     gw.send_command = AsyncMock(side_effect=[
         CommandResult(success=True, text="v1.14.1"),       # reachability probe
         CommandResult(success=False, error="timeout"),     # clock sync — fails
+        CommandResult(success=False, error="timeout"),     # clock refresh read (S3.1)
     ])
     wq = WorkQueue(cfg, gw, db)
     await _seed_desired(db, cfg, await gw.get_contacts())
@@ -1732,6 +1763,8 @@ async def test_operation_err_reply_counts_as_failure(db):
     gw.send_command = AsyncMock(side_effect=[
         CommandResult(success=True, text="v1.14.1"),
         CommandResult(success=True, text="ERR: clock cannot go backwards"),
+        # A failed clock sync now reads the clock to refresh the fact (S3.1).
+        CommandResult(success=True, text="12:00 - 5/7/2026 UTC"),
     ])
     wq = WorkQueue(cfg, gw, db)
     await _seed_desired(db, cfg, await gw.get_contacts())

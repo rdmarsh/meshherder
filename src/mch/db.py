@@ -619,6 +619,28 @@ class Database:
             row = await cur.fetchone()
         return _row_to_operation(row) if row else None
 
+    async def get_operations(self, node_pubkey: str) -> list[OperationRecord]:
+        """Latest record per command for a node, most-recent first (for `mch node show`).
+
+        Operations are updated in place, so in practice there is one row per command; this
+        dedupes defensively and keeps only the newest per command.
+        """
+        db = self._db_required()
+        async with db.execute(
+            "SELECT * FROM operations WHERE node_pubkey = ?"
+            " ORDER BY COALESCE(run_at, queued_at) DESC",
+            (node_pubkey,),
+        ) as cur:
+            rows = await cur.fetchall()
+        seen: set[str] = set()
+        result: list[OperationRecord] = []
+        for row in rows:
+            op = _row_to_operation(row)
+            if op.command not in seen:
+                seen.add(op.command)
+                result.append(op)
+        return result
+
     async def get_pending_operations(self, node_pubkey: str) -> list[OperationRecord]:
         db = self._db_required()
         async with db.execute(
