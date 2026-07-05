@@ -913,6 +913,7 @@ def issues(ctx: click.Context, query: str | None, as_json: bool) -> None:
     help="Apply an operator-approved replacement path to the gateway contact.",
 )
 @click.option("--yes", "-y", is_flag=True, help="Apply the change (default: preview only).")
+@click.option("--json", "as_json", is_flag=True, help="Emit the path status/candidate as JSON.")
 @click.pass_context
 def path(
     ctx: click.Context,
@@ -921,6 +922,7 @@ def path(
     advert: bool,
     apply_path: str | None,
     yes: bool,
+    as_json: bool,
 ) -> None:
     """Inspect or explicitly repair the cached management path for NODE.
 
@@ -944,6 +946,9 @@ def path(
             timeout=90,
         )
         data = _check(resp)
+        if as_json:
+            _emit_json(data)
+            return
         _render_path_candidate(data)
         return
 
@@ -964,12 +969,18 @@ def path(
             timeout=90,
         )
         data = _check(resp)
+        if as_json:
+            _emit_json(data)
+            return
         click.echo("updated cached management path")
         _render_path_status(data)
         return
 
     resp = _rpc(ctx.obj["socket"], {"cmd": "path", "query": node})
     data = _check(resp)
+    if as_json:
+        _emit_json(data)
+        return
     _render_path_status(data)
 
 
@@ -1692,8 +1703,11 @@ def contacts(ctx: click.Context, query: str | None, as_json: bool) -> None:
     is_flag=True,
     help="Hide nodes mch already manages; show only unmanaged ones.",
 )
+@click.option("--json", "as_json", is_flag=True, help="Emit the discovery result as JSON.")
 @click.pass_context
-def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -> None:
+def discover(
+    ctx: click.Context, radio: str, dwell: float, unknown_only: bool, as_json: bool
+) -> None:
     """Actively discover MeshCore nodes on a temporary gateway radio.
 
     This sends a bounded discovery request, restores the gateway radio, and
@@ -1709,7 +1723,7 @@ def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -
         ctx.obj["socket"],
         {"cmd": "discover", "radio": [float(freq), float(bw), int(sf), int(cr)], "dwell": dwell},
         timeout=dwell + 30,
-        on_progress=lambda msg: click.echo(f"  {msg}"),
+        on_progress=lambda msg: click.echo(f"  {msg}") if not as_json else None,
     )
     data = _check(resp)
     if unknown_only:
@@ -1718,6 +1732,9 @@ def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -
             node for node in data.get("nodes", [])
             if node.get("status") != "managed"
         ]
+    if as_json:
+        _emit_json(data)
+        return
     _render_discovery(data)
 
 
@@ -1812,8 +1829,11 @@ def _render_probe_result(data: dict[str, Any]) -> None:
     help="Log in with the node's configured password before probing. Auth-required "
     "nodes silently drop unauthenticated commands, so a bare `ver` times out.",
 )
+@click.option("--json", "as_json", is_flag=True, help="Emit the probe result as JSON.")
 @click.pass_context
-def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) -> None:
+def probe(
+    ctx: click.Context, node: str, radio: str, advert: bool, login: bool, as_json: bool
+) -> None:
     """Send a directed `ver` to NODE on a given radio to test reachability.
 
     Temporarily switches the gateway radio, optionally sends a zero-hop advert
@@ -1836,10 +1856,13 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
             "advert": advert,
             "login": login,
         },
-        on_progress=lambda msg: click.echo(f"  {msg}"),
+        on_progress=lambda msg: click.echo(f"  {msg}") if not as_json else None,
         timeout=60,
     )
     data = _check(resp)
+    if as_json:
+        _emit_json(data)
+        return
     _render_probe_result(data)
 
 
@@ -2204,8 +2227,9 @@ def set_label(ctx: click.Context, node: str, label: str | None) -> None:
 
 @fleet_group.command("suggest")
 @click.argument("query", required=False)
+@click.option("--json", "as_json", is_flag=True, help="Emit the suggestions as JSON for scripting.")
 @click.pass_context
-def suggest(ctx: click.Context, query: str | None) -> None:
+def suggest(ctx: click.Context, query: str | None, as_json: bool) -> None:
     """Show suggested settings based on each node's neighbour count.
 
     QUERY: pubkey prefix, label substring, or name substring. Omit to show all nodes.
@@ -2217,13 +2241,17 @@ def suggest(ctx: click.Context, query: str | None) -> None:
     Requires a `neighbors` fact-policy key (mch config set --global neighbors
     --policy fact) and at least one completed sync cycle to populate the count.
     """
-    _show_suggestions(ctx, query)
+    _show_suggestions(ctx, query, as_json)
 
 
-def _show_suggestions(ctx: click.Context, query: str | None) -> None:
+def _show_suggestions(ctx: click.Context, query: str | None, as_json: bool = False) -> None:
     resp = _rpc(ctx.obj["socket"], {"cmd": "suggest"})
     all_data = _check(resp)
     data = _filter_nodes(all_data, query)
+
+    if as_json:
+        _emit_json(data)
+        return
 
     if not all_data:
         click.echo("no nodes in database")

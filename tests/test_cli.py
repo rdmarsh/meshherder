@@ -479,6 +479,43 @@ def test_path_command_shows_stored_route_metadata():
     assert "out_path_hash_mode: 1" in result.output
 
 
+def test_path_command_json_emits_payload_verbatim():
+    # S4.4: json-first — the read command emits the daemon shape verbatim.
+    payload = {"pubkey": "aabbccdd11223344", "label": "site-a", "name": "Tower",
+               "contact_present": False, "cached_path": "flood", "route": "flood",
+               "path_repair_needed": True}
+    result = _run(["node", "path", "site-a", "--json"], {"ok": True, "data": payload})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
+
+
+def test_probe_command_json_emits_payload_verbatim():
+    payload = {"ok": True, "response": "v1.14.1", "login_attempted": False}
+    result = _run(
+        ["node", "probe", "site-a", "--radio", "915.8,250,11,5", "--json"],
+        {"ok": True, "data": payload},
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
+
+
+def test_discover_command_json_emits_payload_verbatim():
+    payload = {"nodes": [{"pubkey": "aa" * 32, "name": "N", "status": "unmanaged"}]}
+    result = _run(
+        ["node", "discover", "--radio", "915.8,250,10,5", "--json"],
+        {"ok": True, "data": payload},
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
+
+
+def test_suggest_command_json_emits_list_verbatim():
+    payload = [{"pubkey": "aa" * 32, "label": "site-a", "neighbors": 4, "profile": "tower"}]
+    result = _run(["fleet", "suggest", "--json"], {"ok": True, "data": payload})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
+
+
 def test_path_command_marks_flood_route_for_repair():
     result = _run(["node", "path", "site-a"], {"ok": True, "data": {
         "pubkey": "aabbccdd11223344",

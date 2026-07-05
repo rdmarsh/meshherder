@@ -12,6 +12,19 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Next
 
+### RECOMMENDATIONS-3 slice 4 — remaining items
+
+- **S4.4 tail:** `--json` was added to the read commands `node path`, `node discover`,
+  `fleet suggest`, `node probe` (and `gateway contacts` in S2.6). Still owed: `--json` on the
+  *preview payloads* of `node prune` / `node clean` / `config import`, plus short shape docstrings
+  on those daemon handlers and socket-contract coverage.
+- **S4.2 (deferred):** split `src/mch/cli.py` (~3.3k lines) into a `src/mch/cli/` package
+  (`render.py`, `fleet.py`, `node.py`, `config_cmds.py`, `daemon_cmds.py`, `gateway.py`, `wizard.py`,
+  `help_topics.py`). Pure-move refactor, its own PR; run `mch --help` diffs before/after and keep the
+  help-text/banned-jargon/docs-drift guards green.
+- **S4.3 (deferred):** turn `daemon._dispatch`'s if-chain into a `dict[str, Handler]` table, extracting
+  the remaining inline blocks into `_handle_*` coroutines. Mechanical; socket contract tests pin it.
+
 ### Commission flow: finish the config.yaml sunset
 
 - DONE (Unreleased, 2026-07-03): `mch commission` replace/scan and `mch node contacts` now resolve
