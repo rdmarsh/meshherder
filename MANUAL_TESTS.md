@@ -261,11 +261,11 @@ Result:
 ## Test 9: Destructive-Action Guardrails
 
 Purpose: confirm inspection commands do not silently delete state or send irreversible commands.
-Do not run `mch node prune --yes`, `mch node remove --yes`, or `mch node remove --force` in this test.
+Do not run `mch node prune --yes` in this test.
 
 ```bash
 mch node prune
-mch node remove <TEST_LABEL> --yes
+mch node prune <TEST_LABEL>
 mch node exec <TEST_LABEL> erase
 mch node exec <TEST_LABEL> set prv.key 00000000
 ```
@@ -273,8 +273,9 @@ mch node exec <TEST_LABEL> set prv.key 00000000
 Expected:
 
 - `mch node prune` lists candidates only, or reports none; it does not delete without `--yes`.
-- `mch node remove <TEST_LABEL> --yes` refuses because the node is still configured and `--force`
-  was not supplied.
+- `mch node prune <TEST_LABEL>` refuses because the node is still managed (not retired) — it points
+  you at `mch node retire <TEST_LABEL>` first. (`mch node remove` still exists as a hidden,
+  deprecated alias for the rare `--force` delete of a still-managed node.)
 - Both `mch node exec` attempts are blocked locally as unsafe and do not reach the node.
 
 Result:
@@ -297,10 +298,19 @@ curl -fsS 'http://127.0.0.1:8743/logs?node=<TEST_LABEL>&limit=10'
 curl -i http://127.0.0.1:8743/not-a-route
 ```
 
+You do not need the HTTP API to get the same JSON — the read commands take `--json` and emit the
+same report model. Compare the two (they should carry the same data for the same fleet):
+
+```bash
+mch fleet status --json
+mch fleet issues --json    # exits 2 when any issue is present
+```
+
 Expected:
 
 - `/health` responds successfully; status/plan/logs return JSON local report data.
 - Node status corresponds to `mch fleet status <TEST_LABEL>`.
+- `mch fleet status --json` returns the same report shape as `GET /status` for the same fleet.
 - An unknown path returns `404` rather than exposing an unexpected action.
 - No API request initiates sync, exec, or commissioning work.
 
