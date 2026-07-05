@@ -2222,6 +2222,109 @@ async def test_show_setting_unknown_node_errors(db, wq, config):
     assert "not found" in resp["error"]
 
 
+async def test_show_setting_unknown_key_errors(db, wq, config):
+    await _seed_plain_node(db)
+    resp = await _dispatch(
+        {"cmd": "show_setting", "query": "test", "key": "node.owner"}, wq, db, config
+    )
+    assert resp["ok"] is False
+    assert "not a valid setting key" in resp["error"]
+
+
+# --- S1.1: mch config show NODE (no key) — list every resolving key -----------------
+
+async def test_show_setting_all_keys_lists_resolutions(db, wq, config):
+    node = await _seed_plain_node(db)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="txdelay", desired="10",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="txdelay", desired="14",
+        policy=SettingPolicy.ENFORCE,
+    ))
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey, key="txdelay", desired="14",
+        policy=SettingPolicy.ENFORCE, observed="14",
+    ))
+
+    resp = await _dispatch({"cmd": "show_setting", "query": "test"}, wq, db, config)
+
+    assert resp["ok"] is True
+    data = resp["data"]
+    assert data["all_keys"] is True
+    rows = {r["key"]: r for r in data["settings"]}
+    assert rows["txdelay"]["desired"] == "14"
+    assert rows["txdelay"]["desired_source"] == "node"  # node beats global
+    assert rows["txdelay"]["observed"] == "14"
+    assert rows["txdelay"]["policy"] == "enforce"
+    assert rows["txdelay"]["directive"] is None
+
+
+async def test_show_setting_all_keys_includes_observed_only_leftover(db, wq, config):
+    node = await _seed_plain_node(db)
+    await db.upsert_setting(SettingRecord(
+        node_pubkey=node.pubkey, key="txdelay", desired=None,
+        policy=SettingPolicy.AUDIT, observed="7",
+    ))
+
+    resp = await _dispatch({"cmd": "show_setting", "query": "test"}, wq, db, config)
+
+    rows = {r["key"]: r for r in resp["data"]["settings"]}
+    assert rows["txdelay"]["desired"] is None
+    assert rows["txdelay"]["desired_source"] is None
+    assert rows["txdelay"]["observed"] == "7"
+
+
+async def test_show_setting_all_keys_notes_name_prefix_directive(db, wq, config):
+    node = Node(
+        pubkey="aabbccdd" * 8, name="Test", label="corbin", group="deployed",
+        state=NodeState.CONFIGURED,
+    )
+    await db.upsert_node(node)
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GROUP, scope_id="deployed", key="name_prefix",
+        desired="\U0001f9b7 ", policy=None,
+    ))
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.NODE, scope_id=node.pubkey, key="name",
+        desired="Quakers Hill Corb", policy=SettingPolicy.ENFORCE,
+    ))
+
+    resp = await _dispatch({"cmd": "show_setting", "query": "corbin"}, wq, db, config)
+
+    rows = {r["key"]: r for r in resp["data"]["settings"]}
+    assert rows["name"]["desired"] == "\U0001f9b7 Quakers Hill Corb"
+    assert rows["name"]["directive"] is not None
+    assert "name_prefix" in rows["name"]["directive"]
+    assert "group 'deployed'" in rows["name"]["directive"]
+
+
+# --- S1.2: mch config show --group/--global — dump rows at a scope -------------------
+
+async def test_show_setting_global_scope_dumps_rows(db, wq, config):
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GLOBAL, scope_id="", key="owner.info", desired="rdm",
+        policy=SettingPolicy.ENFORCE,
+    ))
+
+    resp = await _dispatch({"cmd": "show_setting", "scope": "global"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["scope"] == "global"
+    rows = {r["key"]: r for r in resp["data"]["settings"]}
+    assert rows["owner.info"]["desired"] == "rdm"
+    assert rows["owner.info"]["policy"] == "enforce"
+
+
+async def test_show_setting_group_scope_unknown_group_errors(db, wq, config):
+    resp = await _dispatch(
+        {"cmd": "show_setting", "scope": "group", "group": "ghosts"}, wq, db, config
+    )
+    assert resp["ok"] is False
+    assert "no member nodes" in resp["error"]
+
+
 # ------------------------------------------------------------------
 # clean_settings — orphaned observed setting rows
 # ------------------------------------------------------------------

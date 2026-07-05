@@ -2404,49 +2404,178 @@ def unset_setting(
     _scoped_target_echo("unset", key, "", data)
 
 
-@config_group.command("show")
-@click.argument("node")
-@click.argument("key")
-@click.option("--json", "as_json", is_flag=True, help="Emit the resolution as JSON for scripting.")
-@click.pass_context
-def show_setting(ctx: click.Context, node: str, key: str, as_json: bool) -> None:
-    """Show why a setting has the value it does.
+def _age_short(iso: str | None) -> str:
+    """Compact age with no ' ago' suffix, for the config-show AGE column ('2d', '3h')."""
+    if not iso:
+        return "-"
+    return _ago(iso).lstrip().removesuffix(" ago")
 
-    \b
-    mch config show NODE KEY
 
-    Lists what you set at each level (whole fleet, the node's group, the node
-    itself), which one wins, and the value the node last reported back.
-    Read-only: it sends no mesh traffic.
-    """
-    data = _check(_rpc(ctx.obj["socket"], {"cmd": "show_setting", "query": node, "key": key}))
-    if as_json:
-        _emit_json(data)
+def _render_config_all_keys(data: dict[str, Any]) -> None:
+    """Render the all-keys resolution table for `mch config show NODE`."""
+    target = data.get("label") or data.get("name") or data["pubkey"][:12]
+    group = f", group {data['group']!r}" if data.get("group") else ""
+    click.echo(f"settings for {target} ({data['pubkey'][:12]}){group}:")
+    rows = data["settings"]
+    if not rows:
+        click.echo("  nothing is set and nothing has been observed yet")
         return
+
+    def _desired_cell(r: dict[str, Any]) -> str:
+        base = _sv(r.get("desired"))
+        return f"{base} *" if r.get("directive") else base
+
+    key_w = max(_wlen("KEY"), max((_wlen(r["key"]) for r in rows), default=0))
+    pol_w = max(_wlen("POLICY"), max((_wlen(r["policy"]) for r in rows), default=0))
+    des_w = max(_wlen("DESIRED"), max((_wlen(_desired_cell(r)) for r in rows), default=0))
+    from_w = max(
+        _wlen("FROM"), max((_wlen(r.get("desired_source") or "-") for r in rows), default=0)
+    )
+    obs_w = max(_wlen("OBSERVED"), max((_wlen(_sv(r.get("observed"))) for r in rows), default=0))
+
+    def _row(key: str, pol: str, des: str, frm: str, obs: str, age: str) -> str:
+        return (
+            f"  {_wpad(key, key_w)}  {_wpad(pol, pol_w)}  {_wpad(des, des_w)}"
+            f"  {_wpad(frm, from_w)}  {_wpad(obs, obs_w)}  {age}"
+        )
+
+    click.echo("")
+    click.echo(_row("KEY", "POLICY", "DESIRED", "FROM", "OBSERVED", "AGE"))
+    click.echo(_row("---", "------", "-------", "----", "--------", "---"))
+    for r in rows:
+        click.echo(_row(
+            r["key"], r["policy"], _desired_cell(r),
+            r.get("desired_source") or "-", _sv(r.get("observed")),
+            _age_short(r.get("observed_at")),
+        ).rstrip())
+    directives = [r for r in rows if r.get("directive")]
+    if directives:
+        click.echo("")
+        for r in directives:
+            click.echo(f"  * {r['key']}: {r['directive']}")
+    click.echo("")
+    click.echo("(`mch config show NODE KEY` traces one key through node/group/global)")
+
+
+def _render_config_scope(data: dict[str, Any]) -> None:
+    """Render the rows stored at a group/global scope for `mch config show --group/--global`."""
+    if data["scope"] == "global":
+        click.echo("global settings (apply to every node unless a group or node overrides):")
+    else:
+        click.echo(f"settings for group {data['group']!r} "
+                   "(apply to every node in the group unless the node overrides):")
+    rows = data["settings"]
+    if not rows:
+        click.echo("  nothing is set at this scope")
+        return
+    key_w = max(_wlen("KEY"), max((_wlen(r["key"]) for r in rows), default=0))
+    pol_w = max(_wlen("POLICY"), max((_wlen(r["policy"] or "(inherit)") for r in rows), default=0))
+    click.echo("")
+    click.echo(f"  {_wpad('KEY', key_w)}  {_wpad('POLICY', pol_w)}  DESIRED")
+    click.echo(f"  {_wpad('---', key_w)}  {_wpad('------', pol_w)}  -------")
+    for r in rows:
+        click.echo(
+            f"  {_wpad(r['key'], key_w)}  {_wpad(r['policy'] or '(inherit)', pol_w)}  "
+            f"{_sv(r.get('desired'))}".rstrip()
+        )
+
+
+def _render_config_single_key(key: str, data: dict[str, Any]) -> None:
+    """Render the single-key resolution trace for `mch config show NODE KEY`."""
     target = data.get("label") or data.get("name") or data["pubkey"][:8]
     resolved = data["resolved"]
-
     click.echo(f"{key}  on  {target}  ({data['pubkey'][:12]})")
     if not data["configured"]:
-        click.echo("  not configured for this node "
-                   "(no desired/policy row resolves at any scope)")
+        click.echo(f"  nothing is set for this key — not on the node, its group, or globally "
+                   f"(mch config set {target} {key} VALUE to set it)")
     desired = resolved["desired"]
     desired_str = repr(desired) if desired is not None else "-"
-    src = f"  (from {resolved['desired_source']})" if resolved["desired_source"] else ""
-    click.echo(f"  resolved:  policy={resolved['policy']}  desired={desired_str}{src}")
+    # A directive (e.g. name_prefix) transformed the value: show that instead of the bare
+    # FROM scope so the transformation on screen is explained.
+    if resolved.get("directive"):
+        detail = f"  ({resolved['directive']})"
+    elif resolved["desired_source"]:
+        detail = f"  (from {resolved['desired_source']})"
+    else:
+        detail = ""
+    # For a valid-but-unset key, the policy is just the inherited default, not an
+    # operator-set row: mark it so it can't be misread as configuration.
+    policy_str = resolved["policy"]
+    if not data["configured"]:
+        policy_str = f"{policy_str} (default)"
+    click.echo(f"  resolved:  policy={policy_str}  desired={desired_str}{detail}")
     obs = resolved["observed"]
     if obs is None:
         click.echo("  observed:  (never read)")
     else:
-        when = f"  [{resolved['observed_at']}]" if resolved["observed_at"] else ""
+        when = f"  {_ago_with_ts(resolved['observed_at'])}" if resolved["observed_at"] else ""
         click.echo(f"  observed:  {obs!r}{when}")
     if data["scopes"]:
-        click.echo("  scopes:")
+        click.echo("  where it's set:")
+        # Most-specific-wins order (node beats group beats global); the daemon returns
+        # global-first, so the winner is last.
         for s in data["scopes"]:
             label = s["scope"] if s["scope"] != "group" else f"group {s['scope_id']!r}"
             sd = repr(s["desired"]) if s["desired"] is not None else "-"
             sp = s["policy"] or "(inherit)"
             click.echo(f"    {label:<16}  policy={sp:<9}  desired={sd}")
+
+
+@config_group.command("show")
+@click.argument("node", required=False, default=None)
+@click.argument("key", required=False, default=None)
+@click.option("--group", "group_name", default=None,
+              help="Show the rows set at a group's scope.")
+@click.option("--global", "global_scope", is_flag=True,
+              help="Show the rows set at global scope.")
+@click.option("--json", "as_json", is_flag=True, help="Emit the resolution as JSON for scripting.")
+@click.pass_context
+def show_setting(
+    ctx: click.Context,
+    node: str | None,
+    key: str | None,
+    group_name: str | None,
+    global_scope: bool,
+    as_json: bool,
+) -> None:
+    """Show desired state: everything on a node, one key's resolution, or a scope's rows.
+
+    \b
+    Whole node:  mch config show NODE          every key that resolves for the node
+    One key:     mch config show NODE KEY       trace it through node/group/global
+    A group:     mch config show --group NAME    rows set at that group's scope
+    Every node:  mch config show --global        rows set at global scope
+
+    Read-only: it sends no mesh traffic.
+    """
+    scope = _scope_from_flags(group_name, global_scope)
+    if scope != "node":
+        if node or key:
+            raise click.UsageError("with --group/--global, do not pass a NODE or KEY")
+        req: dict[str, Any] = {"cmd": "show_setting", "scope": scope}
+        if scope == "group":
+            req["group"] = group_name
+        data = _check(_rpc(ctx.obj["socket"], req))
+        if as_json:
+            _emit_json(data)
+            return
+        _render_config_scope(data)
+        return
+
+    if not node:
+        raise click.UsageError("usage: mch config show NODE [KEY]  (or --group NAME / --global)")
+
+    req = {"cmd": "show_setting", "query": node}
+    if key is not None:
+        req["key"] = key
+    data = _check(_rpc(ctx.obj["socket"], req))
+    if as_json:
+        _emit_json(data)
+        return
+    if key is None:
+        _render_config_all_keys(data)
+    else:
+        _render_config_single_key(key, data)
 
 
 # ---------------------------------------------------------------------------

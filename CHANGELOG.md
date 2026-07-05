@@ -5,6 +5,17 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **`mch config show` grew a whole-node and per-scope read (RECOMMENDATIONS-3 slice 1).** `mch config
+  show NODE` (no KEY) now lists every key that resolves for the node — policy, desired, which scope the
+  value came from (FROM), the observed value, and its age — instead of erroring with a missing-argument
+  message. `mch config show --group NAME` / `--global` dump the desired/policy rows stored at that
+  scope, completing the read side of the `config set`/`unset` grammar. The single-key trace was
+  polished: an unknown KEY is now rejected (like `config set`) instead of reporting a bogus resolution;
+  an inherited default policy renders as `enforce (default)`; observed timestamps use the friendly
+  `(local time, N ago)` form; and where a directive (e.g. `name_prefix`) transforms the resolved value
+  the view now says so (`* name: node value + name_prefix '🦷 ' from group 'deployed'`). All three
+  views honour `--json`.
+
 ## 0.22.0 - 2026-07-05
 
 - **Removed the read-only HTTP API.** The optional loopback HTTP server (`api.py`, the `api:` config
