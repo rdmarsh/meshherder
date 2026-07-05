@@ -31,6 +31,8 @@ from mch.command_safety import blocked_exec_command
 from mch.config import (
     DIRECTIVE_KEYS,
     Config,
+    GroupConfig,
+    NodeConfig,
     config_dict_to_yaml,
     config_to_desired_operations,
     config_to_desired_rows,
@@ -39,6 +41,7 @@ from mch.config import (
     normalize_directive_value,
     resolve_desired,
     resolve_desired_configs,
+    resolve_name_prefix,
     settable_keys,
     validate_directive_value,
     validate_node_label,
@@ -431,54 +434,193 @@ async def _handle_unset_setting(
     return {"ok": True, "data": data}
 
 
+def _desired_source(
+    key: str,
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None,
+) -> str | None:
+    """Which scope supplied the resolved desired value (most specific with a value wins)."""
+    for scope_name, cfg_obj in (
+        ("node", node_cfg), ("group", group_cfg), ("global", global_cfg)
+    ):
+        sc = cfg_obj.settings.get(key) if cfg_obj else None
+        if sc and sc.desired is not None:
+            return scope_name
+    return None
+
+
+def _scope_phrase(scope_name: str | None, group: str | None) -> str:
+    """Human phrase for a scope in directive notes: node / group 'x' / global."""
+    if scope_name == "group":
+        return f"group {group!r}"
+    return scope_name or "?"
+
+
+def _directive_note(
+    key: str,
+    node: Node,
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None,
+    resolved_desired: str | None,
+) -> str | None:
+    """Explain a directive that transformed a key's resolved desired value.
+
+    Only ``name_prefix`` transforms a *settings-key* desired value today (it is prepended
+    to ``name``); ``default_policy``/``via_radio`` change reachability/policy resolution,
+    not a per-key desired string, so they do not produce a per-row note here. Survey
+    evidence (2026-07-05): corbin's stored ``name`` row was 'Quakers Hill Corb' while the
+    resolved value was '🦷 Quakers Hill Corb' with nothing on screen explaining the '🦷 '.
+    """
+    if key != "name" or resolved_desired is None:
+        return None
+    prefix = resolve_name_prefix(node_cfg, group_cfg, global_cfg)
+    if not prefix or not resolved_desired.startswith(prefix):
+        return None
+    base_source = _desired_source("name", node_cfg, group_cfg, global_cfg)
+    for scope_name, cfg_obj in (
+        ("node", node_cfg), ("group", group_cfg), ("global", global_cfg)
+    ):
+        if cfg_obj and getattr(cfg_obj, "name_prefix", None):
+            prefix_scope = scope_name
+            break
+    else:
+        prefix_scope = None
+    return (
+        f"{base_source or 'inherited'} value + name_prefix {prefix!r} "
+        f"from {_scope_phrase(prefix_scope, node.group)}"
+    )
+
+
+def _resolve_setting_row(
+    key: str,
+    node: Node,
+    node_cfg: NodeConfig,
+    group_cfg: GroupConfig | None,
+    global_cfg: GroupConfig | None,
+    settings_by_key: dict[str, Any],
+    facts_by_key: dict[str, Any],
+) -> dict[str, Any]:
+    """One key's resolution for the all-keys ``mch config show NODE`` table."""
+    resolved_desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
+    observed, observed_at = _observed_for_key(key, settings_by_key, facts_by_key)
+    return {
+        "key": key,
+        "policy": resolve_policy(key, node_cfg, group_cfg, global_cfg).value,
+        "desired": resolved_desired,
+        "desired_source": _desired_source(key, node_cfg, group_cfg, global_cfg),
+        "observed": observed,
+        "observed_at": observed_at,
+        "directive": _directive_note(
+            key, node, node_cfg, group_cfg, global_cfg, resolved_desired
+        ),
+    }
+
+
+def _observed_for_key(
+    key: str, settings_by_key: dict[str, Any], facts_by_key: dict[str, Any]
+) -> tuple[str | None, str | None]:
+    """Observed value + iso timestamp for a key (settings store, then node_facts store).
+
+    A key lives in exactly one store per the single-observation invariant, so the settings
+    store is checked first and facts only as a fallback.
+    """
+    setting = settings_by_key.get(key)
+    if setting is not None:
+        at = setting.last_checked.isoformat() if setting.last_checked else None
+        return setting.observed, at
+    fact = facts_by_key.get(key)
+    if fact is not None:
+        return fact.value, fact.collected_at.isoformat()
+    return None, None
+
+
+async def _handle_show_scope(req: dict[str, Any], db: Database) -> dict[str, Any]:
+    """List the desired/policy rows stored *at* a group or global scope (no node resolution).
+
+    The read-side complement to `mch config set --group/--global`: a straight dump of the
+    rows at that scope, so `show` completes the grammar triangle with `set`/`unset`.
+    """
+    scope, scope_id, data, error = await _resolve_setting_scope(req, db)
+    if error or scope is None:
+        return {"ok": False, "error": error or "could not resolve scope"}
+    # Mirror `set`'s typo guard: a group nobody is in would silently never apply.
+    if scope is Scope.GROUP:
+        group_names = {n.group for n in await db.get_all_nodes() if n.group}
+        if scope_id not in group_names:
+            return {
+                "ok": False,
+                "error": (
+                    f"group {scope_id!r} has no member nodes - assign a node to it first "
+                    "(via `mch config import` or commissioning), or check the spelling"
+                ),
+            }
+    rows = [
+        {
+            "key": row.key,
+            "desired": row.desired,
+            "policy": row.policy.value if row.policy else None,
+        }
+        for row in sorted(await db.get_desired_settings(scope, scope_id), key=lambda r: r.key)
+    ]
+    data["settings"] = rows
+    return {"ok": True, "data": data}
+
+
 async def _handle_show_setting(
     req: dict[str, Any], db: Database, config: Config
 ) -> dict[str, Any]:
-    """Explain one key for one node: how each scope sets it, what resolves, what's observed.
+    """Explain settings for one node (all keys, or one key traced through the scopes).
 
     The read-side complement to `mch config set`/`mch config unset`. Resolution is
-    Node > Group > Global, so this shows the per-scope desired/policy rows that feed
-    `resolve_desired`/`resolve_policy`
-    plus the value mch has actually observed (from the settings or node_facts store - a key
-    lives in exactly one, per the single-observation invariant). It sends no mesh traffic.
+    Node > Group > Global. With a ``scope`` of group/global it dumps that scope's stored
+    rows instead (see `_handle_show_scope`). With no ``key`` it lists every resolving key
+    (configured keys plus observed-only leftovers) oriented around resolution. With a
+    ``key`` it traces that one key: the per-scope desired/policy rows that feed
+    `resolve_desired`/`resolve_policy`, plus the value mch has actually observed (settings
+    or node_facts store - a key lives in exactly one). It sends no mesh traffic.
     """
-    key = str(req.get("key") or "")
-    if not key:
-        return {"ok": False, "error": "missing setting key"}
+    if req.get("scope") in ("group", "global"):
+        return await _handle_show_scope(req, db)
 
     node = await _resolve_node(str(req.get("query") or ""), db)
     if not node:
         return {"ok": False, "error": f"node {req.get('query')!r} not found"}
 
     node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
+    settings_by_key = {s.key: s for s in await db.get_settings(node.pubkey)}
+    facts_by_key = {f.key: f for f in await db.get_fact_records(node.pubkey)}
+
+    key = str(req.get("key") or "")
+    if not key:
+        # All-keys listing: configured keys plus observed-only setting leftovers, the same
+        # key set `mch node show` renders, but oriented around resolution (the FROM column).
+        keys = sorted(all_setting_keys(node_cfg, group_cfg, global_cfg) | set(settings_by_key))
+        return {"ok": True, "data": {
+            "pubkey": node.pubkey,
+            "label": node.label,
+            "name": node.name,
+            "group": node.group,
+            "all_keys": True,
+            "settings": [
+                _resolve_setting_row(
+                    k, node, node_cfg, group_cfg, global_cfg, settings_by_key, facts_by_key
+                )
+                for k in keys
+            ],
+        }}
+
+    # Single-key trace. Validate the key like `config set` does, so a typo can't masquerade
+    # as "nothing is set" (survey: `config show corbin node.owner` happily reported a
+    # resolution for a non-key).
+    if key not in settable_keys() | readable_observation_keys():
+        valid = ", ".join(sorted(settable_keys()))
+        return {"ok": False, "error": f"{key!r} is not a valid setting key (choose from: {valid})"}
+
     configured = key in all_setting_keys(node_cfg, group_cfg, global_cfg)
-    resolved_policy = resolve_policy(key, node_cfg, group_cfg, global_cfg)
     resolved_desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
-
-    # Which scope supplied the resolved desired value (first non-None, most specific wins).
-    desired_source: str | None = None
-    for scope_name, cfg_obj in (
-        ("node", node_cfg), ("group", group_cfg), ("global", global_cfg)
-    ):
-        sc = cfg_obj.settings.get(key) if cfg_obj else None
-        if sc and sc.desired is not None:
-            desired_source = scope_name
-            break
-
-    # Observed value: a key lives in exactly one store, so check both (settings then facts).
-    observed: str | None = None
-    observed_at: str | None = None
-    for setting in await db.get_settings(node.pubkey):
-        if setting.key == key:
-            observed = setting.observed
-            observed_at = setting.last_checked.isoformat() if setting.last_checked else None
-            break
-    else:
-        for fact in await db.get_fact_records(node.pubkey):
-            if fact.key == key:
-                observed = fact.value
-                observed_at = fact.collected_at.isoformat()
-                break
+    observed, observed_at = _observed_for_key(key, settings_by_key, facts_by_key)
 
     # Per-scope rows that exist for this key, for the resolution trace.
     scopes: list[dict[str, Any]] = []
@@ -505,11 +647,14 @@ async def _handle_show_setting(
         "group": node.group,
         "configured": configured,
         "resolved": {
-            "policy": resolved_policy.value,
+            "policy": resolve_policy(key, node_cfg, group_cfg, global_cfg).value,
             "desired": resolved_desired,
-            "desired_source": desired_source,
+            "desired_source": _desired_source(key, node_cfg, group_cfg, global_cfg),
             "observed": observed,
             "observed_at": observed_at,
+            "directive": _directive_note(
+                key, node, node_cfg, group_cfg, global_cfg, resolved_desired
+            ),
         },
         "scopes": scopes,
     }}

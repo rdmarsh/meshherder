@@ -323,9 +323,21 @@ and
 like
 .BR "config set" .
 .TP
-.B config show \fINODE KEY\fR
-Explain one key for one node: how each scope sets it, what resolves, and what is
-observed.
+.B config show \fINODE\fR [\fIKEY\fR]
+Show desired state. With just
+.I NODE
+it lists every key that resolves for the node (policy, desired, which scope it
+came from, and the observed value). With a
+.I KEY
+it traces that one key: how each scope sets it, what resolves, and what is
+observed. Accepts
+.B \-\-group
+.I NAME
+and
+.B \-\-global
+to list the rows stored at a group's or the global scope instead (no
+.I NODE
+in that form).
 .TP
 .B config import [\fIFILE\fR] [\-\-yes]
 Seed the database's desired state and node label/group inventory from

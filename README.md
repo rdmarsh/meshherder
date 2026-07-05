@@ -338,7 +338,9 @@ mch config set --global default_policy audit
 mch config set --global ver --policy fact   # collect a read-only fact (no value); policy: enforce/audit/fact/skip
 mch config set <prefix> name_prefix "🌞 "    # directives: name_prefix, default_policy, via_radio
 mch config unset <prefix> txdelay           # remove a DB-set value (observed state untouched)
+mch config show <prefix>                    # list every key resolving for the node (policy, desired, from, observed)
 mch config show <prefix> txdelay            # explain one key: per-scope rows, resolved value, observed
+mch config show --global                    # list the rows set at global scope (or --group NAME)
 mch config import                           # preview seeding the DB from the daemon's config (dry run)
 mch config import legacy.yaml --yes         # seed from an explicit file (settings + label/group inventory)
 mch config export > backup.yaml             # complete fleet backup (inventory + desired state)

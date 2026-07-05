@@ -641,7 +641,10 @@ key is no longer configured, retaining the historical row until an explicit clea
   switch was folded in here (originally F4) to avoid a broken intermediate state.
 - **F4 (done)** — added `mch config show NODE KEY`: prints a key's per-scope desired/policy rows, the
   resolved policy/desired (with the source scope), and the observed value. Read-only. (The report/
-  clean rework moved into F3.)
+  clean rework moved into F3.) Extended in RECOMMENDATIONS-3 slice 1: `config show NODE` (no KEY) lists
+  every resolving key as a table (policy/desired/FROM/observed/age), and `config show --group NAME` /
+  `--global` dump a scope's stored rows, so the read side mirrors `config set`/`unset` at every scope.
+  Directive transforms (name_prefix) are shown inline; an unknown KEY is rejected like `config set`.
 - **F5 (separate, bench on luna)** — investigate free/batched/incidental facts; record in JOURNAL
   before turning any of it into a rule.
 

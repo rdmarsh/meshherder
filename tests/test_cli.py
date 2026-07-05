@@ -3401,6 +3401,7 @@ def test_show_sends_query_and_renders_resolution():
     assert "desired='14'" in result.output
     assert "from node" in result.output
     assert "global" in result.output
+    assert "where it's set:" in result.output
 
 
 def test_show_reports_unconfigured_key():
@@ -3423,8 +3424,108 @@ def test_show_reports_unconfigured_key():
                         ])
 
     assert result.exit_code == 0
-    assert "not configured" in result.output
+    assert "nothing is set for this key" in result.output
+    assert "policy=audit (default)" in result.output
     assert "never read" in result.output
+
+
+def test_show_no_key_renders_all_keys_table():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "pubkey": "e2601d591517" + "00" * 26, "label": "corbin", "name": "Corb",
+        "group": "deployed", "all_keys": True,
+        "settings": [
+            {"key": "advert.interval", "policy": "enforce", "desired": "238",
+             "desired_source": "global", "observed": "238",
+             "observed_at": "2026-07-03T00:00:00+00:00", "directive": None},
+            {"key": "name", "policy": "enforce", "desired": "\U0001f9b7 Corb",
+             "desired_source": "node", "observed": "\U0001f9b7 Corb",
+             "observed_at": "2026-07-03T00:00:00+00:00",
+             "directive": "node value + name_prefix '\U0001f9b7 ' from group 'deployed'"},
+        ],
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, [
+            "--socket", "/fake.sock", "config", "show", "corbin",
+        ])
+
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "show_setting", "query": "corbin"}
+    assert "settings for corbin" in result.output
+    assert "advert.interval" in result.output
+    assert "KEY" in result.output and "FROM" in result.output
+    # directive-transformed row is starred and footnoted
+    assert "\U0001f9b7 Corb *" in result.output
+    assert "* name:" in result.output
+    assert "name_prefix" in result.output
+
+
+def test_show_no_key_json_emits_settings_list():
+    runner = CliRunner()
+    payload = {"ok": True, "data": {
+        "pubkey": "e2601d591517" + "00" * 26, "label": "corbin", "name": "Corb",
+        "group": "deployed", "all_keys": True,
+        "settings": [{"key": "name", "policy": "enforce", "desired": "Corb",
+                      "desired_source": "node", "observed": "Corb",
+                      "observed_at": None, "directive": None}],
+    }}
+    with patch("mch.cli._rpc", MagicMock(return_value=payload)):
+        result = runner.invoke(cli, [
+            "--socket", "/fake.sock", "config", "show", "corbin", "--json",
+        ])
+    assert result.exit_code == 0
+    assert '"all_keys": true' in result.output
+
+
+def test_show_global_scope_lists_rows():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "scope": "global",
+        "settings": [
+            {"key": "owner.info", "desired": "rdm", "policy": "enforce"},
+        ],
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, [
+            "--socket", "/fake.sock", "config", "show", "--global",
+        ])
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "show_setting", "scope": "global"}
+    assert "global settings" in result.output
+    assert "owner.info" in result.output
+
+
+def test_show_group_scope_sends_group_request():
+    runner = CliRunner()
+    rpc = MagicMock(return_value={"ok": True, "data": {
+        "scope": "group", "group": "deployed",
+        "settings": [{"key": "txdelay", "desired": "10", "policy": "audit"}],
+    }})
+    with patch("mch.cli._rpc", rpc):
+        result = runner.invoke(cli, [
+            "--socket", "/fake.sock", "config", "show", "--group", "deployed",
+        ])
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "show_setting", "scope": "group", "group": "deployed"}
+    assert "group 'deployed'" in result.output
+
+
+def test_show_node_with_scope_flag_is_usage_error():
+    runner = CliRunner()
+    with patch("mch.cli._rpc", MagicMock()) as rpc:
+        result = runner.invoke(cli, [
+            "--socket", "/fake.sock", "config", "show", "corbin", "--global",
+        ])
+    assert result.exit_code == 2
+    rpc.assert_not_called()
+
+
+def test_show_no_args_is_usage_error():
+    runner = CliRunner()
+    with patch("mch.cli._rpc", MagicMock()) as rpc:
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "config", "show"])
+    assert result.exit_code == 2
+    rpc.assert_not_called()
 
 
 def test_set_group_scope_sends_group_request():
