@@ -14,17 +14,17 @@ There is one bright line that decides where every piece of configuration lives:
   per-deployment. mchd never writes to it.
 - **The SQLite DB** — the fleet itself: inventory, desired state (settings, directives, facts,
   operations), and the observed state / history mch records. This is the CMDB. Edited by `mch`
-  commands (and, later, an HTTP API / web frontend), never by hand-editing YAML.
-- **`secrets.yaml`** — passwords and private keys, kept a 0600 file deliberately out of the DB (a
-  read-only/loopback HTTP API and web UI will read the DB; secrets must not be there). Operator-owned.
+  commands (and, much later, possibly a web frontend), never by hand-editing YAML.
+- **`secrets.yaml`** — passwords and private keys, kept a 0600 file deliberately out of the DB (any
+  future read UI reads the DB; secrets must not be there). Operator-owned.
 
 **The test for "config or DB?":** *could two different daemons managing the same fleet legitimately
 hold different values?* If yes, it is per-daemon and belongs in `config.yaml` (a different gateway
-device, API port, or sync cadence). If no — it is a property of the fleet — it belongs in the DB.
+device, socket path, or sync cadence). If no — it is a property of the fleet — it belongs in the DB.
 
 | Layer | Owns | Written by |
 |---|---|---|
-| `config.yaml` | Daemon runtime + bootstrap: `gateway`, `scheduler`, `messenger`, `api`, paths (`db_path`/`socket_path`/`secrets_file`), `profiles_*` | Operator |
+| `config.yaml` | Daemon runtime + bootstrap: `gateway`, `scheduler`, `messenger`, paths (`db_path`/`socket_path`/`secrets_file`), `profiles_*` | Operator |
 | `secrets.yaml` | Passwords, private keys (0600) | Operator |
 | SQLite DB | Mesh/CMDB: inventory, desired state (settings, directives, facts, operations), observed state, history, schedule | mch / mchd |
 
@@ -46,15 +46,15 @@ configs remain to import.
 mch originally made `config.yaml` the source of truth for *desired* state, with the DB holding only
 observed state — the Ansible model (declare intent in version-controlled files; let the tool record
 what it observed). The sunset (see below) moved inventory and desired state into the DB so they can be
-edited by `mch`/API/UI rather than round-tripped through YAML. The reload machinery still applies to
+edited by `mch` (and any future UI) rather than round-tripped through YAML. The reload machinery still applies to
 the daemon settings that remain: mchd watches `config.yaml`/`secrets.yaml`, reloads shortly after a
 save without dropping the gateway connection, and ignores invalid YAML (keeping the last valid config).
 
 ## Desired state in the DB (sunset complete 2026-06-17, started 2026-06-11)
 
 We are moving desired state from config.yaml into the SQLite DB so it can be edited with `mch`
-commands and, later, an HTTP API and a web frontend. A web UI round-tripping a YAML file is
-fragile; an API/UI writing to a DB is natural. Git history of intent is an acceptable loss here:
+commands and, much later, possibly a web frontend. A web UI round-tripping a YAML file is
+fragile; a UI writing to a DB is natural. Git history of intent is an acceptable loss here:
 mch targets a single hobbyist box, not a corporate fleet, and retirement history (below) replaces
 the practice of keeping old config.yaml copies.
 
@@ -72,8 +72,8 @@ desired value immediately - "intent recorded" stops being conflated with the slo
   Unfavouriting only clears the eviction pin; it does not delete the contact, and it is a local
   gateway write, not mesh traffic. Reading favourites back *as inventory* is dropped - `mch
   contacts` already covers "what is visible on the mesh".
-- **secrets.yaml stays a file.** Passwords and private keys must not live in a DB that a (currently
-  read-only, loopback-only, unauthenticated) HTTP API and web UI will read. File mode 0600 is a
+- **secrets.yaml stays a file.** Passwords and private keys must not live in a DB that any future
+  read UI would read. File mode 0600 is a
   clear secret boundary; the DB has no equivalent. "config.yaml goes away" and "secrets.yaml goes
   away" are independent decisions; the second is argued against for now.
 
@@ -137,7 +137,7 @@ wanted.
    now, so it always read `db`. The report still carries a constant `source="db"` field for schema
    stability.)_
    This also closed a gap: the **report** path (`build_fleet_report`, feeding `mch node`/`mch
-   status`/`mch fleet plan`/the HTTP API) did not previously apply `overlay_db_settings` - only the sync
+   status`/`mch fleet plan`/`--json`) did not previously apply `overlay_db_settings` - only the sync
    path did - so it would not have reflected a `mch config set` until the next sync wrote an observed row.
    The overlay now runs in reporting too, so DB-authored desired values (and the `mch fleet plan`
    preview) are visible immediately. Observed-only history rows have `source = None` (rendered `-`).
@@ -261,11 +261,18 @@ available. It is not designed around datacenter-style immediate reachability.
 - Recovery logic must be conservative around writes because a response can be lost after a write
   has taken effect.
 
-## API-ready internal model
+## Shared internal report model
 
-`mch` should move toward a single daemon-side report/action model that can be rendered by the CLI,
-a future HTTP/OpenAPI interface, and compact mesh DM/channel summaries. `mch fleet status` and `mch fleet plan`
-should not separately reconstruct desired-vs-observed meaning from raw DB records.
+`mch` uses a single daemon-side report/action model rendered by the CLI (human tables and `--json`)
+and compact mesh DM/channel summaries. `mch fleet status` and `mch fleet plan` do not separately
+reconstruct desired-vs-observed meaning from raw DB records.
+
+**The HTTP API was retired in 0.22.0.** It existed only as the read contract for a future dashboard;
+with the web UI shelved and `mch ... --json` serving the identical report model over the Unix socket
+(no open port, no loopback caveat, no authentication to design), the loopback HTTP server was dead
+weight. If a UI is ever built, it should rebuild a read API against this same report model and the
+frozen `--json` contract — not resurrect the old server. The paragraphs below keep the model's
+design rationale; anywhere they say "API" read "the report model behind `--json`".
 
 Intended split:
 - `mch fleet status [LABEL_OR_PREFIX]`: current state and evidence.
@@ -279,42 +286,36 @@ The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`
 `nominal` means the observed value differs textually but is equivalent within expected firmware or
 computer representation tolerance.
 
-Implemented contract: `src/mch/report.py` builds `schema_version: 2` fleet/node reports consumed
-by CLI reporting and the optional read-only HTTP API. HTTP is loopback-only until authentication
-exists; it deliberately provides no sync, exec, or commissioning routes. A future dashboard and
-map should consume this model rather than deriving status independently.
-HTTP paths follow the existing read-only command vocabulary (`/status`, `/plan`, `/issues`,
-`/logs`, and `/health`).
+Implemented contract: `src/mch/report.py` builds `schema_version: 2` fleet/node reports consumed by
+CLI reporting (tables and `--json`). The read commands map to the model: `fleet status`/`node show`
+(state and evidence), `fleet plan` (next actions), `fleet issues` (faults only), `fleet logs`
+(history). A future dashboard should consume this model rather than deriving status independently.
 
 The report's `issues` block (`drifted`/`bad_state`/`open_nodes`) carries only *faults* — the
 categories that drive alerting and the `mch fleet issues` exit code 2. Firmware currency is
 deliberately a **separate** advisory field (`firmware: {latest, outdated[]}`, plus
 `summary.outdated_firmware`): being behind the latest release is not a fault, so it must not set the
-alert code. The same report is emitted by every CLI read command's `--json` flag, bypassing the
-`_status_view`/`_node_detail_view` terminal-projection shims, so CLI `--json` and the HTTP API stay
-byte-for-byte identical for the same data (pinned by `tests/test_cli_api_contract.py` over a real
-socket). RECOMMENDATIONS-2 S3.1 removed the dead post-sunset `ghosts`/`unseen_nodes` categories that
-could never populate.
+alert code. The full report is emitted by every CLI read command's `--json` flag, bypassing the
+`_status_view`/`_node_detail_view` terminal-projection shims. `tests/test_cli_report_contract.py`
+pins `mch fleet status --json` to `build_fleet_report()` over a real daemon socket, so the socket
+round-trip and report shape can't silently drift. RECOMMENDATIONS-2 S3.1 removed the dead
+post-sunset `ghosts`/`unseen_nodes` categories that could never populate.
 
-The first implementation exposes a complete fleet report from `/status`, including facts and
-settings for every node. That is useful while proving the model, but it is not the intended
-dashboard polling contract. Before a map UI is built, `/status` should become a lightweight fleet
-summary: health/state, identity, timestamps, marker coordinates, and issue/drift counts. Keep
-`lat`/`lon` in that summary so drawing the map does not require one detail request per marker.
-`/status/<node>` remains the full clickable detail view. Logs, plan, and fleet issues remain
-separate resources because they have different refresh and presentation needs.
+`--json` currently emits the *complete* fleet report, including facts and settings for every node.
+That is fine for scripting and cron. If a polled map UI is ever built, it will want a lighter fleet
+summary (health/state, identity, timestamps, marker `lat`/`lon`, issue/drift counts) with a separate
+per-node detail call — a shaping decision to make against real UI needs, not to pre-build now.
 
-Future API-driven interactions should preserve a distinction between reads and writes. The CLI
-and a web UI can share daemon-side operation logic, but write endpoints require authentication,
-audit records, validation, and safe concurrency behavior first. In particular, editing desired
-settings or selecting new facts to collect should present a configuration diff for review before
-applying it; it must not turn an unauthenticated local status API into a configuration editor.
+Any future write path (a web UI editing desired settings, selecting facts) must preserve a
+read/write distinction: writes require authentication, audit records, validation, and safe
+concurrency first, and must present a configuration diff for review before applying — never a
+silent editor. The CLI and such a UI would share daemon-side operation logic.
 
 Keep service diagnostics distinct from node activity. The systemd journal owns daemon startup,
-process failures, and detailed transport/radio debugging. The database-backed `/logs` and
-`mch fleet logs` views retain operator-relevant node history, including writes, operations, drift, and
-read failures that explain a partial sync. `mch fleet status` reports mesh state; it is not a
-replacement for `systemctl status mchd`.
+process failures, and detailed transport/radio debugging. The database-backed `mch fleet logs`
+view retains operator-relevant node history — writes, operations, drift, and read failures that
+explain a partial sync. `mch fleet status` reports mesh state; it is not a replacement for
+`systemctl status mchd`.
 
 `mch daemon status` and `mch daemon logs` are thin, read-only wrappers over `systemctl status mchd`
 and `journalctl -u mchd` so operators can reach service diagnostics without recalling the unit name.
@@ -649,8 +650,8 @@ key is no longer configured, retaining the historical row until an explicit clea
 The original model held that facts and settings should stay distinct data types: facts as
 inventory/evidence with no desired value/policy/write-back, settings as managed values carrying
 desired value, scope inheritance, policy, comparison status, write attempts, and a planned action.
-The API/DB kept separate `facts` and `settings` collections, combined only at presentation under an
-"observed values" heading. That separation already forbade duplicate mesh traffic — a key that was
+The report model kept separate `facts` and `settings` collections, combined only at presentation
+under an "observed values" heading. That separation already forbade duplicate mesh traffic — a key that was
 both a fact and a setting was to be read once and fed to both records — which is exactly the
 single-read invariant the policy unification now makes structural rather than aspirational.
 
@@ -694,11 +695,11 @@ daemon never caches passwords in the DB.
 Do not move passwords or node private keys into the current SQLite database simply to make a web
 interface easier. The database is observational runtime/history state and can currently be
 rebuilt from operator-owned configuration. Making it authoritative for secrets would make normal
-database backup, export, diagnostics, and accidental API exposure security-critical. Any future
+database backup, export, and diagnostics security-critical. Any future
 secret store needs an explicit encryption, key-management, access-control, redaction, backup,
 migration, and recovery design.
 
-Configuration import/export is compatible with an API-first UI without changing this ownership
+Configuration import/export is compatible with a future UI without changing this ownership
 model. A normal export should exclude secrets. Any secret export must be explicit and strongly
 protected, and importing desired state should validate and present a reviewable diff before it is
 applied. A future settings editor may manage YAML or a replacement structured format only after

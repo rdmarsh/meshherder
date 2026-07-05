@@ -16,11 +16,16 @@
 >   scope-flag and mutation conventions codified in `mch help concepts` + DESIGN.md. (No release was
 >   cut first, so `remove` was kept as an alias rather than deleted — revisit when a release ships.)
 > - **Slice 3 (`--json` + firmware fleet views) — DONE.** `--json` on the read commands (report model
->   verbatim, API-parity pinned by a real-socket contract test); fleet-wide firmware currency (VER
->   `!` marker + advisory footer, never a fault); dead `ghosts`/`unseen_nodes` categories removed.
+>   verbatim, pinned by a real-socket contract test); fleet-wide firmware currency (VER `!` marker +
+>   advisory footer, never a fault); dead `ghosts`/`unseen_nodes` categories removed.
 > - **Slice 4 (`mch node add` pipeline) — DESIGN DRAFTED, awaiting operator review.**
 >   `docs/onboarding-pipeline.md` is Deliverable 1; no code until it is approved. It surfaces one
 >   decision for the operator: whether the interactive wizard may write `secrets.yaml` itself.
+>
+> **Post-slice-3 (0.22.0): the read-only HTTP API was retired.** With the web UI shelved, `--json`
+> serves the identical report model over the Unix socket with less surface, so `src/mch/api.py` and
+> the `api:` config were removed. Slice 3's "CLI JSON and HTTP API must be the same model" (below) is
+> now just "CLI JSON is the model"; the contract test pins `--json` to `build_fleet_report()`.
 
 A follow-up review of Mesh Herder at **v0.20.1 + unreleased sweep work** (commit `d22ffd3`,
 2026-07-04), written — like part 1 (`RECOMMENDATIONS.md`) — as a work plan another AI model or

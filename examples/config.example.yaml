@@ -6,7 +6,7 @@
 # commands across the mesh, and keeps each managed node in its declared desired state.
 # Think Ansible for your nodes — without needing SSH or IP connectivity to any of them.
 #
-# This file holds DAEMON SETTINGS ONLY: the gateway, scheduler, messenger, HTTP API,
+# This file holds DAEMON SETTINGS ONLY: the gateway, scheduler, messenger,
 # and file paths. Desired state — the inventory of managed nodes, their groups, the
 # global defaults, and the facts to collect — lives in the SQLite database, not here.
 # The daemon refuses to start if this file still carries `nodes:`, `groups:`, `global:`,
@@ -97,12 +97,6 @@ messenger:
   # in the app. Omit or set to null to disable channel announcements.
   # announce_channel: 1
 
-# Read-only HTTP API for local integrations and a future dashboard.
-# Disabled by default. It exposes normalized fleet/node status, facts (including
-# lat/lon for a future map), issues, planned actions, and logs. It does not expose
-# sync, exec, commission, or any write operation.
-# Until API authentication exists, mchd only permits loopback binds.
-# api:
-#   enabled: true
-#   host: 127.0.0.1
-#   port: 8743
+# There is no HTTP API. For scripting/integration, the read commands emit the same
+# report model as JSON: `mch fleet status --json` (also fleet issues/plan/logs,
+# node show, config show). It goes over the Unix socket — no open port, no auth to design.

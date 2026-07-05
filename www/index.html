@@ -81,7 +81,7 @@ pip install -e .</code></pre>
       <li><strong>mch node exec</strong> — run one-off MeshCore CLI commands on any managed node without touching config. Destructive commands require confirmation; irreversible ones are blocked.</li>
       <li><strong>mch node new</strong> — guided wizard to take a freshly-flashed node to fully managed: generates or restores a private key, sets name/password/radio, verifies identity after reboot.</li>
       <li><strong>Hot reload</strong> — mchd watches <code>config.yaml</code> and <code>secrets.yaml</code> and reloads on change. Invalid YAML is rejected; previous config stays active.</li>
-      <li><strong>Read-only integration API</strong> — optional loopback HTTP JSON status, plan, issue, and log endpoints for reporting tools and future dashboards.</li>
+      <li><strong>Scriptable <code>--json</code></strong> — every read command emits the normalized report model as JSON over the Unix socket, for cron, alerting, and reporting tools. No open port.</li>
     </ul>
   </section>
 

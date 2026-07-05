@@ -402,8 +402,8 @@ fetch). Open follow-ups:
   Mechanical, no operator-facing behaviour change, but large diff — keep test suites green at each
   step. (Was SUGGEST #14/#2.)
 - **M4 test gaps.** CLI↔daemon contract test over a real Unix socket — **DONE (Unreleased,
-  RECOMMENDATIONS-2 S3.2):** `tests/test_cli_api_contract.py` drives the real daemon socket and
-  asserts `mch fleet status --json` equals the API `/status` body for the same seeded DB, pinning the
+  RECOMMENDATIONS-2 S3.2):** `tests/test_cli_report_contract.py` drives the real daemon socket and
+  asserts `mch fleet status --json` equals `build_fleet_report()` for the same seeded DB, pinning the
   `_status_view`/`_node_detail_view` projection shims against drift. **Still open:** concurrency tests
   for scheduler vs manual sync vs exec vs commission ownership (the operation lock is load-bearing and
   untested; was SUGGEST #19).
@@ -446,8 +446,8 @@ fetch). Open follow-ups:
 ## Wishlist
 
 - `mch ping`, `mch discover`, and an overall `mch health` command.
-- Read-only dashboard/map based on the existing local API once reporting payloads are suitably
-  compact.
+- Read-only dashboard/map, much later. It would rebuild a read API against the `--json` report model
+  (`report.py`) — not the retired loopback HTTP server — once reporting payloads are suitably compact.
 - Group-aware commissioning defaults and safer recovery of an interrupted generated private key.
 - Adopt an already deployed node into configuration without destructive recommissioning.
 - Dynamic `txdelay`/`direct.txdelay` recommendations based on observed neighbour count.
@@ -511,8 +511,9 @@ fetch). Open follow-ups:
 
 - 2026-07-04: **RECOMMENDATIONS-2 slice 3 (`--json` + firmware fleet views).** Added `--json` to the
   read commands (`fleet status/issues/plan/logs`, `node show`, `config show`), emitting the report
-  model verbatim — identical to the HTTP API body, pinned by a real-socket CLI↔API contract test
-  (`tests/test_cli_api_contract.py`, the part-1 M4 remainder). Added fleet-wide firmware-currency
+  model verbatim, pinned by a real-socket contract test (`tests/test_cli_report_contract.py`, the
+  part-1 M4 remainder). (The HTTP API this originally mirrored was retired in 0.22.0.) Added
+  fleet-wide firmware-currency
   surfaces: a VER-column `!` marker in `mch fleet status` and an advisory "N nodes behind latest
   vX.Y.Z" footer on status/issues, kept out of the `issues` categories so firmware age never trips
   exit 2 (new `report.firmware` field + `summary.outdated_firmware`). Removed the dead

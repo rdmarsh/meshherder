@@ -5,6 +5,13 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Removed the read-only HTTP API.** The optional loopback HTTP server (`api.py`, the `api:` config
+  block, `/status`/`/issues`/`/plan`/`/logs`/`/health`) existed only as the read contract for a future
+  dashboard. With the web UI shelved and `mch ... --json` (added in 0.21.0) serving the identical
+  report model over the Unix socket — no open port, no loopback caveat, no authentication to design —
+  the HTTP transport was dead weight. A leftover `api:` block in `config.yaml` now fails to load with a
+  hint pointing at `--json`. If a UI is ever built, it should rebuild a read API against the stable
+  `--json` report model, not resurrect this server.
 - **Removed the `mch fleet status` single-match magic switch (RECOMMENDATIONS-2 S1.3).** A query that
   matched exactly one node used to silently switch to the full detail view; it now always renders the
   (filtered) table and prints a one-line hint pointing at `mch node show NODE`, which has been the

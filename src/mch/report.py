@@ -1,4 +1,4 @@
-"""Normalized read-only fleet reporting for CLI, HTTP API, and future UI clients."""
+"""Normalized read-only fleet reporting — the model behind CLI tables, `--json`, and a future UI."""
 
 from __future__ import annotations
 
