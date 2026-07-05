@@ -6,16 +6,24 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## >>> RESUME HERE (updated 2026-07-03) - update or clear this block when you pick up <<<
 
-**RECOMMENDATIONS-3 in progress (2026-07-05).** Slices 1–3 implemented on `main` (each merged
-`--no-ff`): S1 `mch config show` grew a whole-node table + `--group`/`--global` scope listing; S2
-turned the `fleet status` footer into a summary (tables stay in `fleet issues`), sorted the fleet
-table, added `help states`, a fleet-outage advisory, the `gateway contacts` table, `nodes.last_attempt_at`
-(schema v2) with a TRIED column, and output polish; S3 refreshes the clock fact after a *failed*
-`clock sync` and adds an `operations:` section to `node show`. **Bench-confirm owed (S3.1):** the
-failed-`clock sync` clock re-read is unit-tested but not yet verified against real firmware on the
-luna bench node (test frequency 915.800 only). Confirm one failing `clock sync` re-reads the clock
-and the facts NOTE flips direction, then record the observation here. Slices 4 (complexity pay-down)
-and 5 (docs) still pending.
+**RECOMMENDATIONS-3 (2026-07-05).** All five slices worked; slices 1–3 and 5 complete, slice 4
+partial. Each slice merged `--no-ff` to `main`. 994 tests pass, ruff + mypy clean.
+- **S1:** `mch config show` grew a whole-node table + `--group`/`--global` scope listing.
+- **S2:** `fleet status` footer is now a summary (tables stay in `fleet issues`), fleet table sorted
+  by group/label, `help states`, fleet-outage advisory, `gateway contacts` table, `nodes.last_attempt_at`
+  (schema v2) + TRIED column, output polish.
+- **S3:** clock fact refreshed after a *failed* `clock sync`; `operations:` section in `node show`.
+- **S4 (partial):** DONE — deleted dead `status`/`plan`/`issues`/`node` RPC verbs + `legacy_*`
+  builders (all reads go through `fleet`/`fleet_node`), retired the hidden `node remove` alias
+  (`--force` moved to `mch node prune NODE --force`), `--json` on `node path`/`discover`/`fleet suggest`/
+  `node probe`, `ensure_ascii=False` in `--json`. DEFERRED to BACKLOG — the `cli.py` package split
+  (S4.2), the `_dispatch` handler-table refactor (S4.3), and `--json` on the prune/clean/import
+  preview payloads (S4.4 tail). These are large pure-move refactors best done as their own PRs.
+- **S5:** removed the retired HTTP API from `mchd.8` + added a docs-drift guard.
+
+**Bench-confirm owed (S3.1):** the failed-`clock sync` clock re-read is unit-tested but not yet
+verified against real firmware on the luna bench node (test frequency 915.800 only). Confirm one
+failing `clock sync` re-reads the clock and the facts NOTE flips direction, then record it here.
 
 
 **Status (2026-07-03): 0.20.0 RELEASED.** Noun-grouped CLI (`daemon`/`fleet`/`node`/`config`)
