@@ -5,6 +5,20 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **High-volume views stopped drowning the signal (RECOMMENDATIONS-3 slice 2).** `mch fleet status`
+  now prints a short issue *summary* (drift/problem-state counts and a one-line open-nodes warning)
+  instead of repeating the full drift and problem-state tables — those stay in `mch fleet issues`, the
+  detail/alerting view. The fleet table sorts by group then label, and when ≥3 and ≥half of non-retired
+  nodes are down it prints a gateway advisory (advisory only, never exit 2). `mch gateway contacts`
+  became a compact PUBKEY/NAME table (the gateway can see hundreds of unmanaged repeaters; the ~10-line
+  adopt recipe is now reserved for a small QUERY match) and gained `--json`. New `mch help states`
+  teaches the STATE column. Honesty fixes: a new `nodes.last_attempt_at` (schema v2) records when the
+  reachability probe last *tried* a node, shown as a TRIED column in `fleet issues` and a `last tried:`
+  line in `node show`, and the drift table footnotes why an unreachable node's enforce rows show 0
+  TRIES. Polish: `fleet status <no-match>` now fails loudly (stderr + exit 1); `node show` renders `-`
+  for a blank mesh name; `config set/unset` usage lines show `[NODE] KEY [VALUE]`; and the exit-code
+  help notes that 2 also means a usage error.
+
 - **`mch config show` grew a whole-node and per-scope read (RECOMMENDATIONS-3 slice 1).** `mch config
   show NODE` (no KEY) now lists every key that resolves for the node — policy, desired, which scope the
   value came from (FROM), the observed value, and its age — instead of erroring with a missing-argument

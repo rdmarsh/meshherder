@@ -56,6 +56,7 @@ class Node:
     auth_required: bool = False
     auth_cached: bool = False  # True once we have authenticated this session
     next_sync_at: datetime | None = None  # wall-clock time for next scheduled sync
+    last_attempt_at: datetime | None = None  # when mch last tried to reach it (any outcome)
 
 
 @dataclass

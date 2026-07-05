@@ -1358,6 +1358,36 @@ def test_status_summarizes_open_nodes_as_one_line():
     assert "open nodes: 1 with no ACL" in result.output
 
 
+def test_issues_problem_states_shows_tried_column():
+    # S2.4: TRIED says when mch last tried to reach the node, resolving the apparent
+    # "unreachable … LAST SEEN 2h ago" contradiction.
+    result = _run(["fleet", "issues"], _status_resp(bad_state=[{
+        "pubkey": "aabbccdd" * 8, "label": "corbin", "name": "Corb",
+        "state": "unreachable", "last_seen": "2026-07-05T00:00:00+00:00",
+        "last_attempt_at": "2026-07-05T00:00:00+00:00",
+    }]))
+    assert result.exit_code == 2
+    assert "TRIED" in result.output
+
+
+def test_issues_drift_footer_explains_zero_tries():
+    result = _run(["fleet", "issues"], _status_resp(drifted=[{
+        "node_pubkey": "aabbccdd" * 8, "label": "corbin",
+        "key": "owner.info", "desired": "x", "observed": "y",
+        "policy": "enforce", "update_attempts": 0,
+    }]))
+    assert result.exit_code == 2
+    assert "next successful sync" in result.output
+    assert "TRIES counts write attempts" in result.output
+
+
+def test_node_show_renders_last_tried_line():
+    detail = _detail()
+    detail["data"]["last_attempt_at"] = "2026-07-05T00:00:00+00:00"
+    result = _run(["node", "show", "site-a"], detail)
+    assert "last tried:" in result.output
+
+
 def test_issues_shows_full_drift_table():
     result = _run(["fleet", "issues"], _status_resp(drifted=[{
         "node_pubkey": "aabbccdd" * 8, "label": "site-a",

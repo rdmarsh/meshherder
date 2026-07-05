@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     last_connected  TEXT,
     auth_required   INTEGER NOT NULL DEFAULT 0,
     auth_cached     INTEGER NOT NULL DEFAULT 0,
-    next_sync_at    TEXT
+    next_sync_at    TEXT,
+    last_attempt_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -134,6 +135,11 @@ _MIGRATIONS: list[tuple[int, list[str]]] = [
         "ALTER TABLE settings ADD COLUMN update_attempts INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE logs ADD COLUMN display_pubkey TEXT",
         "ALTER TABLE logs ADD COLUMN display_label TEXT",
+    ]),
+    (2, [
+        # when mch last *tried* to reach the node (any probe outcome), so an "unreachable"
+        # row can say when the verdict was reached rather than implying it just happened (S2.4)
+        "ALTER TABLE nodes ADD COLUMN last_attempt_at TEXT",
     ]),
 ]
 
@@ -247,6 +253,19 @@ class Database:
         db = self._db_required()
         await db.execute(
             "UPDATE nodes SET next_sync_at = ? WHERE pubkey = ?",
+            (_dt(when), pubkey),
+        )
+        await db.commit()
+
+    async def set_node_last_attempt(self, pubkey: str, when: datetime) -> None:
+        """Record when mch last *tried* to reach a node (any probe outcome).
+
+        A dedicated setter (like set_next_sync) so `upsert_node` never has to carry this
+        column and can't clobber it — the probe records the attempt directly. See S2.4.
+        """
+        db = self._db_required()
+        await db.execute(
+            "UPDATE nodes SET last_attempt_at = ? WHERE pubkey = ?",
             (_dt(when), pubkey),
         )
         await db.commit()
@@ -683,6 +702,7 @@ def _row_to_node(row: aiosqlite.Row) -> Node:
         auth_required=bool(row["auth_required"]),
         auth_cached=bool(row["auth_cached"]),
         next_sync_at=_parse_dt(row["next_sync_at"]),
+        last_attempt_at=_parse_dt(row["last_attempt_at"]),
     )
 
 

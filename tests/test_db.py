@@ -401,6 +401,25 @@ async def test_set_next_sync(db):
     assert fetched.next_sync_at == t
 
 
+async def test_set_node_last_attempt_roundtrips(db):
+    await db.upsert_node(Node(pubkey="aa", name="N"))
+    t = datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
+    await db.set_node_last_attempt("aa", t)
+    assert (await db.get_node("aa")).last_attempt_at == t
+
+
+async def test_upsert_node_does_not_clobber_last_attempt(db):
+    # The probe records last_attempt via its own setter; a later upsert_node (which does not
+    # carry the column) must preserve it (S2.4).
+    await db.upsert_node(Node(pubkey="aa", name="N"))
+    t = datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
+    await db.set_node_last_attempt("aa", t)
+    node = await db.get_node("aa")
+    node.name = "Renamed"
+    await db.upsert_node(node)
+    assert (await db.get_node("aa")).last_attempt_at == t
+
+
 async def test_get_due_node_returns_overdue(db):
     past   = datetime(2020, 1, 1, tzinfo=UTC)
     future = datetime(2099, 1, 1, tzinfo=UTC)

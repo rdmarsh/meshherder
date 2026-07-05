@@ -299,8 +299,12 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   firmware version via `REQ_TYPE_GET_OWNER_INFO` while keeping anonymous results clearly marked.
 - Decide whether live sync progress should include timestamps now that it is always displayed for
   foreground node sync.
-- Explain partial status more directly when enforced reads timed out after other reads succeeded;
-  `TRIES` counts writes, so a failed read correctly does not increment it.
+- DONE (Unreleased, RECOMMENDATIONS-3 S2.4): explain partial/unreachable status more directly.
+  `mch fleet issues` now footnotes the drift table when any enforce row has 0 TRIES ("enforce drift
+  is corrected on the node's next successful sync; TRIES counts write attempts"), and the
+  problem-states table gained a TRIED column (new `nodes.last_attempt_at`, recorded by the
+  reachability probe) so "unreachable … LAST SEEN 2h ago" no longer reads as a contradiction.
+  `mch help states` teaches the STATE words and TRIES; `node show` gained a `last tried:` line.
 - Add an operator-controlled way to hide stale cached facts that are no longer configured, such
   as a misspelled `facts:` key (`powersavings`) that remains visible in node status after it is
   removed from configuration. Preserve observation history by default.

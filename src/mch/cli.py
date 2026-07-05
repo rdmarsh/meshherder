@@ -687,6 +687,7 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
         "state": node["state"],
         "last_seen": node["last_seen"],
         "last_connected": node["last_connected"],
+        "last_attempt_at": node.get("last_attempt_at"),
         "next_sync_at": node.get("next_sync_at"),
         "auth_cached": node["auth"]["cached"],
         "passwd_known": node["auth"]["password_known"],
@@ -1072,6 +1073,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     click.echo(f"state:       {_state_text(data.get('state'))}")
     click.echo(f"last seen:   {_ago_with_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ago_with_ts(data.get('last_connected'))}")
+    click.echo(f"last tried:  {_ago_with_ts(data.get('last_attempt_at'))}")
     click.echo(f"next sync:   {_next_sync_text(data.get('next_sync_at'))}")
     click.echo(f"pubkey:      {_pk(data.get('pubkey'))}")
     click.echo(f"pubkey full: {data['pubkey']}")
@@ -1445,6 +1447,11 @@ def _render_issue_sections(
                              _sv(s.get("desired")), _sv(s.get("observed")),
                              _tries(s),
                              s["policy"]))
+        # 0 TRIES on an enforce row reads as "mch isn't doing anything" — explain that the fix
+        # waits for the node's next successful sync, and what TRIES actually counts (S2.4).
+        if any(s["policy"] == "enforce" and _tries(s) == "0" for s in drifted):
+            click.echo("  enforce drift is corrected on the node's next successful sync; "
+                       "TRIES counts write attempts")
         click.echo("")
 
     if bad_state:
@@ -1453,17 +1460,24 @@ def _render_issue_sections(
             _wlen("LABEL"),
             max((_wlen(n.get("label") or "-") for n in bad_state), default=0),
         )
-        fmt = "  {:<12}  {}  {}  {:<16}"
-        click.echo(fmt.format("PUBKEY", _wpad("LABEL", name_w), f"{'STATE':<12}", "LAST SEEN"))
-        click.echo(fmt.format("------", _wpad("-----", name_w), f"{'-----':<12}", "---------"))
+        # TRIED = when mch last tried to reach the node (any outcome). It answers the apparent
+        # contradiction "unreachable … LAST SEEN 2h ago": the advert is 2h old, but the failed
+        # probe that set unreachable may have been much later (S2.4).
+        fmt = "  {:<12}  {}  {}  {:<16}  {}"
+        click.echo(fmt.format(
+            "PUBKEY", _wpad("LABEL", name_w), f"{'STATE':<12}", "LAST SEEN", "TRIED"))
+        click.echo(fmt.format(
+            "------", _wpad("-----", name_w), f"{'-----':<12}", "---------", "-----"))
         for n in bad_state:
             label = n.get("label") or "-"
             last = _ago(n.get("last_seen"))
+            tried = _ago(n.get("last_attempt_at"))
             click.echo(fmt.format(
                 _pk(n.get("pubkey")),
                 _wpad(label, name_w),
                 _state_cell(n.get("state"), 12),
                 last,
+                tried,
             ))
         click.echo("")
 
