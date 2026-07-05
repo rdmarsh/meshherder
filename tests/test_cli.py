@@ -897,12 +897,17 @@ def test_validate_warns_for_unknown_fact_and_suggests_typo(tmp_path):
 def _status_resp(
     nodes=None, drifted=None, bad_state=None, open_nodes=None
 ):
-    """Build a status RPC response with empty defaults for all issue arrays."""
+    """Build a `fleet` RPC response (the canonical report model) with empty issue defaults."""
     return {"ok": True, "data": {
+        "schema_version": 2,
         "nodes": nodes or [],
-        "drifted": drifted or [],
-        "bad_state": bad_state or [],
-        "open_nodes": open_nodes or [],
+        "issues": {
+            "drifted": drifted or [],
+            "bad_state": bad_state or [],
+            "open_nodes": open_nodes or [],
+        },
+        "firmware": {"latest": "", "outdated": []},
+        "plan": {"writes": [], "audits": [], "unknown": [], "blocked": []},
     }}
 
 
@@ -1144,20 +1149,42 @@ def test_fleet_issues_filters_by_query():
 
 def _summary(pubkey="aabbccdd" * 8, name="Tower", label="site-a",
              group=None, state="configured", ver=None, neighbors=None):
+    """A canonical fleet-report node (ver/neighbors nested under facts)."""
     return {"pubkey": pubkey, "name": name, "label": label, "group": group,
             "state": state, "last_seen": None, "last_connected": None,
-            "next_sync_at": None, "neighbors": neighbors, "ver": ver}
+            "last_attempt_at": None, "next_sync_at": None,
+            "facts": {"ver": ver, "neighbors": neighbors}}
+
+
+def _canon_setting(s):
+    """Translate a test's legacy projected setting (drift/approximate) into a canonical one."""
+    if s.get("drift"):
+        status = "drift"
+    elif s.get("approximate"):
+        status = "nominal"
+    elif s.get("observed") is None:
+        status = "unknown"
+    else:
+        status = "ok"
+    return {
+        "key": s["key"], "desired": s.get("desired"), "observed": s.get("observed"),
+        "policy": s["policy"], "source": s.get("source"),
+        "update_attempts": s.get("update_attempts", 0), "status": status,
+    }
 
 
 def _detail(pubkey="aabbccdd" * 8, name="Tower", label="site-a", group=None,
             facts=None, fact_times=None, settings=None, logs=None):
+    """A canonical node-report RPC response (the shape `fleet_node` returns)."""
     return {"ok": True, "data": {
         "pubkey": pubkey, "name": name, "label": label, "group": group,
         "state": "configured", "last_seen": None, "last_connected": None,
-        "next_sync_at": None,
-        "auth_required": False, "auth_cached": True, "passwd_known": True,
-        "facts": facts or {}, "facts_collected_at": fact_times or {},
-        "settings": settings or [], "logs": logs or [],
+        "last_attempt_at": None, "next_sync_at": None,
+        "auth": {"required": False, "cached": True, "password_known": True, "open": False},
+        "fact_keys": sorted(facts or {}), "facts": facts or {},
+        "facts_collected_at": fact_times or {},
+        "settings": [_canon_setting(s) for s in (settings or [])],
+        "operations": [], "logs": logs or [],
     }}
 
 
@@ -1751,7 +1778,7 @@ def test_prune_single_node_previews_without_yes():
     """`node prune NODE` previews the one retired node and doesn't delete without --yes (S2.3)."""
     result = _run(["node", "prune", "old-site"], _remove_resp())
     assert result.exit_code == 0
-    assert "retired node to delete" in result.output
+    assert "node to delete" in result.output
     assert "run again with --yes" in result.output
 
 
@@ -1773,15 +1800,11 @@ def test_prune_single_node_refuses_still_managed():
     assert "mch node retire site-a" in combined
 
 
-def test_node_remove_is_hidden_but_still_works():
-    """`node remove` stays as a hidden deprecated alias until a release ships `prune NODE`."""
-    runner = CliRunner()
-    assert ("node", "remove") not in {
-        ("node", name) for name in cli.commands["node"].commands
-    } or cli.commands["node"].commands["remove"].hidden
-    result = runner.invoke(cli, ["node", "remove", "--help"])
-    assert result.exit_code == 0
-    assert "deprecated" in result.output.lower()
+def test_node_remove_alias_is_gone():
+    """The hidden `node remove` alias was retired; --force moved onto `node prune` (S4.1)."""
+    assert "remove" not in cli.commands["node"].commands
+    result = CliRunner().invoke(cli, ["node", "remove", "--help"])
+    assert result.exit_code != 0
 
 
 # ------ clean facts ------
@@ -1849,38 +1872,21 @@ def _remove_resp(deleted=0, retired=True):
     }}
 
 
-def test_remove_prompt_can_decline_delete():
-    runner = CliRunner()
-    with patch("mch.cli._rpc", side_effect=[_remove_resp()]) as mock_rpc:
-        result = runner.invoke(
-            cli,
-            ["--socket", "/fake.sock", "node", "remove", "old-site"],
-            input="n\n",
-        )
-    assert result.exit_code == 0
-    mock_rpc.assert_called_once()
-    assert "Delete this node?" in result.output
-    assert "not deleted" in result.output
-
-
-def test_remove_yes_deletes_without_prompt():
+def test_prune_force_deletes_still_managed_node():
+    """--force (moved onto `node prune NODE`) is the escape hatch for a still-managed node."""
     result = _run_multi(
-        ["node", "remove", "old-site", "--yes"], _remove_resp(), _remove_resp(deleted=1)
-    )
-    assert result.exit_code == 0
-    assert "node to delete" in result.output
-    assert "deleted 1 node(s)" in result.output
-    assert "secrets.yaml is left unchanged" in result.output
-
-
-def test_remove_active_node_notes_force_when_used():
-    result = _run_multi(
-        ["node", "remove", "site-a", "--force", "--yes"],
+        ["node", "prune", "site-a", "--force", "--yes"],
         _remove_resp(retired=False),
         _remove_resp(deleted=1, retired=False),
     )
     assert result.exit_code == 0
     assert "still managed (not retired)" in result.output
+    assert "deleted 1 node(s)" in result.output
+
+
+def test_prune_force_requires_a_node():
+    result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "node", "prune", "--force"])
+    assert result.exit_code == 2  # usage error: --force applies to a single node
 
 
 def _retire_resp(state="retired"):
@@ -1912,10 +1918,18 @@ def test_unretire_command_sends_query_and_reports_state():
 # ------ plan ------
 
 def _plan_resp(writes=None, audits=None, unknown=None):
+    """A `fleet` RPC response whose plan section carries the given rows (canonical shape)."""
     return {"ok": True, "data": {
-        "writes": writes or [],
-        "audits": audits or [],
-        "unknown": unknown or [],
+        "schema_version": 2,
+        "nodes": [],
+        "issues": {"drifted": [], "bad_state": [], "open_nodes": []},
+        "firmware": {"latest": "", "outdated": []},
+        "plan": {
+            "writes": writes or [],
+            "audits": audits or [],
+            "unknown": unknown or [],
+            "blocked": [],
+        },
     }}
 
 

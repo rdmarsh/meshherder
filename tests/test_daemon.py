@@ -160,7 +160,7 @@ async def test_node_dispatch_prefix_returns_facts(db, wq, config):
     node = await _seed_node_with_facts(db)
     prefix = node.pubkey[:8]
 
-    resp = await _dispatch({"cmd": "node", "pubkey": prefix}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": prefix}, wq, db, config)
 
     assert resp["ok"] is True
     data = resp["data"]
@@ -172,10 +172,10 @@ async def test_node_dispatch_passwd_known_when_in_secrets(db, wq, config):
     node = await _seed_node_with_facts(db)
     config.secrets = {node.pubkey[:8]: NodeSecrets(password="hunter2")}
 
-    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": node.pubkey}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["passwd_known"] is True
+    assert resp["data"]["auth"]["password_known"] is True
 
 
 async def test_node_dispatch_passwd_known_false_when_no_secret(db, wq, config):
@@ -183,10 +183,10 @@ async def test_node_dispatch_passwd_known_false_when_no_secret(db, wq, config):
     node = await _seed_node_with_facts(db)
     config.secrets = {}
 
-    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": node.pubkey}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["passwd_known"] is False
+    assert resp["data"]["auth"]["password_known"] is False
 
 
 async def test_node_dispatch_passwd_known_true_when_default_secret(db, wq, config):
@@ -194,10 +194,10 @@ async def test_node_dispatch_passwd_known_true_when_default_secret(db, wq, confi
     node = await _seed_node_with_facts(db)
     config.secrets = {"default": NodeSecrets(password="fleetpassword")}
 
-    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": node.pubkey}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["passwd_known"] is True
+    assert resp["data"]["auth"]["password_known"] is True
 
 
 async def test_fleet_node_dispatch_includes_management_path(db, wq, config):
@@ -344,10 +344,10 @@ async def test_issues_dispatch_no_open_node_when_default_password(db, wq, config
     await db.upsert_node(node)
     config.secrets = {"default": NodeSecrets(password="fleetpassword")}
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["open_nodes"] == []
+    assert resp["data"]["issues"]["open_nodes"] == []
 
 
 async def test_status_dispatch_no_open_nodes_when_default_password(db, wq, config):
@@ -363,10 +363,10 @@ async def test_status_dispatch_no_open_nodes_when_default_password(db, wq, confi
     await db.upsert_node(node)
     config.secrets = {"default": NodeSecrets(password="fleetpassword")}
 
-    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["open_nodes"] == []
+    assert resp["data"]["issues"]["open_nodes"] == []
 
 
 async def test_daemon_reload_updates_existing_config_object(tmp_path):
@@ -465,14 +465,14 @@ async def test_node_dispatch_full_pubkey_returns_facts(db, wq, config):
     """node command with full pubkey should also return facts."""
     node = await _seed_node_with_facts(db)
 
-    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": node.pubkey}, wq, db, config)
 
     assert resp["ok"] is True
     assert resp["data"]["facts"] == {"ver": "v1.14.1", "board": "TestBoard", "role": "repeater"}
 
 
 async def test_node_dispatch_unknown_pubkey_returns_error(db, wq, config):
-    resp = await _dispatch({"cmd": "node", "pubkey": "deadbeef"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": "deadbeef"}, wq, db, config)
     assert resp["ok"] is False
     assert "not found" in resp["error"]
 
@@ -481,14 +481,14 @@ async def test_node_dispatch_label_match(db, wq, config):
     """node command should match by label when pubkey prefix lookup fails."""
     node = await _seed_node_with_facts(db)
     # node.label == "test"
-    resp = await _dispatch({"cmd": "node", "pubkey": "test"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": "test"}, wq, db, config)
     assert resp["ok"] is True
     assert resp["data"]["pubkey"] == node.pubkey
 
 
 async def test_node_dispatch_label_match_case_insensitive(db, wq, config):
     node = await _seed_node_with_facts(db)
-    resp = await _dispatch({"cmd": "node", "pubkey": "TEST"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": "TEST"}, wq, db, config)
     assert resp["ok"] is True
     assert resp["data"]["pubkey"] == node.pubkey
 
@@ -497,7 +497,7 @@ async def test_node_dispatch_label_substring_match(db, wq, config):
     """node command matches a label by substring, not just exact match."""
     node = await _seed_node_with_facts(db)
     # node.label == "test"; query "es" should match
-    resp = await _dispatch({"cmd": "node", "pubkey": "es"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": "es"}, wq, db, config)
     assert resp["ok"] is True
     assert resp["data"]["pubkey"] == node.pubkey
 
@@ -506,7 +506,7 @@ async def test_node_dispatch_name_substring_match(db, wq, config):
     """node command falls through to name substring when label doesn't match."""
     node = await _seed_node_with_facts(db)
     # node.name == "Test Node"; query "ode" should match
-    resp = await _dispatch({"cmd": "node", "pubkey": "ode"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": "ode"}, wq, db, config)
     assert resp["ok"] is True
     assert resp["data"]["pubkey"] == node.pubkey
 
@@ -522,7 +522,7 @@ async def test_node_dispatch_ambiguous_returns_error(db, wq, config):
     await db.upsert_node(node1)
     await db.upsert_node(node2)
 
-    resp = await _dispatch({"cmd": "node", "pubkey": "wip"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": "wip"}, wq, db, config)
     assert resp["ok"] is False
     assert "ambiguous" in resp["error"]
 
@@ -1113,16 +1113,16 @@ async def test_status_dispatch_returns_node_list_and_issue_arrays(db, wq, config
     await db.upsert_node(node)
     config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="site-a")]
 
-    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
     data = resp["data"]
     assert len(data["nodes"]) == 1
     assert data["nodes"][0]["pubkey"] == node.pubkey
     assert data["nodes"][0]["state"] == "configured"
-    assert data["drifted"] == []
-    assert data["bad_state"] == []
-    assert data["open_nodes"] == []
+    assert data["issues"]["drifted"] == []
+    assert data["issues"]["bad_state"] == []
+    assert data["issues"]["open_nodes"] == []
     # RECOMMENDATIONS-2 S3.1: the dead ghost/unseen categories are gone from the payload.
     assert "ghosts" not in data
     assert "unseen_nodes" not in data
@@ -1143,10 +1143,10 @@ async def test_status_dispatch_returns_drifted_array(db, wq, config):
     )
     await db.upsert_setting(setting)
 
-    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
-    assert len(resp["data"]["drifted"]) == 1
-    assert resp["data"]["drifted"][0]["update_attempts"] == 4
+    assert len(resp["data"]["issues"]["drifted"]) == 1
+    assert resp["data"]["issues"]["drifted"][0]["update_attempts"] == 4
 
 
 async def test_node_dispatch_resets_displayed_attempts_for_new_desired_value(db, wq, config):
@@ -1166,7 +1166,7 @@ async def test_node_dispatch_resets_displayed_attempts_for_new_desired_value(db,
     ))
     config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
-    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": node.pubkey}, wq, db, config)
 
     assert resp["data"]["settings"][0]["update_attempts"] == 0
 
@@ -1189,7 +1189,7 @@ async def test_node_dispatch_hides_prior_attempts_when_policy_changes_to_audit(d
     ))
     config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
-    resp = await _dispatch({"cmd": "node", "pubkey": node.pubkey}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet_node", "query": node.pubkey}, wq, db, config)
 
     assert resp["data"]["settings"][0]["update_attempts"] == 0
 
@@ -1210,10 +1210,10 @@ async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, conf
     ))
     config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
-    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["writes"] == [{
+    assert resp["data"]["plan"]["writes"] == [{
         "pubkey": node.pubkey,
         "label": "site-a",
         "mesh_name": "Tower",
@@ -1223,8 +1223,8 @@ async def test_plan_dispatch_lists_enforced_writes_from_known_state(db, wq, conf
         "policy": "enforce",
         "command": "set name New",
     }]
-    assert resp["data"]["audits"] == []
-    assert resp["data"]["unknown"] == []
+    assert resp["data"]["plan"]["audits"] == []
+    assert resp["data"]["plan"]["unknown"] == []
 
 
 async def test_plan_dispatch_uses_raw_meshcore_command_display(db, wq, config):
@@ -1243,10 +1243,10 @@ async def test_plan_dispatch_uses_raw_meshcore_command_display(db, wq, config):
     ))
     config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
-    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["writes"][0]["command"] == "set owner.info 🦷 rdm"
+    assert resp["data"]["plan"]["writes"][0]["command"] == "set owner.info 🦷 rdm"
 
 
 async def test_plan_dispatch_skips_close_enough_radio_roundoff(db, wq, config):
@@ -1265,12 +1265,12 @@ async def test_plan_dispatch_skips_close_enough_radio_roundoff(db, wq, config):
     ))
     config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
-    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["writes"] == []
-    assert resp["data"]["audits"] == []
-    assert resp["data"]["unknown"] == []
+    assert resp["data"]["plan"]["writes"] == []
+    assert resp["data"]["plan"]["audits"] == []
+    assert resp["data"]["plan"]["unknown"] == []
 
 
 async def test_plan_dispatch_audit_default_does_not_write(db, wq, config):
@@ -1289,11 +1289,11 @@ async def test_plan_dispatch_audit_default_does_not_write(db, wq, config):
     ))
     config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
-    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
-    assert resp["data"]["writes"] == []
-    assert resp["data"]["audits"][0]["key"] == "owner.info"
-    assert resp["data"]["audits"][0]["policy"] == "audit"
+    assert resp["data"]["plan"]["writes"] == []
+    assert resp["data"]["plan"]["audits"][0]["key"] == "owner.info"
+    assert resp["data"]["plan"]["audits"][0]["policy"] == "audit"
 
 
 async def test_plan_dispatch_unknown_when_no_known_setting(db, wq, config):
@@ -1305,11 +1305,11 @@ async def test_plan_dispatch_unknown_when_no_known_setting(db, wq, config):
     ))
     config.nodes = [NodeConfig(pubkey_prefix="aabbccdd", label="site-a")]
 
-    resp = await _dispatch({"cmd": "plan"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
-    assert resp["data"]["writes"] == []
-    assert resp["data"]["unknown"][0]["key"] == "name"
-    assert resp["data"]["unknown"][0]["reason"] == "not observed yet"
+    assert resp["data"]["plan"]["writes"] == []
+    assert resp["data"]["plan"]["unknown"][0]["key"] == "name"
+    assert resp["data"]["plan"]["unknown"][0]["reason"] == "not observed yet"
 
 
 async def test_status_dispatch_includes_label(db, wq, config):
@@ -1317,7 +1317,7 @@ async def test_status_dispatch_includes_label(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="Tower", label="site-a", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
 
-    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["data"]["nodes"][0]["label"] == "site-a"
 
@@ -1335,13 +1335,13 @@ async def test_status_dispatch_includes_group_and_facts(db, wq, config):
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="ver", value="v1.14.1"))
     await db.upsert_fact(NodeFact(node_pubkey=node.pubkey, key="neighbors", value="5"))
 
-    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
     row = resp["data"]["nodes"][0]
     assert row["group"] == "repeaters"
-    assert row["ver"] == "v1.14.1"
-    assert row["neighbors"] == "5"
+    assert row["facts"]["ver"] == "v1.14.1"
+    assert row["facts"]["neighbors"] == "5"
 
 
 # ------------------------------------------------------------------
@@ -1357,12 +1357,12 @@ async def test_issues_dispatch_no_issues(db, wq, config):
     await db.upsert_node(node)
     config.nodes = [NodeConfig(pubkey_prefix=node.pubkey[:8], label="site-a")]
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["drifted"] == []
-    assert resp["data"]["bad_state"] == []
-    assert resp["data"]["open_nodes"] == []
+    assert resp["data"]["issues"]["drifted"] == []
+    assert resp["data"]["issues"]["bad_state"] == []
+    assert resp["data"]["issues"]["open_nodes"] == []
 
 
 async def test_issues_dispatch_returns_drifted_settings(db, wq, config):
@@ -1375,11 +1375,11 @@ async def test_issues_dispatch_returns_drifted_settings(db, wq, config):
         policy=SettingPolicy.ENFORCE, drift=True,
     ))
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
-    assert len(resp["data"]["drifted"]) == 1
-    assert resp["data"]["drifted"][0]["key"] == "owner.info"
-    assert resp["data"]["drifted"][0]["label"] == "site-a"
+    assert len(resp["data"]["issues"]["drifted"]) == 1
+    assert resp["data"]["issues"]["drifted"][0]["key"] == "owner.info"
+    assert resp["data"]["issues"]["drifted"][0]["label"] == "site-a"
 
 
 async def test_issues_dispatch_returns_bad_state_nodes(db, wq, config):
@@ -1389,9 +1389,9 @@ async def test_issues_dispatch_returns_bad_state_nodes(db, wq, config):
     await db.upsert_node(good)
     await db.upsert_node(bad)
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
-    assert resp["data"]["bad_state"] == [{"pubkey": bad.pubkey, "label": "b",
+    assert resp["data"]["issues"]["bad_state"] == [{"pubkey": bad.pubkey, "label": "b",
                                            "name": "Bad", "state": "configuring",
                                            "last_seen": None, "last_attempt_at": None}]
 
@@ -1401,9 +1401,9 @@ async def test_issues_dispatch_online_not_in_bad_state(db, wq, config):
     node = Node(pubkey="aabbccdd" * 8, name="N", label="n", state=NodeState.ONLINE)
     await db.upsert_node(node)
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
-    assert resp["data"]["bad_state"] == []
+    assert resp["data"]["issues"]["bad_state"] == []
 
 
 async def test_issues_dispatch_has_no_ghost_or_unseen_categories(db, wq, config):
@@ -1417,11 +1417,12 @@ async def test_issues_dispatch_has_no_ghost_or_unseen_categories(db, wq, config)
     await db.upsert_node(node)
     config.nodes = []
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
-    assert "ghosts" not in resp["data"]
-    assert "unseen_nodes" not in resp["data"]
-    assert set(resp["data"]) == {"drifted", "bad_state", "open_nodes"}
+    issues = resp["data"]["issues"]
+    assert "ghosts" not in issues
+    assert "unseen_nodes" not in issues
+    assert set(issues) == {"drifted", "bad_state", "open_nodes"}
 
 
 async def test_dispatch_unknown_command_returns_error(db, wq, config):
@@ -1569,11 +1570,11 @@ async def test_issues_dispatch_open_nodes_when_no_acl(db, wq, config):
     await db.upsert_node(node)
     config.secrets = {}
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert len(resp["data"]["open_nodes"]) == 1
-    assert resp["data"]["open_nodes"][0]["pubkey"] == node.pubkey
+    assert len(resp["data"]["issues"]["open_nodes"]) == 1
+    assert resp["data"]["issues"]["open_nodes"][0]["pubkey"] == node.pubkey
 
 
 async def test_issues_dispatch_no_open_node_when_passwd_configured(db, wq, config):
@@ -1589,10 +1590,10 @@ async def test_issues_dispatch_no_open_node_when_passwd_configured(db, wq, confi
     await db.upsert_node(node)
     config.secrets = {node.pubkey[:8]: NodeSecrets(password="hunter2")}
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["open_nodes"] == []
+    assert resp["data"]["issues"]["open_nodes"] == []
 
 
 async def test_issues_dispatch_no_open_node_when_auth_cached(db, wq, config):
@@ -1608,10 +1609,10 @@ async def test_issues_dispatch_no_open_node_when_auth_cached(db, wq, config):
     await db.upsert_node(node)
     config.secrets = {}
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["open_nodes"] == []
+    assert resp["data"]["issues"]["open_nodes"] == []
 
 
 async def test_issues_dispatch_no_open_node_when_auth_required(db, wq, config):
@@ -1627,10 +1628,10 @@ async def test_issues_dispatch_no_open_node_when_auth_required(db, wq, config):
     await db.upsert_node(node)
     config.secrets = {}
 
-    resp = await _dispatch({"cmd": "issues"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["open_nodes"] == []
+    assert resp["data"]["issues"]["open_nodes"] == []
 
 
 async def test_status_dispatch_open_nodes_in_array(db, wq, config):
@@ -1646,10 +1647,10 @@ async def test_status_dispatch_open_nodes_in_array(db, wq, config):
     await db.upsert_node(node)
     config.secrets = {}
 
-    resp = await _dispatch({"cmd": "status"}, wq, db, config)
+    resp = await _dispatch({"cmd": "fleet"}, wq, db, config)
 
     assert resp["ok"] is True
-    assert len(resp["data"]["open_nodes"]) == 1
+    assert len(resp["data"]["issues"]["open_nodes"]) == 1
 
 
 # ------------------------------------------------------------------

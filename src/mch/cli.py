@@ -646,8 +646,6 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
 
 def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
     """Project the fleet report model into the existing terminal status renderer."""
-    if "schema_version" not in fleet:
-        return fleet
     firmware = fleet.get("firmware", {"latest": "", "outdated": []})
     outdated_pubkeys = {n["pubkey"] for n in firmware.get("outdated", [])}
     return {
@@ -673,8 +671,6 @@ def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
 
 def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
     """Project a canonical node report response into the existing terminal detail renderer."""
-    if "auth" not in node:
-        return node
     facts = {key: "???" for key in node.get("fact_keys", [])}
     facts.update(node["facts"])
     fact_times = {key: None for key in facts}
@@ -714,8 +710,9 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
 
 
 def _plan_view(fleet: dict[str, Any]) -> dict[str, Any]:
-    """Read plan data from the fleet API while accepting legacy test/daemon payloads."""
-    return fleet["plan"] if "plan" in fleet else fleet
+    """Read plan data from the fleet report model."""
+    plan: dict[str, Any] = fleet["plan"]
+    return plan
 
 
 def _emit_json(payload: Any) -> None:
@@ -1846,36 +1843,43 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
     _render_probe_result(data)
 
 
-def _prune_one(ctx: click.Context, node: str, yes: bool) -> None:
-    """Prune a single retired node. Refuses a still-managed node — retire it first."""
-    # A single-node prune reuses the daemon's `remove` (dry-run preview + --yes execute), without
-    # a force path: the whole point of prune is that the node is already retired.
+def _prune_one(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
+    """Prune a single node. Refuses a still-managed node — retire it first, or use --force.
+
+    Reuses the daemon's `remove` (dry-run preview + --yes execute). ``--force`` is the only
+    escape hatch for deleting a node that is still managed (not retired); without it prune
+    only touches already-retired nodes.
+    """
     resp = _rpc(
-        ctx.obj["socket"], {"cmd": "remove", "query": node, "dry_run": True, "force": False}
+        ctx.obj["socket"], {"cmd": "remove", "query": node, "dry_run": True, "force": force}
     )
     if not resp.get("ok"):
         err = resp.get("error", "") or "unknown error"
         if "still managed" in err:
-            err = f"{node!r} is still managed — retire it first: mch node retire {node}"
+            err = (f"{node!r} is still managed — retire it first (mch node retire {node}), "
+                   "or force deletion with --force")
         click.echo(f"error: {err}", err=True)
         raise SystemExit(1)
     data = resp["data"]
 
-    click.echo("retired node to delete (history and all):")
+    click.echo("node to delete (history and all):")
     click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
     click.echo(f"  label:     {data.get('label') or '-'}")
     click.echo(f"  mesh name: {data.get('name') or '-'}")
     click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
+    if force and not data.get("retired"):
+        click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
     click.echo("")
 
     if not yes:
-        click.echo(f"run again with --yes to delete: mch node prune {node} --yes")
+        again = f"mch node prune {node} --yes" + (" --force" if force else "")
+        click.echo(f"run again with --yes to delete: {again}")
         click.echo("secrets.yaml entries are left unchanged")
         return
 
     del_resp = _rpc(
         ctx.obj["socket"],
-        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": False},
+        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": force},
     )
     deleted = _check(del_resp).get("deleted", 0)
     click.echo(f"deleted {deleted} node(s)")
@@ -1885,15 +1889,23 @@ def _prune_one(ctx: click.Context, node: str, yes: bool) -> None:
 @node_group.command("prune")
 @click.argument("node", required=False)
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed nodes (default: preview only).")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="With NODE: delete even a still-managed node (not retired); it may re-seed.",
+)
 @click.pass_context
-def prune(ctx: click.Context, node: str | None, yes: bool) -> None:
+def prune(ctx: click.Context, node: str | None, yes: bool, force: bool) -> None:
     """Permanently delete retired nodes (the cleanup step after `mch node retire`).
 
     With no NODE, lists every retired node and deletes them all with --yes. Pass a NODE to
-    delete just that one. A node that is still managed is refused — retire it first.
+    delete just that one. A still-managed node is refused — retire it first, or override
+    with --force (the escape hatch for deleting a node that is still managed).
     """
+    if force and not node:
+        raise click.UsageError("--force applies to a single node: mch node prune NODE --force")
     if node:
-        _prune_one(ctx, node, yes)
+        _prune_one(ctx, node, yes, force)
         return
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
@@ -2098,57 +2110,6 @@ def clean_settings(
     _render_stale_table(
         data, noun_plural="settings", noun_singular="setting", key_header="SETTING", yes=yes
     )
-
-
-@node_group.command("remove", hidden=True)
-@click.argument("node")
-@click.option("--yes", "-y", is_flag=True, help="Delete without prompting.")
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Allow deleting a node that is still managed (not retired).",
-)
-@click.pass_context
-def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
-    """Deprecated: use `mch node prune NODE`. Kept as a hidden alias, and as the only
-    path with --force (delete a still-managed node). Removed once a release ships that
-    carries the `prune NODE` replacement.
-    """
-    click.echo(
-        "note: `mch node remove` is deprecated — use `mch node prune NODE` "
-        "(use this only for --force).",
-        err=True,
-    )
-    resp = _rpc(
-        ctx.obj["socket"],
-        {"cmd": "remove", "query": node, "dry_run": True, "force": force},
-    )
-    data = _check(resp)
-
-    label = data.get("label") or "-"
-    name = data.get("name") or "-"
-    click.echo("node to delete:")
-    click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
-    click.echo(f"  label:     {label}")
-    click.echo(f"  mesh name: {name}")
-    click.echo(f"  state:     {data.get('state') or '-'}")
-    click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
-    if not data.get("retired"):
-        click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
-    click.echo("")
-    click.echo("This deletes the node's facts, settings, operations, logs, and inventory row.")
-    click.echo("secrets.yaml is left unchanged.")
-
-    if not yes and not click.confirm("Delete this node?"):
-        click.echo("not deleted")
-        return
-
-    delete_resp = _rpc(
-        ctx.obj["socket"],
-        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": force},
-    )
-    deleted = _check(delete_resp).get("deleted", 0)
-    click.echo(f"deleted {deleted} node(s)")
 
 
 @node_group.command("retire")
@@ -2411,8 +2372,8 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
         )
         raise SystemExit(1)
 
-    # resolve node to get pubkey for confirmation display
-    node_resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": node})
+    # resolve node to get pubkey for confirmation display (the canonical node report)
+    node_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": node})
     if not node_resp.get("ok"):
         click.echo(f"error: {node_resp.get('error')}", err=True)
         raise SystemExit(1)
