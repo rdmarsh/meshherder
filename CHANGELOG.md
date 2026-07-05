@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.22.0 - 2026-07-05
+
 - **Removed the read-only HTTP API.** The optional loopback HTTP server (`api.py`, the `api:` config
   block, `/status`/`/issues`/`/plan`/`/logs`/`/health`) existed only as the read contract for a future
   dashboard. With the web UI shelved and `mch ... --json` (added in 0.21.0) serving the identical
