@@ -774,10 +774,11 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
 
     filtered = bool(query and len(nodes) != len(all_nodes))
 
-    # Zero matches with a query
+    # Zero matches with a query: fail loudly (stderr + exit 1) like `node show`, so a typo
+    # in a script does not look like success (S2.7).
     if query and not nodes:
-        click.echo(f"  no nodes matching '{query}'")
-        return
+        click.echo(f"no nodes matching '{query}'", err=True)
+        raise SystemExit(1)
 
     # Fleet table
     if nodes:
@@ -1067,7 +1068,7 @@ def _render_node_detail(data: dict[str, Any]) -> None:
     """Render the full per-node detail view."""
     click.echo(f"label:       {data.get('label') or '-'}")
     click.echo(f"group:       {data.get('group') or '-'}")
-    click.echo(f"mesh name:   {data['name']}")
+    click.echo(f"mesh name:   {data['name'] or '-'}")
     click.echo(f"state:       {_state_text(data.get('state'))}")
     click.echo(f"last seen:   {_ago_with_ts(data.get('last_seen'))}")
     click.echo(f"last conn:   {_ago_with_ts(data.get('last_connected'))}")
@@ -2383,7 +2384,7 @@ def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) 
 
 
 @config_group.command("set")
-@click.argument("args", nargs=-1, required=True)
+@click.argument("args", nargs=-1, required=True, metavar="[NODE] KEY [VALUE]")
 @click.option("--group", "group_name", default=None,
               help="Set at group scope: applies to every node in the group.")
 @click.option("--global", "global_scope", is_flag=True,
@@ -2467,7 +2468,7 @@ def set_setting(
 
 
 @config_group.command("unset")
-@click.argument("args", nargs=-1, required=True)
+@click.argument("args", nargs=-1, required=True, metavar="[NODE] KEY")
 @click.option("--group", "group_name", default=None,
               help="Unset at group scope.")
 @click.option("--global", "global_scope", is_flag=True,

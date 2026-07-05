@@ -1196,6 +1196,20 @@ def test_status_renders_canonical_fleet_api_response():
     assert "4" in result.output
 
 
+def test_node_show_blank_mesh_name_renders_dash():
+    # S2.7: a never-contacted node has no mesh name; render '-' not emptiness.
+    result = _run(["node", "show", "9635"], _detail(name=""))
+    assert "mesh name:   -" in result.output
+
+
+def test_config_set_usage_shows_positional_metavar():
+    # S2.7: usage reads with the real positionals, not the nargs `ARGS...` hack.
+    runner = CliRunner()
+    result = runner.invoke(cli, ["config", "set"])
+    assert "[NODE] KEY [VALUE]" in result.output
+    assert "ARGS..." not in result.output
+
+
 def test_node_show_renders_known_path_from_detail_response():
     detail = _detail()
     detail["data"]["management_path"] = {
@@ -1625,8 +1639,9 @@ def test_node_show_shows_ok_settings_in_green():
 
 
 def test_status_no_match():
+    # S2.7: a zero-match filter fails loudly (stderr + exit 1), like `node show`.
     result = _run(["fleet", "status", "zzzz"], _status_resp())
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "no nodes matching" in result.output
 
 
