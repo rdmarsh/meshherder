@@ -721,10 +721,12 @@ def _plan_view(fleet: dict[str, Any]) -> dict[str, Any]:
 def _emit_json(payload: Any) -> None:
     """Print a report payload as indented JSON — the CLI's scripting/integration surface.
 
-    The shapes are the report model (`report.py`), the same objects the HTTP API serves, so
-    `mch fleet status --json` and the API `/status` body match for the same data.
+    The shapes are the documented report model (`report.py`), served over the Unix socket as
+    the one read contract (the HTTP API was retired in 0.22.0). ``ensure_ascii=False`` so
+    emoji-heavy node names arrive as UTF-8 (this fleet's names are emoji-heavy and every
+    consumer — jq, terminals, files — is UTF-8), not as \\uXXXX surrogate escapes (S4.5).
     """
-    click.echo(json.dumps(payload, indent=2, default=str))
+    click.echo(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
 
 
 def _filter_report_by_query(report: dict[str, Any], query: str | None) -> dict[str, Any]:

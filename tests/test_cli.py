@@ -1007,6 +1007,15 @@ def test_fleet_status_json_emits_report_verbatim():
     assert json.loads(result.output) == resp["data"]
 
 
+def test_json_emits_readable_utf8_not_surrogate_escapes():
+    # S4.5: emoji names come through as UTF-8, not \uXXXX escapes.
+    resp = _report_resp(nodes=[_report_node(name="\U0001f9b7 Corb", label="corbin")])
+    result = _run(["fleet", "status", "--json"], resp)
+    assert result.exit_code == 0
+    assert "\U0001f9b7 Corb" in result.output
+    assert "\\ud83e" not in result.output
+
+
 def test_fleet_status_json_filters_nodes_by_query():
     resp = _report_resp(nodes=[_report_node(label="tower"),
                                _report_node(pubkey="11" * 32, label="ridge", name="Ridge")])
