@@ -24,10 +24,6 @@ reply is reused as the
 fact. Independent fact and setting reads are issued in a randomized order each
 cycle so a marginal link does not repeatedly lose the same trailing observations.
 .PP
-When enabled in configuration, mchd also serves a read-only HTTP JSON API on a
-loopback address for local integrations and future user interfaces. It does
-not expose sync, command execution, commissioning, or other mutating actions.
-.PP
 The daemon owns all gateway traffic. The
 .BR mch (1)
 command talks to
@@ -66,10 +62,6 @@ nodes, facts to collect, messenger settings, and paths such as
 .I db_path
 and
 .IR socket_path .
-An optional
-.I api
-mapping enables the loopback-only read-only HTTP API and selects its host and
-port.
 .TP
 .I /etc/meshherder/secrets.yaml
 Node passwords and private keys. This file is usually mode 600 and owned by the
@@ -85,36 +77,19 @@ Default Unix socket used by
 .TP
 .I /dev/meshcore0
 Recommended stable symlink for the USB-attached gateway node.
-.SH READ-ONLY API
-The HTTP API is disabled by default. Enable it in
-.I config.yaml
-with:
-.PP
-.nf
-api:
-  enabled: true
-  host: 127.0.0.1
-  port: 8743
-.fi
-.PP
-Only loopback hosts are accepted until API authentication is implemented.
-Available read-only endpoints are:
-.PP
-.nf
-GET /health
-GET /status
-GET /status/<label-or-pubkey-prefix>
-GET /issues
-GET /plan
-GET /logs?node=<label-or-prefix>&limit=50
-.fi
-.PP
-The
-.B /status
-response includes
-.B schema_version: 2
+.SH SCRIPTING
+There is no HTTP API. For scripting and integrations, the read commands of
+.BR mch (1)
+emit the normalized report model as JSON over the Unix socket with
+.BR \-\-json
+(for example
+.B mch fleet status \-\-json
+or
+.BR "mch fleet issues \-\-json" ),
+carrying
+.B schema_version
 and normalized node health, facts, setting classifications, planned actions,
-and issues suitable for presentation by a dashboard.
+and issues.
 .SH SYSTEMD
 The packaged service unit is named
 .BR mchd.service .
@@ -154,7 +129,7 @@ and reloads them shortly after changes. You can also force a reload with:
 sudo systemctl kill -s HUP mchd
 .fi
 .PP
-Gateway device, database path, socket path, and API listener changes require a daemon restart.
+Gateway device, database path, and socket path changes require a daemon restart.
 .SH OPERATION
 The daemon processes nodes sequentially to avoid hammering the mesh. Between
 nodes it waits the configured

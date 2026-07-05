@@ -5,6 +5,11 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Docs cleanup (RECOMMENDATIONS-3 slice 5).** The `mchd(8)` man page no longer documents the
+  retired HTTP API (the `api:` config block and the READ-ONLY API section are gone); a new docs-drift
+  guard asserts the daemon man page mentions neither `api:` nor the HTTP endpoints, so retired daemon
+  surface fails the same way retired CLI surface does. Scripting now points at `mch ... --json`.
+
 - **Complexity pay-down (RECOMMENDATIONS-3 slice 4, in progress).** Deleted the dead read-path
   adapter stack left over from the HTTP-API retirement: the daemon's `status`/`plan`/`issues`/`node`
   RPC verbs and their `legacy_*` builders are gone (every read now flows through the one `fleet` /
