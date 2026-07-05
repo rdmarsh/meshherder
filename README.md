@@ -309,7 +309,8 @@ password, add it to `secrets.yaml` before syncing.
 
 ```
 mch fleet status                  # fleet view: state, label, group, firmware, neighbours, last seen
-mch fleet status <label|prefix>   # one match → detail view; multiple matches → filtered table
+mch fleet status <label|prefix>   # filtered table (single match hints `mch node show`)
+mch node show <label|prefix>      # full detail for one node (facts, settings, schedule, activity)
 mch daemon validate                # validate the daemon's /etc/meshherder/config.yaml
 mch fleet suggest                    # suggested txdelay for every node based on neighbour count
 mch fleet suggest <label|prefix>     # full suggestions + the `mch config set` commands to apply them
@@ -655,11 +656,11 @@ mch sync                            Shortcut for `mch fleet sync`
 mch help selectors                  How to name a node on the command line
 mch help concepts                   Desired vs reported, policy, scope, sync, exit codes
 mch fleet status                    Fleet overview: state, label, group, firmware (VER, ! = outdated), neighbours, last seen
-mch fleet status <label|prefix>     One match → node detail; multiple matches → filtered table + issues
+mch fleet status <label|prefix>     Filtered table; a single match hints `mch node show`
                               (add --json to fleet status/issues/plan/logs, node show, config show for scripting)
-                              Detail view: facts, all desired settings (config + group, including
-                              pending ones not yet synced), last seen/last conn and approximate
-                              next sync with full timestamp and relative time, recent activity logs
+mch node show <label|prefix>        Full detail for one node: facts, all desired settings (config +
+                              group, including pending ones not yet synced), last seen/last conn
+                              and approximate next sync with timestamp + relative time, activity logs
 mch daemon validate                  Validate /etc/meshherder/config.yaml
 mch daemon validate --config <path>  Validate an explicit config file
 mch fleet plan                      Desired-vs-known changes; no mesh traffic and no writes

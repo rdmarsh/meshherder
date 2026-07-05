@@ -118,7 +118,8 @@ scheduler:
 mch help selectors / concepts      # learn how to name a node, and mch's vocabulary
 mch daemon validate                # validate config/secrets and warn about unknown facts
 mch fleet status                   # fleet overview: state, label, group, firmware, neighbours, last seen
-mch fleet status &lt;label|prefix&gt;    # one match: node detail; multiple: filtered table
+mch fleet status &lt;label|prefix&gt;    # filtered table (single match hints `mch node show`)
+mch node show &lt;label|prefix&gt;        # full detail for one node
 mch fleet plan                     # desired-vs-known diff, no mesh traffic, no writes
 mch fleet plan &lt;label|prefix&gt;      # filter to one node
 mch fleet sync                     # sweep all nodes in background

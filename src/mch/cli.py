@@ -741,16 +741,6 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
 
     filtered = bool(query and len(nodes) != len(all_nodes))
 
-    # Single match → detail view. This "magic" switch is being retired in favour of the explicit
-    # `mch node show NODE`; keep it for one release but nudge operators toward the new command.
-    if query and len(nodes) == 1:
-        pubkey = nodes[0]["pubkey"]
-        detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": pubkey})
-        detail = _node_detail_view(_check(detail_resp))
-        _render_node_detail(detail)
-        click.echo(f"(tip: `mch node show {query}` shows this detail view directly)", err=True)
-        return
-
     # Zero matches with a query
     if query and not nodes:
         click.echo(f"  no nodes matching '{query}'")
@@ -813,6 +803,11 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
         click.echo(f"{len(nodes)} of {len(all_nodes)} nodes shown")
     else:
         click.echo(f"{len(all_nodes)} nodes")
+
+    # A single match no longer silently switches to the detail view (that magic switch was dropped
+    # after 0.21.0 shipped its deprecation hint); point the operator at the explicit command.
+    if query and len(nodes) == 1:
+        click.echo(f"(tip: `mch node show {query}` shows full detail for this node)", err=True)
 
     _render_issue_sections(drifted, bad_state, open_nodes)
     _render_firmware_advisory(data.get("firmware"), query)
