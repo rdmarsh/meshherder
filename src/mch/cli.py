@@ -1536,39 +1536,35 @@ def _filter_plan_items(items: list[dict[str, Any]], query: str | None) -> list[d
     ]
 
 
-@gateway_group.command("contacts")
-@click.argument("query", required=False, default=None)
-@click.pass_context
-def contacts(ctx: click.Context, query: str | None) -> None:
-    """Show repeaters the gateway can see that mch isn't managing yet.
+# Above a handful of matches the per-contact adopt recipe (~10 lines each) drowns the
+# terminal — on luna the gateway sees 337 unmanaged repeaters (~3,400 lines). So the recipe
+# is reserved for a small QUERY result; everything else is a compact table (S2.6).
+_MAX_CONTACT_RECIPES = 5
 
-    \b
-    Optionally filter by pubkey prefix or name substring:
-      mch gateway contacts 4e       # pubkeys starting with 4e
-      mch gateway contacts mill     # names containing "mill"
 
-    For each contact it prints the ready-to-run `mch node adopt` command that starts
-    managing the node, plus the matching secrets.yaml snippet if the node needs a login
-    password.
-    """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
-    data = _check(resp)
-    data = _filter_contacts(data or [], query)
-
-    if not data:
-        if query:
-            click.echo(f"no unmanaged repeater contacts matching '{query}'")
-        else:
-            click.echo("no unmanaged repeater contacts found")
-        return
-
+def _render_contacts_table(contacts: list[dict[str, Any]], query: str | None) -> None:
+    """Compact PUBKEY/NAME table of unmanaged repeaters, sorted by name."""
+    rows = sorted(contacts, key=lambda c: (c.get("adv_name") or "").lower())
+    name_w = max(
+        _wlen("NAME"), max((_wlen(c.get("adv_name") or "-") for c in rows), default=0)
+    )
+    click.echo(f"  {'PUBKEY':<12}  {_wpad('NAME', name_w)}".rstrip())
+    click.echo(f"  {'------':<12}  {_wpad('----', name_w)}".rstrip())
+    for c in rows:
+        click.echo(f"  {c.get('public_key', '')[:12]:<12}  {c.get('adv_name') or '-'}".rstrip())
+    n = len(rows)
     if query:
-        click.echo(f"# Repeater contacts matching '{query}' that mch isn't managing yet.")
+        click.echo(f"{n} unmanaged repeater{_plural(n)} matching '{query}'")
     else:
-        click.echo("# Repeater contacts the gateway can see that mch isn't managing yet.")
-    click.echo("# Bring one under management by running its `mch node adopt` command below.\n")
+        click.echo(f"{n} unmanaged repeater{_plural(n)} visible to the gateway")
+    click.echo("(`mch gateway contacts NAME` prints the adopt recipe for matches)")
 
-    for c in data:
+
+def _render_contact_recipes(contacts: list[dict[str, Any]]) -> None:
+    """Per-contact `mch node adopt` recipe + secrets.yaml stanza (small result sets only)."""
+    click.echo("# Repeater contacts that mch isn't managing yet.")
+    click.echo("# Bring one under management by running its `mch node adopt` command below.\n")
+    for c in contacts:
         pubkey = c.get("public_key", "")
         prefix = pubkey[:12]
         name = c.get("adv_name", "") or "unknown"
@@ -1590,6 +1586,46 @@ def contacts(ctx: click.Context, query: str | None) -> None:
 
         click.echo("# if the node requires a login, add its password to secrets.yaml:")
         click.echo(f"  {prefix}: \"\"      # add password if required, or leave blank\n")
+
+
+@gateway_group.command("contacts")
+@click.argument("query", required=False, default=None)
+@click.option("--json", "as_json", is_flag=True,
+              help="Emit the contact list as JSON for scripting.")
+@click.pass_context
+def contacts(ctx: click.Context, query: str | None, as_json: bool) -> None:
+    """Show repeaters the gateway can see that mch isn't managing yet.
+
+    \b
+    Without a filter it prints a compact table (at mesh scale the gateway can see
+    hundreds of contacts). Filter by pubkey prefix or name substring:
+      mch gateway contacts 4e       # pubkeys starting with 4e
+      mch gateway contacts mill     # names containing "mill"
+
+    When a filter matches only a handful of contacts, each is shown as a ready-to-run
+    `mch node adopt` command plus its secrets.yaml snippet; a larger match stays a table.
+    """
+    resp = _rpc(ctx.obj["socket"], {"cmd": "contacts"})
+    data = _check(resp)
+    data = _filter_contacts(data or [], query)
+
+    if as_json:
+        _emit_json(data)
+        return
+
+    if not data:
+        if query:
+            click.echo(f"no unmanaged repeater contacts matching '{query}'")
+        else:
+            click.echo("no unmanaged repeater contacts found")
+        return
+
+    # The adopt recipe is reserved for a small, deliberate QUERY result; everything else
+    # (no query, or a broad match) is the compact table.
+    if query and len(data) <= _MAX_CONTACT_RECIPES:
+        _render_contact_recipes(data)
+    else:
+        _render_contacts_table(data, query)
 
 
 @node_group.command("discover")

@@ -292,10 +292,15 @@ or require confirmation.
 .SS gateway \(em operate the locally attached gateway node
 .TP
 .B gateway contacts \fR[\fILABEL_OR_PREFIX\fR]
-Show repeater contacts visible to the gateway that are not yet managed in the DB,
-printing the
+Show repeater contacts visible to the gateway that are not yet managed. Without a
+filter it prints a compact table (the gateway can see hundreds of contacts). When
+a filter matches only a handful, each is shown as a ready-to-run
 .B "mch node adopt"
-command to bring each under management.
+command plus its
+.I secrets.yaml
+snippet; a larger match stays a table. Add
+.B \-\-json
+to emit the contact list for scripting.
 .TP
 .B gateway admin \fR[\fICLI ARGS...\fR]
 Stop

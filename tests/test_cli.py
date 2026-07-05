@@ -2132,16 +2132,44 @@ def test_contacts_no_contacts():
     assert "no unmanaged repeater contacts" in result.output
 
 
-def test_contacts_shows_adopt_command():
+def test_contacts_no_query_is_a_table_not_recipes():
+    # S2.6: the default view is a compact table — no per-contact adopt recipe.
     result = _run(["gateway", "contacts"], {"ok": True, "data": [
         {"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2},
     ]})
     assert result.exit_code == 0
-    # Post-sunset: print the runnable adopt command with the full pubkey, not a config.yaml block.
+    assert "PUBKEY" in result.output and "NAME" in result.output
+    assert "Millbrook" in result.output
+    assert "1 unmanaged repeater visible to the gateway" in result.output
+    assert "mch node adopt" not in result.output  # recipe is query-only
+
+
+def test_contacts_query_small_match_shows_adopt_recipe():
+    result = _run(["gateway", "contacts", "mill"], {"ok": True, "data": [
+        {"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2},
+    ]})
+    assert result.exit_code == 0
     assert "mch node adopt" in result.output
     assert "aabbccdd" * 8 in result.output
     assert "Millbrook" in result.output
     assert "config.yaml" not in result.output
+
+
+def test_contacts_query_large_match_stays_a_table():
+    # Above the recipe cap even a query result stays a table (S2.6).
+    data = [{"public_key": f"{i:02d}" + "aa" * 31, "adv_name": f"rep {i}", "type": 2}
+            for i in range(8)]
+    result = _run(["gateway", "contacts", "rep"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert "mch node adopt" not in result.output
+    assert "8 unmanaged repeaters matching 'rep'" in result.output
+
+
+def test_contacts_json_emits_list():
+    data = [{"public_key": "aabbccdd" * 8, "adv_name": "Millbrook", "type": 2}]
+    result = _run(["gateway", "contacts", "--json"], {"ok": True, "data": data})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == data
 
 
 # ------ sync ------
