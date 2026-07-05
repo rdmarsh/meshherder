@@ -104,3 +104,19 @@ def test_website_cli_references_exist():
 
 def test_man_page_cli_references_exist():
     _check("docs/man/mch.1", _MAN_RE)
+
+
+def test_mchd_man_page_has_no_retired_http_api():
+    """The HTTP API was retired in 0.22.0; the daemon man page must not resurrect it (S5.1).
+
+    Retired daemon surface should fail the same way retired CLI surface already does, so a
+    future edit that re-documents the `api:` block or an HTTP listener trips a test.
+    """
+    text = (_ROOT / "docs/man/mchd.8").read_text()
+    lowered = text.lower()
+    # No `api:` config block and no HTTP endpoints — the enabling surface, not the phrase
+    # "there is no HTTP API" (which is the correct thing to say).
+    assert "api:" not in lowered
+    assert "read-only api" not in lowered
+    for endpoint in ("/status", "/health", "/issues", "/plan", "/logs"):
+        assert endpoint not in text
