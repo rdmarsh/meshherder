@@ -26,7 +26,6 @@ from typing import Any
 
 from meshcore.events import EventType
 
-from mch.api import ReadOnlyApi
 from mch.command_registry import readable_observation_keys, validate_value
 from mch.command_safety import blocked_exec_command
 from mch.config import (
@@ -1258,7 +1257,6 @@ class Daemon:
         self._wq: WorkQueue | None = None
         self._messenger: Messenger | None = None
         self._server: asyncio.Server | None = None
-        self._api: ReadOnlyApi | None = None
         self._config_snapshot: dict[Path, FileSignature] = {}
         self._config_watch_task: asyncio.Task[None] | None = None
         self._work_queue_task: asyncio.Task[None] | None = None
@@ -1323,10 +1321,6 @@ class Daemon:
         )
         os.chmod(sock_path, 0o660)  # group-writable so mch group members can connect
         log.info("control socket listening at %s", sock_path)
-
-        if config.api.enabled:
-            self._api = ReadOnlyApi(config, self._db)
-            await self._api.start()
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -1439,8 +1433,6 @@ class Daemon:
             if self._server:
                 self._server.close()
                 await self._server.wait_closed()
-            if self._api:
-                await self._api.close()
             if self._gateway:
                 await self._gateway.disconnect()
             if self._db:

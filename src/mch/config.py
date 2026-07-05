@@ -8,7 +8,6 @@ import re
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field, replace
 from difflib import get_close_matches
-from ipaddress import ip_address
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -51,7 +50,6 @@ _TOP_LEVEL_KEYS = {
     "profiles_url",
     "profiles_file",
     "messenger",
-    "api",
     "global",
     "groups",
     "nodes",
@@ -59,7 +57,6 @@ _TOP_LEVEL_KEYS = {
 _GATEWAY_KEYS = {"device", "baud", "name", "radio", "advert_on_start"}
 _SCHEDULER_KEYS = {"inter_node_delay_seconds", "sync_interval_days"}
 _MESSENGER_KEYS = {"allowed_prefixes", "announce_channel"}
-_API_KEYS = {"enabled", "host", "port"}
 _NODE_KEYS = {
     "pubkey_prefix",
     "group",
@@ -822,27 +819,6 @@ def config_dict_to_yaml(data: dict[str, Any]) -> str:
 
 
 @dataclass
-class ApiConfig:
-    """Read-only HTTP API configuration for local dashboard and integration clients."""
-    enabled: bool = False
-    host: str = "127.0.0.1"
-    port: int = 8743
-
-    def __post_init__(self) -> None:
-        try:
-            loopback = self.host == "localhost" or ip_address(self.host).is_loopback
-        except ValueError:
-            loopback = False
-        if not loopback:
-            raise ValueError(
-                "api.host must be a loopback address (127.0.0.1, ::1, or localhost)"
-                " until HTTP API authentication is implemented"
-            )
-        if not 0 <= self.port <= 65535:
-            raise ValueError("api.port must be between 0 and 65535")
-
-
-@dataclass
 class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -850,7 +826,6 @@ class Config:
     global_settings: GroupConfig = field(default_factory=lambda: GroupConfig(name="global"))
     groups: list[GroupConfig] = field(default_factory=list)
     messenger: MessengerConfig = field(default_factory=MessengerConfig)
-    api: ApiConfig = field(default_factory=ApiConfig)
     facts: list[str] = field(default_factory=lambda: ["ver", "board", "role"])
     db_path: str = "/var/lib/meshherder/mch.db"
     socket_path: str = "/run/meshherder/mchd.sock"
@@ -880,6 +855,15 @@ def load(
     if not isinstance(raw, dict):
         kind = type(raw).__name__ if raw is not None else "empty file"
         raise ValueError(f"config file must be a YAML mapping, got {kind}")
+    # The read-only HTTP API was retired in 0.22.0 in favour of `mch ... --json` (same report
+    # model, no open port). Give a leftover `api:` block a targeted migration hint rather than the
+    # generic "unknown key" error.
+    if "api" in raw:
+        raise ValueError(
+            "the `api:` block was removed in 0.22.0 (the read-only HTTP API is gone). "
+            "Use `mch fleet status --json` (and the other read commands) for the same data; "
+            "delete the `api:` block from config.yaml."
+        )
     _reject_unknown_keys("config", raw, _TOP_LEVEL_KEYS)
 
     # Sunset: desired state now lives in the DB, not config.yaml. The daemon loads strict and
@@ -907,8 +891,6 @@ def load(
     _reject_unknown_keys("scheduler", sched_raw, _SCHEDULER_KEYS)
     msg_raw = _mapping(raw.get("messenger", {}), "messenger")
     _reject_unknown_keys("messenger", msg_raw, _MESSENGER_KEYS)
-    api_raw = _mapping(raw.get("api", {}), "api")
-    _reject_unknown_keys("api", api_raw, _API_KEYS)
     nodes_raw = _list(raw.get("nodes", []), "nodes")
     global_raw = _mapping(raw.get("global", {}), "global")
     _reject_unknown_keys("global", global_raw, _GLOBAL_KEYS)
@@ -933,7 +915,6 @@ def load(
             ],
             announce_channel=msg_raw.get("announce_channel"),
         ),
-        api=ApiConfig(**api_raw),
         profiles_url=raw.get("profiles_url"),
         profiles_file=raw.get("profiles_file"),
     )

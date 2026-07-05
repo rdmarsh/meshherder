@@ -284,35 +284,29 @@ Result:
 
 ```
 
-## Test 10: Optional Read-Only HTTP API
+## Test 10: `--json` scripting surface
 
-Purpose: verify the optional API exposes the same read-only report model as the CLI. Skip this
-test if `api.enabled` is false in the active configuration.
-
-```bash
-curl -fsS http://127.0.0.1:8743/health
-curl -fsS http://127.0.0.1:8743/status
-curl -fsS http://127.0.0.1:8743/status/<TEST_LABEL>
-curl -fsS http://127.0.0.1:8743/plan
-curl -fsS 'http://127.0.0.1:8743/logs?node=<TEST_LABEL>&limit=10'
-curl -i http://127.0.0.1:8743/not-a-route
-```
-
-You do not need the HTTP API to get the same JSON — the read commands take `--json` and emit the
-same report model. Compare the two (they should carry the same data for the same fleet):
+Purpose: verify the read commands emit the normalized report model as JSON (the scripting surface;
+there is no HTTP API). `jq` is handy but not required.
 
 ```bash
 mch fleet status --json
-mch fleet issues --json    # exits 2 when any issue is present
+mch fleet status <TEST_LABEL> --json
+mch node show <TEST_LABEL> --json
+mch fleet plan --json
+mch fleet logs --json
+mch fleet issues --json    # exits 2 when any issue is present, else 0
 ```
 
 Expected:
 
-- `/health` responds successfully; status/plan/logs return JSON local report data.
-- Node status corresponds to `mch fleet status <TEST_LABEL>`.
-- `mch fleet status --json` returns the same report shape as `GET /status` for the same fleet.
-- An unknown path returns `404` rather than exposing an unexpected action.
-- No API request initiates sync, exec, or commissioning work.
+- Each command prints valid JSON (pipe to `jq .` to confirm) with the report model:
+  `mch fleet status --json` carries `schema_version`, `summary`, `nodes`, `issues`, `firmware`,
+  and `plan`.
+- The JSON matches the human view for the same fleet (`mch fleet status <TEST_LABEL>`).
+- `mch fleet issues --json` exits `2` when any issue is present and `0` when clean; firmware age is
+  advisory and never changes the exit code.
+- No `--json` command initiates sync, exec, or commissioning work — they are read-only.
 
 Result:
 

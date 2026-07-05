@@ -49,8 +49,8 @@ hammers a weak link to force a result, is working against the medium. This is th
 | 6 | Remove / decommission | Done - `mch node remove` |
 | 7 | Don't hammer the mesh | Done, strong - rate limit, reachability probe, randomized reads, bounded recovery |
 | 8 | Be as simple as possible | Ongoing - see "simple yet powerful" tension above |
-| 9 | CLI + API | Done - CLI over Unix socket; read-only HTTP API |
-| 10 | API extensible to a web page | Open - API is the projection layer; see direction 3 |
+| 9 | CLI + scripting | Done - CLI over Unix socket; `--json` on the read commands is the scripting surface (the HTTP API was retired in 0.22.0) |
+| 10 | Extensible to a web page | Deferred - a UI would rebuild a read API against the `--json` report model; web UI is much-later, see direction 3 |
 | 11 | Send updates over the mesh | Partial - `announce_channel` posts status each cycle |
 | 12 | Basic commands via DM / channel | Done - messenger, prefix-gated |
 | 13 | Logs | Done |
@@ -148,16 +148,18 @@ This is the existing DESIGN.md "Future direction" note, now promoted to an activ
 large change - sequence it after the onboarding pipeline so onboarding tells us what inventory the
 DB actually needs to own.
 
-## Direction 3: CLI + API share the model, not the transport
+## Direction 3: one report model, thin transports
 
 Keep the CLI on the Unix socket (filesystem permissions, no network surface, no tokens, works with
-no web server running). Keep the HTTP API as a separate read-only projection for a future web UI.
-They already share `report.py` / `models.py` - that is the correct seam. Do **not** collapse the
-CLI onto HTTP; that would couple the local control plane's availability and auth to a web server
-for no real gain. Powerful *and* simple = one data model, two thin transports.
+no web server running). The report model (`report.py` / `models.py`) is the single source the CLI
+renders as tables and as `--json`; that is the scripting/integration surface. The read-only HTTP API
+that used to also project this model was retired in 0.22.0 — with the web UI shelved and `--json`
+serving the same shapes over the socket, a second network transport was cost without benefit. If a
+web UI is ever built (much later), it rebuilds a read API against this same report model — the seam
+is the model, not a running HTTP server. Do **not** collapse the CLI onto HTTP.
 
-Later, any *write* surface on the API (beyond read-only) needs its own auth and scoping decision -
-it must not become an unauthenticated remote control of the mesh.
+Any *write* surface a future UI adds needs its own auth and scoping decision — it must not become an
+unauthenticated remote control of the mesh.
 
 ## Direction 4: Mesh updates and alerts must respect "don't hammer"
 
@@ -167,7 +169,7 @@ pushed over LoRa must be rare and high-value:
 - Alerts should be **edge-triggered** (a node *became* unreachable, a write *started* failing), not
   periodic status dumps.
 - The per-cycle `announce_channel` status post is already borderline; grow it cautiously.
-- Prefer pulling status locally (CLI/API) over pushing it across the radio.
+- Prefer pulling status locally (CLI / `--json`) over pushing it across the radio.
 
 ## Direction 5: Recommend good derived settings, don't just enforce literals
 

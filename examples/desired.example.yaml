@@ -10,7 +10,7 @@
 #
 # Do NOT install this file as /etc/meshherder/config.yaml — the daemon refuses to
 # start on a config.yaml that still carries `nodes:`, `groups:`, `global:`, or
-# `facts:` blocks. Daemon settings (gateway/scheduler/messenger/api/paths) live in
+# `facts:` blocks. Daemon settings (gateway/scheduler/messenger/paths) live in
 # examples/config.example.yaml instead.
 #
 # After importing, edit desired state directly in the DB with `mch config set` /

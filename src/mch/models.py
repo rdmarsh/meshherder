@@ -90,7 +90,7 @@ class SettingRecord:
 class DesiredSetting:
     """A desired value/policy for one key at one scope (global/group/node).
 
-    The authoritative, CLI- and API-writable source of desired state. ``scope_id``
+    The authoritative, CLI-writable source of desired state. ``scope_id``
     is "" for global, the group name for group scope, and the node pubkey for node
     scope. ``policy``/``poll_hours`` of None mean "inherit" - the resolver falls back
     to a less specific scope or the built-in default.

@@ -612,7 +612,7 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
 # ---------------------------------------------------------------------------
 
 def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
-    """Project the fleet API model into the existing terminal status renderer."""
+    """Project the fleet report model into the existing terminal status renderer."""
     if "schema_version" not in fleet:
         return fleet
     firmware = fleet.get("firmware", {"latest": "", "outdated": []})
@@ -639,7 +639,7 @@ def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
 
 
 def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
-    """Project a canonical node API response into the existing terminal detail renderer."""
+    """Project a canonical node report response into the existing terminal detail renderer."""
     if "auth" not in node:
         return node
     facts = {key: "???" for key in node.get("fact_keys", [])}

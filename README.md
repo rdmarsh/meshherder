@@ -27,7 +27,7 @@ Think Ansible for your nodes, running continuously in the background.
       * [Active discovery on another radio](#active-discovery-on-another-radio)
       * [Investigating reachability with mch node probe](#investigating-reachability-with-mch-probe)
       * [Checking status in the field](#checking-status-in-the-field)
-      * [Read-only fleet API](#read-only-fleet-api)
+      * [Scripting with --json](#scripting-with---json)
       * [Changing a setting fleet-wide](#changing-a-setting-fleet-wide)
    * [CLI reference](#cli-reference)
    * [Logs](#logs)
@@ -83,8 +83,8 @@ Think Ansible for your nodes, running continuously in the background.
   reboot, then prints an importable `nodes:` doc (apply with `mch config import`) and the
   `secrets.yaml` snippet. No need to stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see gateway contacts not yet managed.
-- **Read-only fleet API** — optional loopback HTTP JSON API with normalized node health, settings
-  actions, facts, issues, plan data, and logs, ready for a later dashboard/map UI.
+- **`--json` scripting surface** — every read command (`fleet status/issues/plan/logs`, `node show`,
+  `config show`) emits the normalized report model as JSON over the Unix socket, for cron and scripts.
 
 ## Requirements
 
@@ -101,7 +101,7 @@ recommended udev rule, and upgrades.
 
 There are two kinds of state, and they live in two different places:
 
-- **Daemon settings** — the gateway device, scheduler, messenger, HTTP API, and file paths — live in
+- **Daemon settings** — the gateway device, scheduler, messenger, and file paths — live in
   `config.yaml`. Copy `examples/config.example.yaml` to `/etc/meshherder/config.yaml` and edit it;
   the example documents every option with comments. `mchd` watches `config.yaml` and `secrets.yaml`
   and reloads them shortly after they change (or on `SIGHUP`). Invalid YAML is rejected and the
@@ -327,7 +327,7 @@ so newly added firmware reads can be evaluated before mch metadata catches up.
 Desired state and inventory live in the SQLite database; `config.yaml` carries only daemon settings
 (gateway, scheduler, messenger, api, paths, profiles). **The daemon refuses to start if
 `config.yaml` still contains a `nodes:`, `groups:`, `global:`, or `facts:` desired-state block** — it points
-you at `mch config import`. The DB is edited directly by `mch` (and, later, an HTTP API and web UI). Writes
+you at `mch config import`. The DB is edited directly by `mch`. Writes
 are synchronous, so `mch fleet status <node>` shows the new intent immediately; convergence still waits for
 the next sync (or `mch fleet sync <node>`).
 
@@ -541,83 +541,29 @@ logs 10
 
 Configure authorised sender prefixes under `messenger.allowed_prefixes` in `config.yaml`.
 
-### Read-only fleet API
-
-The optional HTTP API exposes the same normalized report model used by CLI status and plan views.
-Its paths mirror the read-only `mch` commands. It is disabled by default and is intentionally
-restricted to loopback addresses until an authentication design is added.
-
-To use the examples below, add this block to the active `config.yaml` on the host running
-`mchd`, then restart the daemon:
-
-```yaml
-api:
-  enabled: true
-  host: 127.0.0.1
-  port: 8743
-```
-
-```bash
-sudo systemctl restart mchd
-```
-
-`8743` is the default local API port chosen by Mesh Herder; it can be changed to any available
-loopback TCP port in `config.yaml`. Changing the API listener configuration requires restarting
-`mchd`.
-
-Endpoints:
-
-```text
-GET /health
-GET /status
-GET /status/<label-or-pubkey-prefix>
-GET /issues
-GET /plan
-GET /logs?node=<label-or-prefix>&limit=50
-```
-
-Example queries:
-
-```bash
-# Confirm the local API is responding.
-curl -fsS http://127.0.0.1:8743/health
-
-# Fetch the fleet report, including summary counts, nodes, issues, and planned work.
-curl -fsS http://127.0.0.1:8743/status
-
-# Fetch one node by label or public-key prefix.
-curl -fsS http://127.0.0.1:8743/status/SiteA-Rooftop
-curl -fsS http://127.0.0.1:8743/status/aabbccdd
-
-# Fetch issue and action views directly.
-curl -fsS http://127.0.0.1:8743/issues
-curl -fsS http://127.0.0.1:8743/plan
-
-# Fetch the most recent logs, or logs for one node.
-curl -fsS 'http://127.0.0.1:8743/logs?limit=20'
-curl -fsS 'http://127.0.0.1:8743/logs?node=SiteA-Rooftop&limit=20'
-```
-
-Add `| jq` to any example for readable formatted output when `jq` is installed:
-
-```bash
-curl -fsS http://127.0.0.1:8743/status | jq
-curl -fsS http://127.0.0.1:8743/status/SiteA-Rooftop | jq '.health, .facts, .settings'
-```
-
-`/status` returns `schema_version: 2`, a health summary, the managed nodes, issues, an advisory
-`firmware` block (which nodes trail the latest known release), and planned work. Each node includes
-`health`, configured `fact_keys`, collected `facts` such as `lat`/`lon`, and settings classified
-with `status` (`ok`, `nominal`, `drift`, `unknown`, `ignored`) and `action` (`none`, `read`,
-`write`, `report`, `ignore`). This is the contract a future green/red map dashboard should consume;
-the API never contacts nodes or makes changes.
-
 ### Scripting with `--json`
 
-You don't need to enable the HTTP API to script against mch. The read commands take `--json`, which
-emits the **same report model** the API serves (so `mch fleet status --json` and `GET /status` match
-for the same fleet). Available on `fleet status`, `fleet issues`, `fleet plan`, `fleet logs`,
-`node show`, and `config show`.
+There is no HTTP API — the read commands emit the normalized report model as JSON with `--json`,
+which is the whole scripting/integration surface. It goes over the same Unix socket as every other
+command, so there's no open port, no loopback caveat, and no authentication to design. Available on
+`fleet status`, `fleet issues`, `fleet plan`, `fleet logs`, `node show`, and `config show`.
+
+```bash
+# Nodes not seen in the last 24 hours (labels), straight from the CLI:
+mch fleet status --json | jq -r --arg cutoff "$(date -u -d '24 hours ago' +%FT%T)" \
+  '.nodes[] | select((.last_seen // "0") < $cutoff) | .label'
+
+# Which nodes are behind the latest firmware the catalogue knows:
+mch fleet status --json | jq '.firmware'
+```
+
+`mch fleet status --json` returns `schema_version: 2`, a health summary, the managed nodes, issues,
+an advisory `firmware` block (which nodes trail the latest known release), and planned work. Each
+node includes `health`, configured `fact_keys`, collected `facts` such as `lat`/`lon`, and settings
+classified with `status` (`ok`, `nominal`, `drift`, `unknown`, `ignored`) and `action` (`none`,
+`read`, `write`, `report`, `ignore`). It never contacts nodes or makes changes. (If a web UI is ever
+built, it should consume this same model — rebuilt as a read API against the stable `--json`
+contract, not the retired loopback server.)
 
 ```bash
 # Nodes not seen in the last 24 hours (labels), straight from the CLI:

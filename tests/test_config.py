@@ -7,7 +7,6 @@ import pytest
 import yaml
 
 from mch.config import (
-    ApiConfig,
     Config,
     GroupConfig,
     NodeConfig,
@@ -184,20 +183,9 @@ def test_lenient_load_still_accepts_desired_state(tmp_path):
     assert cfg.nodes[0].pubkey_prefix == "aabbccdd"
 
 
-def test_api_config_is_disabled_and_loopback_by_default():
-    cfg = ApiConfig()
-
-    assert cfg.enabled is False
-    assert cfg.host == "127.0.0.1"
-    assert cfg.port == 8743
-
-
-def test_api_config_rejects_non_loopback_bind():
-    with pytest.raises(ValueError, match="loopback"):
-        ApiConfig(enabled=True, host="0.0.0.0")
-
-
-def test_api_block_is_loaded(tmp_path):
+def test_leftover_api_block_gives_migration_hint(tmp_path):
+    # The HTTP API was retired in 0.22.0; a leftover `api:` block gets a targeted --json hint
+    # instead of a bare "unknown key" error.
     p = _write_config(tmp_path, """\
         api:
           enabled: true
@@ -205,9 +193,8 @@ def test_api_block_is_loaded(tmp_path):
           port: 9000
     """)
 
-    cfg = load(p)
-
-    assert cfg.api == ApiConfig(enabled=True, host="localhost", port=9000)
+    with pytest.raises(ValueError, match="--json"):
+        load(p)
 
 
 def test_tab_indentation_in_config_has_actionable_error(tmp_path):
