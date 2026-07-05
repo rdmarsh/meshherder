@@ -963,6 +963,21 @@ def test_help_topics_teach_vocabulary():
         assert word in concepts.output
 
 
+def test_help_states_topic_explains_the_state_column():
+    """`mch help states` teaches the STATE words, including the honest unreachable line (S2.3)."""
+    import re as _re
+    runner = CliRunner()
+    result = runner.invoke(cli, ["help", "states"])
+    assert result.exit_code == 0
+    for word in ("unreachable", "partial", "configured", "retired", "TRIES"):
+        assert word in result.output
+    # Same banned-jargon rule as --help output (RECOMMENDATIONS-2 S1.1).
+    assert not _re.search(
+        r"\bDB\b|source of truth|sunset|eviction|policy-only override|projection",
+        result.output, _re.IGNORECASE,
+    )
+
+
 # ------ --json scripting surface (RECOMMENDATIONS-2 S3.2) ------
 
 def _report_resp(nodes=None, issues=None, plan=None):

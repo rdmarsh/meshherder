@@ -462,7 +462,7 @@ def gateway_group() -> None:
 
 @cli.group("help")
 def help_group() -> None:
-    """Learn mch's vocabulary: `mch help selectors`, `mch help concepts`."""
+    """Learn mch's vocabulary: `mch help selectors`, `mch help concepts`, `mch help states`."""
 
 
 # The two topics teach the words every other command's --help assumes. Sourced from DESIGN.md,
@@ -520,7 +520,34 @@ Where your data lives
 Exit codes
   0  success
   1  error
-  2  issues present (`mch fleet issues` only) — for cron and alerting"""
+  2  issues present (`mch fleet issues`) — for cron and alerting.
+     2 also = command-line usage error (bad arguments)."""
+
+# The STATE column and the problem-states section carry a lot of meaning in one word each.
+# Sourced from the NodeState docstrings (models.py), in operator wording — keep it free of
+# internal jargon (see the banned-words test).
+_STATES_TOPIC = """\
+What the STATE column means
+
+mch shows a state per node. The mesh is not a datacenter — one missed reply
+does not mean a node is gone — so several states are just "we haven't heard
+back yet", not faults.
+
+  configured   reached, and everything you asked for matches.
+  partial      reached, but some settings are still pending or failed.
+  configuring  a sync is in flight — commands are on their way to the node.
+  online       answered this cycle.
+  offline      not seen for a while; no recent advert on the mesh.
+  unreachable  mch tried to reach it on its last turn and got no answer. A
+               solar node sleeping overnight shows unreachable until its next
+               successful sync. `mch fleet issues` shows when it was last TRIED.
+  unknown      never contacted yet — usually a freshly discovered node.
+  retired      deliberately removed from management, kept for history.
+               Bring it back with `mch node unretire`.
+
+TRIES (in the drift table) counts write attempts for an enforced setting.
+An unreachable node shows 0 tries because mch could not write yet; the drift
+is corrected on the node's next successful sync."""
 
 
 @help_group.command("selectors")
@@ -533,6 +560,12 @@ def help_selectors() -> None:
 def help_concepts() -> None:
     """Desired vs reported, policy, scope, sync, and exit codes."""
     click.echo(_CONCEPTS_TOPIC)
+
+
+@help_group.command("states")
+def help_states() -> None:
+    """What each node STATE means (configured, partial, unreachable, …)."""
+    click.echo(_STATES_TOPIC)
 
 
 # ---------------------------------------------------------------------------
