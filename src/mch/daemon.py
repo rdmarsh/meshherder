@@ -62,10 +62,6 @@ from mch.queue import (
 from mch.report import (
     build_fleet_report,
     build_node_report,
-    legacy_issues,
-    legacy_node,
-    legacy_plan,
-    legacy_status,
 )
 
 log = logging.getLogger(__name__)
@@ -831,20 +827,6 @@ async def _dispatch(
         report["management_path"] = wq.management_path_status(node)
         return {"ok": True, "data": report}
 
-    if cmd == "status":
-        return {"ok": True, "data": legacy_status(await build_fleet_report(db, config))}
-
-    if cmd == "node":
-        pubkey = req.get("pubkey", "")
-        try:
-            node = await _resolve_node(pubkey, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"node {pubkey!r} not found"}
-        report = await build_node_report(db, config, node)
-        return {"ok": True, "data": legacy_node(report)}
-
     if cmd == "path":
         query = req.get("query", "")
         try:
@@ -1085,9 +1067,6 @@ async def _dispatch(
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
 
-    if cmd == "plan":
-        return {"ok": True, "data": legacy_plan(await build_fleet_report(db, config))}
-
     if cmd == "contacts":
         return {"ok": True, "data": await wq.unfiled_contacts()}
 
@@ -1320,8 +1299,6 @@ async def _dispatch(
             ],
         }
 
-    if cmd == "issues":
-        return {"ok": True, "data": legacy_issues(await build_fleet_report(db, config))}
 
     if cmd == "suggest":
         from pathlib import Path as _Path

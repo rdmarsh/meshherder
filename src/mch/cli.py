@@ -646,8 +646,6 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
 
 def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
     """Project the fleet report model into the existing terminal status renderer."""
-    if "schema_version" not in fleet:
-        return fleet
     firmware = fleet.get("firmware", {"latest": "", "outdated": []})
     outdated_pubkeys = {n["pubkey"] for n in firmware.get("outdated", [])}
     return {
@@ -673,8 +671,6 @@ def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
 
 def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
     """Project a canonical node report response into the existing terminal detail renderer."""
-    if "auth" not in node:
-        return node
     facts = {key: "???" for key in node.get("fact_keys", [])}
     facts.update(node["facts"])
     fact_times = {key: None for key in facts}
@@ -714,17 +710,20 @@ def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
 
 
 def _plan_view(fleet: dict[str, Any]) -> dict[str, Any]:
-    """Read plan data from the fleet API while accepting legacy test/daemon payloads."""
-    return fleet["plan"] if "plan" in fleet else fleet
+    """Read plan data from the fleet report model."""
+    plan: dict[str, Any] = fleet["plan"]
+    return plan
 
 
 def _emit_json(payload: Any) -> None:
     """Print a report payload as indented JSON — the CLI's scripting/integration surface.
 
-    The shapes are the report model (`report.py`), the same objects the HTTP API serves, so
-    `mch fleet status --json` and the API `/status` body match for the same data.
+    The shapes are the documented report model (`report.py`), served over the Unix socket as
+    the one read contract (the HTTP API was retired in 0.22.0). ``ensure_ascii=False`` so
+    emoji-heavy node names arrive as UTF-8 (this fleet's names are emoji-heavy and every
+    consumer — jq, terminals, files — is UTF-8), not as \\uXXXX surrogate escapes (S4.5).
     """
-    click.echo(json.dumps(payload, indent=2, default=str))
+    click.echo(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
 
 
 def _filter_report_by_query(report: dict[str, Any], query: str | None) -> dict[str, Any]:
@@ -914,6 +913,7 @@ def issues(ctx: click.Context, query: str | None, as_json: bool) -> None:
     help="Apply an operator-approved replacement path to the gateway contact.",
 )
 @click.option("--yes", "-y", is_flag=True, help="Apply the change (default: preview only).")
+@click.option("--json", "as_json", is_flag=True, help="Emit the path status/candidate as JSON.")
 @click.pass_context
 def path(
     ctx: click.Context,
@@ -922,6 +922,7 @@ def path(
     advert: bool,
     apply_path: str | None,
     yes: bool,
+    as_json: bool,
 ) -> None:
     """Inspect or explicitly repair the cached management path for NODE.
 
@@ -945,6 +946,9 @@ def path(
             timeout=90,
         )
         data = _check(resp)
+        if as_json:
+            _emit_json(data)
+            return
         _render_path_candidate(data)
         return
 
@@ -965,12 +969,18 @@ def path(
             timeout=90,
         )
         data = _check(resp)
+        if as_json:
+            _emit_json(data)
+            return
         click.echo("updated cached management path")
         _render_path_status(data)
         return
 
     resp = _rpc(ctx.obj["socket"], {"cmd": "path", "query": node})
     data = _check(resp)
+    if as_json:
+        _emit_json(data)
+        return
     _render_path_status(data)
 
 
@@ -1693,8 +1703,11 @@ def contacts(ctx: click.Context, query: str | None, as_json: bool) -> None:
     is_flag=True,
     help="Hide nodes mch already manages; show only unmanaged ones.",
 )
+@click.option("--json", "as_json", is_flag=True, help="Emit the discovery result as JSON.")
 @click.pass_context
-def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -> None:
+def discover(
+    ctx: click.Context, radio: str, dwell: float, unknown_only: bool, as_json: bool
+) -> None:
     """Actively discover MeshCore nodes on a temporary gateway radio.
 
     This sends a bounded discovery request, restores the gateway radio, and
@@ -1710,7 +1723,7 @@ def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -
         ctx.obj["socket"],
         {"cmd": "discover", "radio": [float(freq), float(bw), int(sf), int(cr)], "dwell": dwell},
         timeout=dwell + 30,
-        on_progress=lambda msg: click.echo(f"  {msg}"),
+        on_progress=lambda msg: click.echo(f"  {msg}") if not as_json else None,
     )
     data = _check(resp)
     if unknown_only:
@@ -1719,6 +1732,9 @@ def discover(ctx: click.Context, radio: str, dwell: float, unknown_only: bool) -
             node for node in data.get("nodes", [])
             if node.get("status") != "managed"
         ]
+    if as_json:
+        _emit_json(data)
+        return
     _render_discovery(data)
 
 
@@ -1813,8 +1829,11 @@ def _render_probe_result(data: dict[str, Any]) -> None:
     help="Log in with the node's configured password before probing. Auth-required "
     "nodes silently drop unauthenticated commands, so a bare `ver` times out.",
 )
+@click.option("--json", "as_json", is_flag=True, help="Emit the probe result as JSON.")
 @click.pass_context
-def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) -> None:
+def probe(
+    ctx: click.Context, node: str, radio: str, advert: bool, login: bool, as_json: bool
+) -> None:
     """Send a directed `ver` to NODE on a given radio to test reachability.
 
     Temporarily switches the gateway radio, optionally sends a zero-hop advert
@@ -1837,43 +1856,53 @@ def probe(ctx: click.Context, node: str, radio: str, advert: bool, login: bool) 
             "advert": advert,
             "login": login,
         },
-        on_progress=lambda msg: click.echo(f"  {msg}"),
+        on_progress=lambda msg: click.echo(f"  {msg}") if not as_json else None,
         timeout=60,
     )
     data = _check(resp)
+    if as_json:
+        _emit_json(data)
+        return
     _render_probe_result(data)
 
 
-def _prune_one(ctx: click.Context, node: str, yes: bool) -> None:
-    """Prune a single retired node. Refuses a still-managed node — retire it first."""
-    # A single-node prune reuses the daemon's `remove` (dry-run preview + --yes execute), without
-    # a force path: the whole point of prune is that the node is already retired.
+def _prune_one(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
+    """Prune a single node. Refuses a still-managed node — retire it first, or use --force.
+
+    Reuses the daemon's `remove` (dry-run preview + --yes execute). ``--force`` is the only
+    escape hatch for deleting a node that is still managed (not retired); without it prune
+    only touches already-retired nodes.
+    """
     resp = _rpc(
-        ctx.obj["socket"], {"cmd": "remove", "query": node, "dry_run": True, "force": False}
+        ctx.obj["socket"], {"cmd": "remove", "query": node, "dry_run": True, "force": force}
     )
     if not resp.get("ok"):
         err = resp.get("error", "") or "unknown error"
         if "still managed" in err:
-            err = f"{node!r} is still managed — retire it first: mch node retire {node}"
+            err = (f"{node!r} is still managed — retire it first (mch node retire {node}), "
+                   "or force deletion with --force")
         click.echo(f"error: {err}", err=True)
         raise SystemExit(1)
     data = resp["data"]
 
-    click.echo("retired node to delete (history and all):")
+    click.echo("node to delete (history and all):")
     click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
     click.echo(f"  label:     {data.get('label') or '-'}")
     click.echo(f"  mesh name: {data.get('name') or '-'}")
     click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
+    if force and not data.get("retired"):
+        click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
     click.echo("")
 
     if not yes:
-        click.echo(f"run again with --yes to delete: mch node prune {node} --yes")
+        again = f"mch node prune {node} --yes" + (" --force" if force else "")
+        click.echo(f"run again with --yes to delete: {again}")
         click.echo("secrets.yaml entries are left unchanged")
         return
 
     del_resp = _rpc(
         ctx.obj["socket"],
-        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": False},
+        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": force},
     )
     deleted = _check(del_resp).get("deleted", 0)
     click.echo(f"deleted {deleted} node(s)")
@@ -1883,15 +1912,23 @@ def _prune_one(ctx: click.Context, node: str, yes: bool) -> None:
 @node_group.command("prune")
 @click.argument("node", required=False)
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed nodes (default: preview only).")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="With NODE: delete even a still-managed node (not retired); it may re-seed.",
+)
 @click.pass_context
-def prune(ctx: click.Context, node: str | None, yes: bool) -> None:
+def prune(ctx: click.Context, node: str | None, yes: bool, force: bool) -> None:
     """Permanently delete retired nodes (the cleanup step after `mch node retire`).
 
     With no NODE, lists every retired node and deletes them all with --yes. Pass a NODE to
-    delete just that one. A node that is still managed is refused — retire it first.
+    delete just that one. A still-managed node is refused — retire it first, or override
+    with --force (the escape hatch for deleting a node that is still managed).
     """
+    if force and not node:
+        raise click.UsageError("--force applies to a single node: mch node prune NODE --force")
     if node:
-        _prune_one(ctx, node, yes)
+        _prune_one(ctx, node, yes, force)
         return
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
@@ -2098,57 +2135,6 @@ def clean_settings(
     )
 
 
-@node_group.command("remove", hidden=True)
-@click.argument("node")
-@click.option("--yes", "-y", is_flag=True, help="Delete without prompting.")
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Allow deleting a node that is still managed (not retired).",
-)
-@click.pass_context
-def remove_node(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
-    """Deprecated: use `mch node prune NODE`. Kept as a hidden alias, and as the only
-    path with --force (delete a still-managed node). Removed once a release ships that
-    carries the `prune NODE` replacement.
-    """
-    click.echo(
-        "note: `mch node remove` is deprecated — use `mch node prune NODE` "
-        "(use this only for --force).",
-        err=True,
-    )
-    resp = _rpc(
-        ctx.obj["socket"],
-        {"cmd": "remove", "query": node, "dry_run": True, "force": force},
-    )
-    data = _check(resp)
-
-    label = data.get("label") or "-"
-    name = data.get("name") or "-"
-    click.echo("node to delete:")
-    click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
-    click.echo(f"  label:     {label}")
-    click.echo(f"  mesh name: {name}")
-    click.echo(f"  state:     {data.get('state') or '-'}")
-    click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
-    if not data.get("retired"):
-        click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
-    click.echo("")
-    click.echo("This deletes the node's facts, settings, operations, logs, and inventory row.")
-    click.echo("secrets.yaml is left unchanged.")
-
-    if not yes and not click.confirm("Delete this node?"):
-        click.echo("not deleted")
-        return
-
-    delete_resp = _rpc(
-        ctx.obj["socket"],
-        {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": force},
-    )
-    deleted = _check(delete_resp).get("deleted", 0)
-    click.echo(f"deleted {deleted} node(s)")
-
-
 @node_group.command("retire")
 @click.argument("node")
 @click.pass_context
@@ -2241,8 +2227,9 @@ def set_label(ctx: click.Context, node: str, label: str | None) -> None:
 
 @fleet_group.command("suggest")
 @click.argument("query", required=False)
+@click.option("--json", "as_json", is_flag=True, help="Emit the suggestions as JSON for scripting.")
 @click.pass_context
-def suggest(ctx: click.Context, query: str | None) -> None:
+def suggest(ctx: click.Context, query: str | None, as_json: bool) -> None:
     """Show suggested settings based on each node's neighbour count.
 
     QUERY: pubkey prefix, label substring, or name substring. Omit to show all nodes.
@@ -2254,13 +2241,17 @@ def suggest(ctx: click.Context, query: str | None) -> None:
     Requires a `neighbors` fact-policy key (mch config set --global neighbors
     --policy fact) and at least one completed sync cycle to populate the count.
     """
-    _show_suggestions(ctx, query)
+    _show_suggestions(ctx, query, as_json)
 
 
-def _show_suggestions(ctx: click.Context, query: str | None) -> None:
+def _show_suggestions(ctx: click.Context, query: str | None, as_json: bool = False) -> None:
     resp = _rpc(ctx.obj["socket"], {"cmd": "suggest"})
     all_data = _check(resp)
     data = _filter_nodes(all_data, query)
+
+    if as_json:
+        _emit_json(data)
+        return
 
     if not all_data:
         click.echo("no nodes in database")
@@ -2409,8 +2400,8 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
         )
         raise SystemExit(1)
 
-    # resolve node to get pubkey for confirmation display
-    node_resp = _rpc(ctx.obj["socket"], {"cmd": "node", "pubkey": node})
+    # resolve node to get pubkey for confirmation display (the canonical node report)
+    node_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": node})
     if not node_resp.get("ok"):
         click.echo(f"error: {node_resp.get('error')}", err=True)
         raise SystemExit(1)

@@ -5,6 +5,14 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Complexity pay-down (RECOMMENDATIONS-3 slice 4, in progress).** Deleted the dead read-path
+  adapter stack left over from the HTTP-API retirement: the daemon's `status`/`plan`/`issues`/`node`
+  RPC verbs and their `legacy_*` builders are gone (every read now flows through the one `fleet` /
+  `fleet_node` report model), `node exec` resolves via `fleet_node`, and the CLI's legacy shape
+  fallbacks were removed. The hidden `node remove` alias was retired; its `--force` escape hatch
+  (delete a still-managed node) moved onto `mch node prune NODE --force`. `--json` now emits readable
+  UTF-8 instead of `\uXXXX` surrogate escapes.
+
 - **Stale observations no longer contradict reality (RECOMMENDATIONS-3 slice 3).** A failed
   `clock sync` now re-reads the clock too (not only a successful one), so a node whose sync keeps
   failing can't keep showing a stale drift direction — corbin showed "slow by 51m" while the failure

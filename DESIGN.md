@@ -108,7 +108,8 @@ unfavourites the contact (eviction-pin removal, not contact deletion), and write
 `mch node unretire <node>` reverses it (re-favourite, reset state so it reconverges). A retired node is
 excluded from sync everywhere (`get_due_node`, the cycle sweep, reschedule, and the favourite-pin
 step). Permanent delete stays separate and explicit: `mch node prune` hard-deletes retired nodes (history
-and all); `mch node remove` deletes one node and guards a still-managed node behind `--force`. Auto-purge
+and all); `mch node prune NODE` deletes one node, and its `--force` flag is the sole escape hatch for
+deleting a still-managed node (not retired; it may re-seed). Auto-purge
 is **not** triggered by a node dropping off the contact list - eviction is the normal state on a
 dense mesh, so contact-list absence is a poor signal. (A dedicated `retired_at`/`retired_reason`
 column pair was considered but not built; the state + log line suffice for a single-operator box and
@@ -369,9 +370,10 @@ for new commands.
   The only exceptions are interactive wizards (`node new`) and the typed-confirmation guard on
   destructive `node exec` commands (that is a confirm, not a preview). `node prune [NODE]` is the
   single delete-local-state command: no argument lists/purges every retired node, a NODE argument
-  prunes that one retired node, and a still-managed node is refused ("retire it first"). The old
-  `node remove` survives only as a hidden deprecated alias — and as the sole `--force` path (delete
-  a still-managed node) — until a release ships carrying `prune NODE`.
+  prunes that one retired node, and a still-managed node is refused ("retire it first") unless
+  `--force` is given. `--force` (valid only with a NODE) is the sole escape hatch for deleting a
+  still-managed node; the old hidden `node remove` alias was retired in favour of it (RECOMMENDATIONS-3
+  S4.1).
 
 ## Node identity
 
@@ -411,7 +413,7 @@ actions rather than a config-seeding pass.
 read-only and does not itself write to the DB (it prints the `mch node adopt` command to run).
 
 To stop managing a node, `mch node retire` (keeps history, unfavourites the contact) or, to delete
-local DB state, `mch node prune` / `mch node remove`. Because reconcile re-seeds any still-favourited
+local DB state, `mch node prune` (with `--force` for a still-managed node). Because reconcile re-seeds any still-favourited
 contact, retire before prune so the node is not immediately re-seeded on the next cycle.
 
 ## `mch gateway contacts` vs the DB

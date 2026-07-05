@@ -17,7 +17,7 @@ from mch.models import (
     SettingPolicy,
     SettingRecord,
 )
-from mch.report import build_fleet_report, build_node_report, legacy_node
+from mch.report import build_fleet_report, build_node_report
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ async def test_fleet_report_classifies_node_health_settings_and_actions(db):
     assert report["plan"]["unknown"][0]["key"] == "owner.info"
 
 
-async def test_legacy_node_includes_next_sync_at(db):
+async def test_node_report_includes_next_sync_at(db):
     next_sync_at = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     node = Node(
         pubkey="aabbccdd" * 8,
@@ -115,9 +115,8 @@ async def test_legacy_node_includes_next_sync_at(db):
     config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge")])
 
     report = await build_node_report(db, config, node)
-    detail = legacy_node(report)
 
-    assert detail["next_sync_at"] == next_sync_at.isoformat()
+    assert report["next_sync_at"] == next_sync_at.isoformat()
 
 
 async def test_fleet_report_drops_dead_ghost_and_unseen_categories(db):
@@ -203,7 +202,7 @@ async def test_report_db_desired_overrides_config_and_is_sourced_db(db):
     assert settings["name"]["source"] == "db"
 
 
-async def test_legacy_node_includes_setting_source(db):
+async def test_node_report_includes_setting_source(db):
     node = Node(pubkey="aabbccdd" * 8, label="ridge", name="Ridge", state=NodeState.CONFIGURED)
     await db.upsert_node(node)
     await db.set_desired_setting(DesiredSetting(
@@ -212,8 +211,7 @@ async def test_legacy_node_includes_setting_source(db):
     config = Config(nodes=[NodeConfig(pubkey_prefix="aabbccdd", label="ridge")])
 
     report = await build_node_report(db, config, node)
-    detail = legacy_node(report)
-    sources = {s["key"]: s["source"] for s in detail["settings"]}
+    sources = {s["key"]: s["source"] for s in report["settings"]}
 
     # All desired state resolves from the DB now (sunset), so its source is "db".
     assert sources["txdelay"] == "db"
