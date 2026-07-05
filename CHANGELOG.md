@@ -5,6 +5,8 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+## 0.21.0 - 2026-07-05
+
 - **`--json` scripting surface + firmware-currency fleet views (RECOMMENDATIONS-2 slice 3).**
   - **`--json` on the read commands** — `fleet status`, `fleet issues`, `fleet plan`, `fleet logs`,
     `node show`, and `config show`. The output is the report model (`report.py`) verbatim, the same

@@ -31,10 +31,14 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   `mch config export` snapshots to `/var/lib/meshherder/backups`, keep-N rotation via
   `MCH_BACKUP_KEEP`, temp-file-then-rename so a failed export never truncates a good snapshot) plus
   an INSTALL section. Restore with `mch config import <snapshot> --yes`.
-- **Cut a release with a version bump.** The sunset is a breaking change (the daemon refuses to
-  start on a config.yaml that still carries desired state), so bump `0.9.35` -> `0.10.0` in
-  `pyproject.toml` and `src/mch/__init__.py`, and move the `## Unreleased` CHANGELOG block under a
-  dated `## 0.10.0` heading, when slice 8 (PR #3) merges.
+- **Cut a release with a version bump — DONE (2026-07-05): released `0.21.0`.** The sunset and the
+  RECOMMENDATIONS-2 slices are breaking (the daemon refuses a config.yaml carrying desired state;
+  commands moved/renamed), so `0.20.1` -> `0.21.0` (minor bump, 0.x alpha) in `pyproject.toml` +
+  `src/mch/__init__.py`, with the `## Unreleased` CHANGELOG block moved under `## 0.21.0 - 2026-07-05`.
+  This is the release that carries the `mch node show` hint, which unblocks removing the
+  `fleet status` single-match magic switch in the next release (RECOMMENDATIONS-2 S1.3). Tag `v0.21.0`
+  is created locally; the operator pushes it and creates the GitHub Release object (gh API is
+  unavailable in the sandbox).
 - **Decision (deferred): `retired: true` vs a richer node lifecycle `status:` field.** Export/import
   currently tags a decommissioned node with the boolean `retired: true`. Consider replacing it with a
   single enum, e.g. `status: production | predeployed | retired | …`, to formalize the deployment
