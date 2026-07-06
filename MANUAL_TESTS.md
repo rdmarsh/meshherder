@@ -292,7 +292,7 @@ there is no HTTP API). `jq` is handy but not required.
 ```bash
 mch fleet status --json
 mch fleet status <TEST_LABEL> --json
-mch node show <TEST_LABEL> --json
+mch node status <TEST_LABEL> --json
 mch fleet plan --json
 mch fleet logs --json
 mch fleet issues --json    # exits 2 when any issue is present, else 0
@@ -395,22 +395,22 @@ Purpose: confirm a deliberate stop completes cleanly and CLI commands do not pre
 is still available.
 
 ```bash
-mch daemon stop
+mch service stop
 systemctl is-active mchd
 systemctl status mchd --no-pager
 pgrep -af '[m]chd'
 mch fleet status
-mch daemon start
+mch service start
 systemctl is-active mchd
 mch fleet status
 ```
 
 Expected:
 
-- `mch daemon stop` prints `stopping current sync, this may take some time...` then `mchd stopped`.
+- `mch service stop` prints `stopping current sync, this may take some time...` then `mchd stopped`.
 - After stopping, `systemctl is-active mchd` reports `inactive` and `mch fleet status` fails because
   there is no daemon socket/service available. `pgrep -af '[m]chd'` prints no daemon process.
-- After `mch daemon start`, `systemctl is-active mchd` reports `active` and `mch fleet status` works again.
+- After `mch service start`, `systemctl is-active mchd` reports `active` and `mch fleet status` works again.
 
 Result:
 
@@ -526,15 +526,15 @@ mch fleet sync <TEST_LABEL>
 While it is waiting for a slow reply, in terminal B:
 
 ```bash
-mch daemon stop
+mch service stop
 systemctl is-active mchd
 journalctl -u mchd --since '-10 minutes' --no-pager
-mch daemon start
+mch service start
 ```
 
 Expected:
 
-- `mch daemon stop` warns that stopping current sync may take time, then completes.
+- `mch service stop` warns that stopping current sync may take time, then completes.
 - `systemctl is-active mchd` reports `inactive` before it is restarted.
 - The journal shows cancellation/cleanup and restoration from `915.800` if a temporary switch was
   in effect; it must not leave the gateway on the bench channel unintentionally.
@@ -559,12 +559,12 @@ node because it deliberately sends one invalid fact read.
 ```bash
 sudoedit /etc/meshherder/config.yaml
 sudo mch config validate --config /etc/meshherder/config.yaml
-mch daemon restart
+mch service restart
 mch fleet sync <TEST_LABEL>
 mch fleet status <TEST_LABEL>
 sudoedit /etc/meshherder/config.yaml
 sudo mch config validate --config /etc/meshherder/config.yaml
-mch daemon restart
+mch service restart
 mch fleet status <TEST_LABEL>
 ```
 
@@ -600,7 +600,7 @@ mch node new
 sudoedit /etc/meshherder/config.yaml
 sudoedit /etc/meshherder/secrets.yaml
 sudo mch config validate --config /etc/meshherder/config.yaml
-mch daemon restart
+mch service restart
 mch fleet status <NEW_PREFIX>
 mch fleet sync <NEW_PREFIX>
 mch fleet logs <NEW_PREFIX> -n 30

@@ -324,6 +324,18 @@ so newly added firmware reads can be evaluated before mch metadata catches up.
 
 ### Editing desired state in the database
 
+Desired-state **scope** is the noun. The resolution hierarchy node > group > fleet maps onto three
+nouns that share the same verbs, so `mch`'s vocabulary reads straight off this grid:
+
+| scope | overview / detail | issues | desired state | sync | extras |
+|---|---|---|---|---|---|
+| **fleet** | `fleet status` | `fleet issues` | `fleet set KEY VAL` | `fleet sync` | `export` / `import` |
+| **group NAME** | `group status [NAME]` | `group issues NAME` | `group set NAME KEY VAL` | `group sync NAME` | `create` / `rename` / `delete` |
+| **node NODE** | `node status NODE` | `node issues NODE` | `node set NODE KEY VAL` | `node sync NODE` | `move` / `retire` / `exec` / … |
+
+A node's own value beats its group's, which beats the fleet-wide default. (`service` and `gateway`
+round out the noun set; the old `config` noun is gone.)
+
 Desired state and inventory live in the SQLite database; `config.yaml` carries only daemon settings
 (gateway, scheduler, messenger, api, paths, profiles). **The daemon refuses to start if
 `config.yaml` still contains a `nodes:`, `groups:`, `global:`, or `facts:` desired-state block** — it points

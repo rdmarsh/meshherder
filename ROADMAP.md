@@ -140,7 +140,7 @@ because the DB is treated as throwaway observed-state.
   observed radios, known routes, facts, schedule.
 - Config (whatever form) describes **desired policy/defaults** and remains exportable as a
   reviewable backup/import format - never lossy shorthand like literal `...`.
-- Add explicit `mch config export config` / import / backup commands so the DB is never the *only* copy.
+- (Done in 0.23.0: `mch fleet export` / `mch fleet import`.) Historically tracked here as the DB-is-not-the-only-copy backup surface.
 - Secrets/private keys need a separate security decision before they enter any ordinary
   backup/export path. (See the protected-secret-storage backlog item.)
 

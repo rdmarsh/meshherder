@@ -62,7 +62,7 @@ sudo install -d -o root -g mch -m 750 /etc/meshherder
 # config.example.yaml holds daemon settings only (gateway, scheduler, messenger, api, paths).
 # Desired state (managed nodes, groups, global defaults, facts) lives in the DB, not this file —
 # the daemon refuses to start if config.yaml carries nodes:/groups:/global:/facts: blocks. Seed
-# desired state after first start with `mch config import` (see examples/desired.example.yaml).
+# desired state after first start with `mch fleet import` (see examples/desired.example.yaml).
 sudo install -o root -g mch -m 640 examples/config.example.yaml /etc/meshherder/config.yaml
 sudo install -o mch -g mch -m 600 examples/secrets.example.yaml /etc/meshherder/secrets.yaml
 
@@ -97,7 +97,7 @@ mch fleet status
 ```
 
 > **Note:** the systemd unit is named `mchd` - always use `systemctl ... mchd`, not `mch`.
-> The `mch daemon start`, `mch daemon stop`, and `mch daemon restart` CLI commands are shortcuts to the same thing.
+> The `mch service start`, `mch service stop`, and `mch service restart` CLI commands are shortcuts to the same thing.
 
 ### Scheduled desired-state backups (recommended)
 
@@ -116,7 +116,7 @@ sudo systemctl enable --now mch-backup.timer
 Snapshots land in `/var/lib/meshherder/backups/backup-YYYY-MM-DD.yaml`. Change the location or
 retention with a drop-in — `sudo systemctl edit mch-backup.service` — setting `MCH_BACKUP_DIR`
 and/or `MCH_BACKUP_KEEP` (default 14). Run one on demand with `sudo systemctl start
-mch-backup.service`, and restore after a loss with `mch config import <snapshot> --yes`.
+mch-backup.service`, and restore after a loss with `mch fleet import <snapshot> --yes`.
 
 ### Shell completion (optional)
 
@@ -245,7 +245,7 @@ the current directory, so an old copied tree can downgrade the daemon even when 
 systemd unit are otherwise correct.
 
 If `mchd` exits because `config.yaml` is invalid, the service stops instead of restart-looping.
-Fix the config with `mch daemon validate`, then restart `mchd`.
+Fix the config with `mch service configtest`, then restart `mchd`.
 
 ## Testing a feature branch on the bench
 
@@ -279,8 +279,8 @@ systemctl status mchd --no-pager
 ```
 
 **Test safely first.** Prefer read-only and dry-run commands before anything that writes. Commands
-that only read the DB or mesh (`mch fleet status`, `mch config export`, `mch fleet plan`) are safe; `mch config import`
-defaults to a dry-run preview and only writes with `--yes`. `mch config import`/`mch config export` are local DB
+that only read the DB or mesh (`mch fleet status`, `mch fleet export`, `mch fleet plan`) are safe; `mch fleet import`
+defaults to a dry-run preview and only writes with `--yes`. `mch fleet import`/`mch fleet export` are local DB
 operations with no mesh traffic, so they cannot strand or disturb field nodes.
 
 **Return to `main` when done:**

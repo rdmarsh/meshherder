@@ -1088,6 +1088,16 @@ def test_top_level_shortcuts_listed_in_help():
     assert "Shortcut for `mch fleet sync`" in result.output
 
 
+def test_node_sync_syncs_one_node():
+    # R4: `node sync NODE` completes the scope grid; it forwards to the per-node sync.
+    rpc = MagicMock(return_value={"ok": True, "data": "synced"})
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "node", "sync", "site-a"])
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1]["cmd"] == "sync"
+    assert rpc.call_args.args[1]["prefix"] == "site-a"
+
+
 def test_help_topics_teach_vocabulary():
     """`mch help selectors` / `mch help concepts` exist and cover the core vocabulary (S1.2)."""
     runner = CliRunner()

@@ -287,6 +287,23 @@ every fleet verb aliases for free, while `global` never appears in `list_command
 README / man page. The word comes from the schema's `scope_type = 'global'` above. Pinned by
 `test_global_is_a_hidden_synonym_for_fleet`.
 
+## Vendored catalogues
+
+Two reference catalogues are **vendored into the repo** and never fetched at runtime — the daemon
+and CLI must work on an offline Raspberry Pi. They come from the meshcore.ninja / MeshCore ecosystem
+(upstream `github.com/meshcore-cz/meshcore-index`):
+
+- **`src/mch/data/networks.yaml`** — known mesh networks/frequencies. Derived from the upstream
+  **CC0** `data.json`. Refresh with `tools/refresh_meshcore_networks.py`.
+- **`src/mch/data/repeater_commands.json`** — the repeater CLI command catalogue (used for
+  `node exec` advisories and settable-key validation). Derived from the **MIT**-licensed
+  `src/lib/repeaterCommands.js`. Refresh with `tools/refresh_meshcore_commands.py`.
+
+Both refresh tools pull upstream, transform, and write the vendored file; the transformed artefact
+is committed so a build never depends on network access. Update deliberately (re-run the tool,
+review the diff, commit) rather than automatically. Licences (CC0 for the network data, MIT for the
+command catalogue) are preserved by keeping this provenance note with the vendored files.
+
 ## Shared internal report model
 
 `mch` uses a single daemon-side report/action model rendered by the CLI (human tables and `--json`)
@@ -313,7 +330,7 @@ The report model should classify settings as `ok`, `nominal`, `drift`, `unknown`
 computer representation tolerance.
 
 Implemented contract: `src/mch/report.py` builds `schema_version: 2` fleet/node reports consumed by
-CLI reporting (tables and `--json`). The read commands map to the model: `fleet status`/`node show`
+CLI reporting (tables and `--json`). The read commands map to the model: `fleet status`/`node status`
 (state and evidence), `fleet plan` (next actions), `fleet issues` (faults only), `fleet logs`
 (history). A future dashboard should consume this model rather than deriving status independently.
 
@@ -343,7 +360,7 @@ view retains operator-relevant node history — writes, operations, drift, and r
 explain a partial sync. `mch fleet status` reports mesh state; it is not a replacement for
 `systemctl status mchd`.
 
-`mch daemon status` and `mch daemon logs` are thin, read-only wrappers over `systemctl status mchd`
+`mch service status` and `mch service logs` are thin, read-only wrappers over `systemctl status mchd`
 and `journalctl -u mchd` so operators can reach service diagnostics without recalling the unit name.
 They deliberately live under the `daemon` (process) noun, not `fleet` (nodes): `daemon logs` is the
 process journal, `fleet logs` is per-node activity. Because they only read, they take no privilege
@@ -385,13 +402,13 @@ to operators once in `mch help concepts`; this is the developer statement plus t
 for new commands.
 
 - **Scope flags.** `--group NAME` / `--global` express the *scope of a desired setting*
-  (`config set`/`unset`) — "set this value at global scope" reads correctly. `--all` expresses
+  (`node/group/fleet set`/`unset`) — "set this value at fleet scope" reads correctly. `--all` expresses
   *applying an action fleet-wide* (`node clean facts|settings`, and any future fleet-wide action) —
   "clean facts across the fleet". The bright line is `--global` (a setting's scope) vs `--all` (an
   action's reach); no command should use `--global` for an action or `--all` for a setting.
   `--group` is shared (restrict either a setting or an action to one group).
 - **Mutation convention.** Commands that delete or change local state *preview by default and execute
-  with `--yes`* (`node prune`, `node clean facts|settings`, `config import`, `node path --apply`).
+  with `--yes`* (`node prune`, `node clean facts|settings`, `fleet import`, `node path --apply`).
   The only exceptions are interactive wizards (`node new`) and the typed-confirmation guard on
   destructive `node exec` commands (that is a confirm, not a preview). `node prune [NODE]` is the
   single delete-local-state command: no argument lists/purges every retired node, a NODE argument
@@ -427,7 +444,7 @@ actions rather than a config-seeding pass.
 2. **`mch node adopt`.** Adds a discovered running node to the DB inventory and gateway contact
    store directly, installing a route and confirming reachability.
 
-3. **`mch config import`.** Seeds inventory + desired state from a YAML backup/desired file. A node
+3. **`mch fleet import`.** Seeds inventory + desired state from a YAML backup/desired file. A node
    given by full pubkey is created up-front (restore path); a node given by short prefix must
    already be a known DB node so its full pubkey resolves.
 
@@ -453,7 +470,7 @@ the mesh and decide what to bring under management. It is read-only; it prints t
 
 mchd reads config.yaml (daemon settings) at startup and on hot reload. It does not modify it, and
 it never edits secrets.yaml. When `mch node new` provisions a node, it prints an importable
-`nodes:` desired-state doc (applied with `mch config import`) plus the secrets.yaml snippet — the
+`nodes:` desired-state doc (applied with `mch fleet import`) plus the secrets.yaml snippet — the
 operator applies the import and adds the password, keeping both under version control.
 
 Reasons for this constraint:
@@ -614,9 +631,9 @@ The union plan in BACKLOG is retired in favour of this.
 
 **Read-only constraint:** registry `kind="fact"` keys (`ver`, `board`, `role`, `neighbors`) have no
 write command, so only `fact` or `skip` are legal for them; `enforce`/`audit` require a writable
-key with a desired value. This is validated at the `mch config set` gate. `mch config set NODE KEY --policy fact`
-(no value) declares a fact via the existing policy-only path; `mch config unset` clears it; a read-side
-`mch config show KEY` (name TBD) prints a key's resolved policy/desired/observed across scopes.
+key with a desired value. This is validated at the `mch node set` gate. `mch node set NODE KEY --policy fact`
+(no value) declares a fact via the existing policy-only path; `mch node unset` clears it; the read-side
+`mch node status NODE KEY` prints a key's resolved policy/desired/observed across scopes.
 
 ### One read pass — never poll a key twice
 
@@ -651,7 +668,7 @@ by a hidden default. A readable key with no scoped row is simply not read — fa
 `default_policy` directive keeps its `enforce`/`audit`/`skip` range; a global "everything is a fact"
 default is meaningless.
 
-Configured fact keys remain checked by `mch daemon validate` against the command registry's readable keys;
+Configured fact keys remain checked by `mch service configtest` against the command registry's readable keys;
 unknown keys stay legal with the `get <key>` fallback but warn and suggest close names to prevent a
 typo causing silent repeated reads. Status presentation can still hide cached observation rows whose
 key is no longer configured, retaining the historical row until an explicit cleanup discards it.

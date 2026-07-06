@@ -221,7 +221,7 @@ async def _wanted_setting_keys(db: Database, node: Any) -> set[str]:
     """Setting keys this node currently wants observed: its resolved desired keys.
 
     Desired state is resolved entirely from the DB (DESIGN.md "Desired state in the DB" /
-    sunset), so a key set only via `mch config set` - or one on a node that was never in
+    sunset), so a key set only via `mch node set` - or one on a node that was never in
     config.yaml - still counts as wanted and is never treated as orphaned. The node's
     group comes from the DB row, so group-scope keys are always attributable now (the old
     config-only path could only attribute them when the node appeared in config.yaml).
@@ -504,7 +504,7 @@ def _resolve_setting_row(
     settings_by_key: dict[str, Any],
     facts_by_key: dict[str, Any],
 ) -> dict[str, Any]:
-    """One key's resolution for the all-keys ``mch config show NODE`` table."""
+    """One key's resolution for the all-keys ``mch node status NODE`` table."""
     resolved_desired = resolve_desired(key, node_cfg, group_cfg, global_cfg)
     observed, observed_at = _observed_for_key(key, settings_by_key, facts_by_key)
     return {

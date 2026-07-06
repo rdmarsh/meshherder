@@ -5,16 +5,17 @@
 # to collect) lives in the SQLite database. This file is the human-editable *source*
 # you feed into the DB with:
 #
-#     mch config import examples/desired.example.yaml     # preview (dry run)
-#     mch config import examples/desired.example.yaml --yes
+#     mch fleet import examples/desired.example.yaml      # preview (dry run)
+#     mch fleet import examples/desired.example.yaml --yes
 #
 # Do NOT install this file as /etc/meshherder/config.yaml — the daemon refuses to
 # start on a config.yaml that still carries `nodes:`, `groups:`, `global:`, or
 # `facts:` blocks. Daemon settings (gateway/scheduler/messenger/paths) live in
 # examples/config.example.yaml instead.
 #
-# After importing, edit desired state directly in the DB with `mch config set` /
-# `mch config unset`, and take backups with `mch config export`. Keep a copy of this
+# After importing, edit desired state directly in the DB with `mch node set` /
+# `mch node unset` (and `group set`/`fleet set` for wider scopes), and take backups with
+# `mch fleet export`. Keep a copy of this
 # file (or an export) under version control as your disaster-recovery snapshot — the
 # DB is the only live copy of desired state.
 #
@@ -25,7 +26,7 @@
 # On import, a flat `facts:` list is folded into global fact-policy rows.
 # All fact commands run within a single node session; inter_node_delay_seconds
 # sits between nodes, not between individual fact commands. 'ver' and 'board'
-# use the bare command; most other keys use 'get <key>'. `mch config import` warns
+# use the bare command; most other keys use 'get <key>'. `mch fleet import` warns
 # about unregistered fact keys and suggests close known names, but permits them
 # so newly introduced firmware reads can still be investigated deliberately.
 facts:
@@ -58,8 +59,8 @@ facts:
 # Use default_policy: enforce only where most declared settings should be written.
 #
 # After import you can change any of these directly in the DB, e.g.
-#   mch config set --group repeaters powersaving on --policy enforce
-#   mch config set NodeA owner.info "Managed with Mesh Herder"
+#   mch group set repeaters powersaving on --policy enforce
+#   mch node set NodeA owner.info "Managed with Mesh Herder"
 
 # Global: shared defaults for every configured node, including nodes that do not
 # belong to a group. Settings and reachability resolve Node > Group > Global;
