@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -88,6 +89,59 @@ def test_main_config_load_error_exits_with_config_status(tmp_path):
         main()
 
     assert exc_info.value.code == CONFIG_ERROR_EXIT
+
+
+def test_main_refuses_to_start_on_invalid_config_with_loud_error(tmp_path, capsys):
+    """Startup auto-validation (R4 S3): an invalid config aborts the boot with a loud stderr
+    error and the config exit status — systemd shows the unit failed rather than a running
+    daemon on a broken config."""
+    config_path = tmp_path / "config.yaml"
+    # Desired-state block in config.yaml is rejected by strict load (sunset).
+    config_path.write_text("nodes:\n  - pubkey_prefix: e2601d59\n    label: x\n")
+
+    with patch("sys.argv", ["mchd", "--config", str(config_path)]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == CONFIG_ERROR_EXIT
+    err = capsys.readouterr().err
+    assert "error loading config" in err
+
+
+def test_main_refuses_to_start_when_config_missing(tmp_path, capsys):
+    missing = tmp_path / "nope.yaml"
+    with patch("sys.argv", ["mchd", "--config", str(missing)]), \
+         pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == CONFIG_ERROR_EXIT
+    assert "config file not found" in capsys.readouterr().err
+
+
+async def test_daemon_reload_rejects_invalid_config_and_keeps_previous(tmp_path, caplog):
+    """SIGHUP/file-change reload auto-validation (R4 S3): an invalid edit is rejected, the last
+    valid config is kept, and the rejection is logged loudly. `service configtest` remains the
+    pre-flight for an edited file; this is the safety net if a bad file reaches a running daemon."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("messenger:\n  allowed_prefixes: [aabbccdd]\n")
+
+    config = load(config_path, strict=True)
+    daemon = Daemon(config)
+    daemon._wq = MagicMock()
+    daemon._wq.refresh_config_state = AsyncMock()
+    daemon._messenger = MagicMock()
+
+    # Overwrite with a config strict validation rejects (desired-state block in config.yaml).
+    config_path.write_text("nodes:\n  - pubkey_prefix: aabbccdd\n    label: x\n")
+
+    with caplog.at_level(logging.ERROR):
+        await daemon._reload_config("SIGHUP")
+
+    # Previous config is preserved and nothing was re-applied downstream.
+    assert daemon._config is config
+    assert config.messenger.allowed_prefixes == ["aabbccdd"]
+    daemon._wq.refresh_config_state.assert_not_awaited()
+    daemon._messenger.update_config.assert_not_called()
+    assert any("keeping previous config" in r.getMessage() for r in caplog.records)
 
 
 async def _seed_node_with_facts(db: Database) -> Node:
