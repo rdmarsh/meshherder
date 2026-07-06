@@ -2459,27 +2459,41 @@ async def test_show_setting_all_keys_notes_name_prefix_directive(db, wq, config)
 
 # --- S1.2: mch config show --group/--global — dump rows at a scope -------------------
 
-async def test_show_setting_global_scope_dumps_rows(db, wq, config):
-    await db.set_desired_setting(DesiredSetting(
-        scope_type=Scope.GLOBAL, scope_id="", key="owner.info", desired="rdm",
-        policy=SettingPolicy.ENFORCE,
-    ))
+async def test_group_status_bare_lists_groups_with_member_counts(db, wq, config):
+    await db.create_group("field")
+    await db.create_group("solar")
+    await db.upsert_node(Node(pubkey="aa" * 32, name="A", group="field", state=NodeState.UNKNOWN))
 
-    resp = await _dispatch({"cmd": "show_setting", "scope": "global"}, wq, db, config)
+    resp = await _dispatch({"cmd": "group_status", "name": ""}, wq, db, config)
 
     assert resp["ok"] is True
-    assert resp["data"]["scope"] == "global"
-    rows = {r["key"]: r for r in resp["data"]["settings"]}
-    assert rows["owner.info"]["desired"] == "rdm"
-    assert rows["owner.info"]["policy"] == "enforce"
+    counts = {g["name"]: g["member_count"] for g in resp["data"]["groups"]}
+    assert counts == {"field": 1, "solar": 0}
 
 
-async def test_show_setting_group_scope_unknown_group_errors(db, wq, config):
-    resp = await _dispatch(
-        {"cmd": "show_setting", "scope": "group", "group": "ghosts"}, wq, db, config
+async def test_group_status_name_returns_rows_and_members(db, wq, config):
+    await db.create_group("deployed")
+    await db.upsert_node(
+        Node(pubkey="bb" * 32, name="Corb", label="corbin", group="deployed",
+             state=NodeState.CONFIGURED)
     )
+    await db.set_desired_setting(DesiredSetting(
+        scope_type=Scope.GROUP, scope_id="deployed", key="txdelay", desired="10",
+        policy=SettingPolicy.AUDIT,
+    ))
+
+    resp = await _dispatch({"cmd": "group_status", "name": "deployed"}, wq, db, config)
+
+    assert resp["ok"] is True
+    assert resp["data"]["name"] == "deployed"
+    assert [s["key"] for s in resp["data"]["settings"]] == ["txdelay"]
+    assert [m["label"] for m in resp["data"]["members"]] == ["corbin"]
+
+
+async def test_group_status_unknown_group_errors(db, wq, config):
+    resp = await _dispatch({"cmd": "group_status", "name": "ghosts"}, wq, db, config)
     assert resp["ok"] is False
-    assert "mch group create ghosts" in resp["error"]
+    assert "ghosts" in resp["error"]
 
 
 # ------------------------------------------------------------------

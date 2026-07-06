@@ -455,11 +455,6 @@ def group_group() -> None:
     """Manage groups: the middle scope between one node and the whole fleet."""
 
 
-@cli.group("config")
-def config_group() -> None:
-    """Set desired values for nodes, groups, or the whole fleet, and back them up."""
-
-
 @cli.group("gateway")
 def gateway_group() -> None:
     """Operate the locally attached gateway node (admin console, contacts)."""
@@ -670,8 +665,29 @@ def _status_view(fleet: dict[str, Any]) -> dict[str, Any]:
             for node in fleet["nodes"]
         ],
         "firmware": firmware,
+        "fleet_defaults": fleet.get("fleet_defaults", []),
         **fleet["issues"],
     }
+
+
+def _render_fleet_defaults(rows: list[dict[str, Any]]) -> None:
+    """Compact fleet-scope desired section for `mch fleet status` (rendered only when non-empty).
+
+    The read complement of `mch fleet set`; a fleet default is the widest, least-specific scope
+    (groups and nodes may override). Replaces the old `config show --global` (R4 S5.3).
+    """
+    if not rows:
+        return
+    key_w = max(_wlen("KEY"), max((_wlen(r["key"]) for r in rows), default=0))
+    des_w = max(_wlen("DESIRED"), max((_wlen(_sv(r.get("desired"))) for r in rows), default=0))
+    click.echo("fleet defaults (groups and nodes may override):")
+    click.echo(f"  {_wpad('KEY', key_w)}  {_wpad('DESIRED', des_w)}  POLICY")
+    for r in rows:
+        click.echo(
+            f"  {_wpad(r['key'], key_w)}  {_wpad(_sv(r.get('desired')), des_w)}  "
+            f"{r.get('policy') or '(inherit)'}"
+        )
+    click.echo("")
 
 
 def _node_detail_view(node: dict[str, Any]) -> dict[str, Any]:
@@ -786,6 +802,11 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
         click.echo(f"no nodes matching '{query}'", err=True)
         raise SystemExit(1)
 
+    # Fleet-scope defaults (compact, only when non-empty) head the whole-fleet view; a
+    # node-filtered view stays focused on that node (R4 S5.3, decision 4).
+    if not query:
+        _render_fleet_defaults(data.get("fleet_defaults", []))
+
     # Fleet table
     if nodes:
         def _short_ver(raw: str | None) -> str:
@@ -860,6 +881,36 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
     _render_firmware_advisory(data.get("firmware"), query)
 
 
+def _emit_issue_lists(
+    ctx: click.Context,
+    drifted: list[dict[str, Any]],
+    bad_state: list[dict[str, Any]],
+    open_nodes: list[dict[str, Any]],
+    firmware: dict[str, Any] | None,
+    advisory_query: str | None,
+    as_json: bool,
+) -> None:
+    """Render (or emit as JSON) a filtered issues view and exit 2 when any issue is present.
+
+    Shared by `fleet issues`, `group issues`, and `node issues` — the grid's issue verbs are
+    all filtered views of the same report (R4 S5.4). Firmware age is advisory: shown, but it
+    never sets the exit-2 alert code.
+    """
+    has_issues = bool(drifted or bad_state or open_nodes)
+    if as_json:
+        _emit_json({"drifted": drifted, "bad_state": bad_state, "open_nodes": open_nodes})
+        if has_issues:
+            ctx.exit(2)
+        return
+    if not has_issues:
+        click.echo("no issues")
+    else:
+        _render_issue_sections(drifted, bad_state, open_nodes)
+    _render_firmware_advisory(firmware, advisory_query)
+    if has_issues:
+        ctx.exit(2)
+
+
 @fleet_group.command("issues")
 @click.argument("query", required=False, default=None)
 @click.option("--json", "as_json", is_flag=True, help="Emit the issues as JSON for scripting.")
@@ -872,31 +923,64 @@ def issues(ctx: click.Context, query: str | None, as_json: bool) -> None:
     pubkey prefix, label, or mesh name. Exits 0 when clean and 2 when any issue is present,
     so `mch fleet issues >/dev/null || alert` works.
     """
-    resp = _rpc(ctx.obj["socket"], {"cmd": "fleet"})
-    fleet = _check(resp)
-
-    if as_json:
-        # Machine-readable output keeps the machine-readable exit code (2 = issues present).
-        issue_data = _filter_report_by_query(fleet, query).get("issues", {})
-        _emit_json(issue_data)
-        if any(issue_data.get(k) for k in ("drifted", "bad_state", "open_nodes")):
-            ctx.exit(2)
-        return
-
+    fleet = _check(_rpc(ctx.obj["socket"], {"cmd": "fleet"}))
     data = _status_view(fleet)
-    drifted = _filter_drift(data.get("drifted", []), query)
-    bad_state = _filter_nodes(data.get("bad_state", []), query)
-    open_nodes = _filter_nodes(data.get("open_nodes", []), query)
+    _emit_issue_lists(
+        ctx,
+        _filter_drift(data.get("drifted", []), query),
+        _filter_nodes(data.get("bad_state", []), query),
+        _filter_nodes(data.get("open_nodes", []), query),
+        data.get("firmware"),
+        query,
+        as_json,
+    )
 
-    has_issues = bool(drifted or bad_state or open_nodes)
-    if not has_issues:
-        click.echo("no issues")
-    else:
-        _render_issue_sections(drifted, bad_state, open_nodes)
-    # Firmware age is advisory, not a fault: shown here, but it never sets the exit-2 alert code.
-    _render_firmware_advisory(data.get("firmware"), query)
-    if has_issues:
-        ctx.exit(2)
+
+@node_group.command("issues")
+@click.argument("node")
+@click.option("--json", "as_json", is_flag=True, help="Emit the issues as JSON for scripting.")
+@click.pass_context
+def node_issues(ctx: click.Context, node: str, as_json: bool) -> None:
+    """Show only the open issues for one NODE (a filtered `fleet issues`).
+
+    Exits 2 when the node has any issue, so a per-node health check can alert.
+    """
+    fleet = _check(_rpc(ctx.obj["socket"], {"cmd": "fleet"}))
+    if not _filter_nodes(fleet.get("nodes", []), node):
+        click.echo(f"no nodes matching '{node}'", err=True)
+        raise SystemExit(1)
+    data = _status_view(fleet)
+    _emit_issue_lists(
+        ctx,
+        _filter_drift(data.get("drifted", []), node),
+        _filter_nodes(data.get("bad_state", []), node),
+        _filter_nodes(data.get("open_nodes", []), node),
+        data.get("firmware"),
+        node,
+        as_json,
+    )
+
+
+@group_group.command("issues")
+@click.argument("name")
+@click.option("--json", "as_json", is_flag=True, help="Emit the issues as JSON for scripting.")
+@click.pass_context
+def group_issues(ctx: click.Context, name: str, as_json: bool) -> None:
+    """Show only the open issues for the nodes in GROUP NAME (a filtered `fleet issues`)."""
+    fleet = _check(_rpc(ctx.obj["socket"], {"cmd": "fleet"}))
+    member_pubkeys = {
+        n["pubkey"] for n in fleet.get("nodes", []) if (n.get("group") or "") == name
+    }
+    data = _status_view(fleet)
+    _emit_issue_lists(
+        ctx,
+        [s for s in data.get("drifted", []) if s.get("node_pubkey") in member_pubkeys],
+        [n for n in data.get("bad_state", []) if n.get("pubkey") in member_pubkeys],
+        [n for n in data.get("open_nodes", []) if n.get("pubkey") in member_pubkeys],
+        data.get("firmware"),
+        None,
+        as_json,
+    )
 
 
 @node_group.command("path")
@@ -1018,7 +1102,7 @@ def sync(ctx: click.Context, node: str | None) -> None:
 
 
 # Top-level shortcuts for the two highest-frequency commands (the daily loop). The noun tree
-# (daemon/fleet/node/config/gateway) stays the model; only these two get a bare alias because
+# (service/fleet/group/node/gateway) stays the model; only these two get a bare alias because
 # operators run them dozens of times a day. They forward verbatim to the `fleet` versions.
 @cli.command("status")
 @click.argument("query", required=False, default=None)
@@ -2190,15 +2274,30 @@ def unretire_node(ctx: click.Context, node: str) -> None:
 
 @node_group.command("status")
 @click.argument("node")
+@click.argument("key", required=False, default=None)
 @click.option("--json", "as_json", is_flag=True, help="Emit the node report as JSON for scripting.")
 @click.pass_context
-def node_status(ctx: click.Context, node: str, as_json: bool) -> None:
-    """Show full detail for one node: facts, all desired settings, schedule, and recent activity.
+def node_status(ctx: click.Context, node: str, key: str | None, as_json: bool) -> None:
+    """Show one node's full detail, or trace one KEY's resolution.
 
-    NODE is a pubkey prefix, label, or mesh-name substring; it must match exactly one node. This
-    is the detail view that `mch fleet status NODE` shows for a single match, as an explicit
-    command.
+    NODE is a pubkey prefix, label, or mesh-name substring; it must match exactly one node.
+
+    \b
+    Whole node:  mch node status NODE       facts, desired settings, schedule, recent activity
+    One key:     mch node status NODE KEY    trace it through node/group/fleet scope
+
+    This is the detail view that `mch fleet status NODE` shows for a single match, plus the
+    per-key desired-state trace (absorbed from the old `config show`). It sends no mesh traffic.
     """
+    if key is not None:
+        # Single-key resolution trace (absorbed from `config show NODE KEY`).
+        data = _check(_rpc(ctx.obj["socket"], {"cmd": "show_setting", "query": node, "key": key}))
+        if as_json:
+            _emit_json(data)
+            return
+        _render_config_single_key(key, data)
+        return
+
     detail_resp = _rpc(ctx.obj["socket"], {"cmd": "fleet_node", "query": node})
     report = _check(detail_resp)
     if as_json:
@@ -2311,6 +2410,96 @@ def group_rename(ctx: click.Context, old: str, new: str) -> None:
     """Rename group OLD to NEW, moving its members and desired state with it."""
     data = _check(_rpc(ctx.obj["socket"], {"cmd": "group_rename", "old": old, "new": new}))
     click.echo(f"group {data['old']!r} renamed to {data['new']!r}")
+
+
+def _render_group_list(groups: list[dict[str, Any]]) -> None:
+    """Bare `group status`: every registered group with its member count."""
+    if not groups:
+        click.echo("no groups registered (create one with `mch group create NAME`)")
+        return
+    name_w = max(_wlen("GROUP"), max((_wlen(g["name"]) for g in groups), default=0))
+    click.echo(f"  {_wpad('GROUP', name_w)}  MEMBERS")
+    click.echo(f"  {_wpad('-----', name_w)}  -------")
+    for g in groups:
+        click.echo(f"  {_wpad(g['name'], name_w)}  {g['member_count']}")
+
+
+def _render_group_status(data: dict[str, Any]) -> None:
+    """`group status NAME`: the group's own desired rows + a rollup of its member nodes."""
+    settings = data.get("settings", [])
+    operations = data.get("operations", [])
+    members = data.get("members", [])
+    click.echo(f"group {data['name']!r}  ({len(members)} member(s))")
+    click.echo("")
+
+    if settings:
+        key_w = max(_wlen("KEY"), max((_wlen(s["key"]) for s in settings), default=0))
+        des_w = max(
+            _wlen("DESIRED"), max((_wlen(_sv(s.get("desired"))) for s in settings), default=0)
+        )
+        click.echo("desired settings:")
+        click.echo(f"  {_wpad('KEY', key_w)}  {_wpad('DESIRED', des_w)}  POLICY")
+        click.echo(f"  {_wpad('---', key_w)}  {_wpad('-------', des_w)}  ------")
+        for s in settings:
+            click.echo(
+                f"  {_wpad(s['key'], key_w)}  {_wpad(_sv(s.get('desired')), des_w)}  "
+                f"{s.get('policy') or '(inherit)'}"
+            )
+        click.echo("")
+
+    if operations:
+        click.echo("operations:")
+        for o in operations:
+            click.echo(f"  {o['command']}  (every {o['every_hours']}h)")
+        click.echo("")
+
+    if not members:
+        click.echo("members: none (ungrouped state is fully supported)")
+        return
+    label_w = max(_wlen("MEMBER"), max((_wlen(m.get("label") or m.get("name") or "-")
+                                        for m in members), default=0))
+    click.echo("members:")
+    click.echo(f"  {_wpad('MEMBER', label_w)}  STATE")
+    click.echo(f"  {_wpad('------', label_w)}  -----")
+    for m in members:
+        ident = m.get("label") or m.get("name") or _pk(m.get("pubkey"))
+        click.echo(f"  {_wpad(ident, label_w)}  {_state_text(m.get('state'))}")
+
+
+@group_group.command("status")
+@click.argument("name", required=False, default=None)
+@click.option("--json", "as_json", is_flag=True, help="Emit group status as JSON for scripting.")
+@click.pass_context
+def group_status(ctx: click.Context, name: str | None, as_json: bool) -> None:
+    """List all groups (bare), or show one group's desired state and members.
+
+    \b
+    All groups:  mch group status           every group with its member count
+    One group:   mch group status NAME       its desired settings/operations + member nodes
+
+    Read-only: it sends no mesh traffic.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "group_status", "name": name or ""}))
+    if as_json:
+        _emit_json(data)
+        return
+    if name is None:
+        _render_group_list(data.get("groups", []))
+    else:
+        _render_group_status(data)
+
+
+@group_group.command("sync")
+@click.argument("name")
+@click.pass_context
+def group_sync(ctx: click.Context, name: str) -> None:
+    """Sync only the nodes in GROUP NAME now — a filtered fleet sync.
+
+    Rate-limited exactly like `mch fleet sync`: one node at a time with the configured
+    inter-node delay. Runs in the background; watch progress with `mch service logs`.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "sync", "group": name}))
+    click.echo(data)
 
 
 # ---------------------------------------------------------------------------
@@ -2684,90 +2873,14 @@ def fleet_unset(ctx: click.Context, key: str) -> None:
     _scoped_target_echo("unset", key, "", data)
 
 
-def _age_short(iso: str | None) -> str:
-    """Compact age with no ' ago' suffix, for the config-show AGE column ('2d', '3h')."""
-    if not iso:
-        return "-"
-    return _ago(iso).lstrip().removesuffix(" ago")
-
-
-def _render_config_all_keys(data: dict[str, Any]) -> None:
-    """Render the all-keys resolution table for `mch config show NODE`."""
-    target = data.get("label") or data.get("name") or data["pubkey"][:12]
-    group = f", group {data['group']!r}" if data.get("group") else ""
-    click.echo(f"settings for {target} ({data['pubkey'][:12]}){group}:")
-    rows = data["settings"]
-    if not rows:
-        click.echo("  nothing is set and nothing has been observed yet")
-        return
-
-    def _desired_cell(r: dict[str, Any]) -> str:
-        base = _sv(r.get("desired"))
-        return f"{base} *" if r.get("directive") else base
-
-    key_w = max(_wlen("KEY"), max((_wlen(r["key"]) for r in rows), default=0))
-    pol_w = max(_wlen("POLICY"), max((_wlen(r["policy"]) for r in rows), default=0))
-    des_w = max(_wlen("DESIRED"), max((_wlen(_desired_cell(r)) for r in rows), default=0))
-    from_w = max(
-        _wlen("FROM"), max((_wlen(r.get("desired_source") or "-") for r in rows), default=0)
-    )
-    obs_w = max(_wlen("OBSERVED"), max((_wlen(_sv(r.get("observed"))) for r in rows), default=0))
-
-    def _row(key: str, pol: str, des: str, frm: str, obs: str, age: str) -> str:
-        return (
-            f"  {_wpad(key, key_w)}  {_wpad(pol, pol_w)}  {_wpad(des, des_w)}"
-            f"  {_wpad(frm, from_w)}  {_wpad(obs, obs_w)}  {age}"
-        )
-
-    click.echo("")
-    click.echo(_row("KEY", "POLICY", "DESIRED", "FROM", "OBSERVED", "AGE"))
-    click.echo(_row("---", "------", "-------", "----", "--------", "---"))
-    for r in rows:
-        click.echo(_row(
-            r["key"], r["policy"], _desired_cell(r),
-            r.get("desired_source") or "-", _sv(r.get("observed")),
-            _age_short(r.get("observed_at")),
-        ).rstrip())
-    directives = [r for r in rows if r.get("directive")]
-    if directives:
-        click.echo("")
-        for r in directives:
-            click.echo(f"  * {r['key']}: {r['directive']}")
-    click.echo("")
-    click.echo("(`mch config show NODE KEY` traces one key through node/group/global)")
-
-
-def _render_config_scope(data: dict[str, Any]) -> None:
-    """Render the rows stored at a group/global scope for `mch config show --group/--global`."""
-    if data["scope"] == "global":
-        click.echo("global settings (apply to every node unless a group or node overrides):")
-    else:
-        click.echo(f"settings for group {data['group']!r} "
-                   "(apply to every node in the group unless the node overrides):")
-    rows = data["settings"]
-    if not rows:
-        click.echo("  nothing is set at this scope")
-        return
-    key_w = max(_wlen("KEY"), max((_wlen(r["key"]) for r in rows), default=0))
-    pol_w = max(_wlen("POLICY"), max((_wlen(r["policy"] or "(inherit)") for r in rows), default=0))
-    click.echo("")
-    click.echo(f"  {_wpad('KEY', key_w)}  {_wpad('POLICY', pol_w)}  DESIRED")
-    click.echo(f"  {_wpad('---', key_w)}  {_wpad('------', pol_w)}  -------")
-    for r in rows:
-        click.echo(
-            f"  {_wpad(r['key'], key_w)}  {_wpad(r['policy'] or '(inherit)', pol_w)}  "
-            f"{_sv(r.get('desired'))}".rstrip()
-        )
-
-
 def _render_config_single_key(key: str, data: dict[str, Any]) -> None:
-    """Render the single-key resolution trace for `mch config show NODE KEY`."""
+    """Render the single-key resolution trace for `mch node status NODE KEY`."""
     target = data.get("label") or data.get("name") or data["pubkey"][:8]
     resolved = data["resolved"]
     click.echo(f"{key}  on  {target}  ({data['pubkey'][:12]})")
     if not data["configured"]:
         click.echo(f"  nothing is set for this key — not on the node, its group, or globally "
-                   f"(mch config set {target} {key} VALUE to set it)")
+                   f"(mch node set {target} {key} VALUE to set it)")
     desired = resolved["desired"]
     desired_str = repr(desired) if desired is not None else "-"
     # A directive (e.g. name_prefix) transformed the value: show that instead of the bare
@@ -2799,78 +2912,6 @@ def _render_config_single_key(key: str, data: dict[str, Any]) -> None:
             sd = repr(s["desired"]) if s["desired"] is not None else "-"
             sp = s["policy"] or "(inherit)"
             click.echo(f"    {label:<16}  policy={sp:<9}  desired={sd}")
-
-
-def _scope_from_flags(group_name: str | None, global_scope: bool) -> str:
-    """Validate the --group/--global flags and return the scope name.
-
-    Only `config show` still uses this — `set`/`unset` moved to the scope nouns (R4 S4). It
-    dies with `config show` in S5.
-    """
-    if group_name and global_scope:
-        raise click.UsageError("choose at most one of --group / --global")
-    if global_scope:
-        return "global"
-    if group_name:
-        return "group"
-    return "node"
-
-
-@config_group.command("show")
-@click.argument("node", required=False, default=None)
-@click.argument("key", required=False, default=None)
-@click.option("--group", "group_name", default=None,
-              help="Show the rows set at a group's scope.")
-@click.option("--global", "global_scope", is_flag=True,
-              help="Show the rows set at global scope.")
-@click.option("--json", "as_json", is_flag=True, help="Emit the resolution as JSON for scripting.")
-@click.pass_context
-def show_setting(
-    ctx: click.Context,
-    node: str | None,
-    key: str | None,
-    group_name: str | None,
-    global_scope: bool,
-    as_json: bool,
-) -> None:
-    """Show desired state: everything on a node, one key's resolution, or a scope's rows.
-
-    \b
-    Whole node:  mch config show NODE          every key that resolves for the node
-    One key:     mch config show NODE KEY       trace it through node/group/global
-    A group:     mch config show --group NAME    rows set at that group's scope
-    Every node:  mch config show --global        rows set at global scope
-
-    Read-only: it sends no mesh traffic.
-    """
-    scope = _scope_from_flags(group_name, global_scope)
-    if scope != "node":
-        if node or key:
-            raise click.UsageError("with --group/--global, do not pass a NODE or KEY")
-        req: dict[str, Any] = {"cmd": "show_setting", "scope": scope}
-        if scope == "group":
-            req["group"] = group_name
-        data = _check(_rpc(ctx.obj["socket"], req))
-        if as_json:
-            _emit_json(data)
-            return
-        _render_config_scope(data)
-        return
-
-    if not node:
-        raise click.UsageError("usage: mch config show NODE [KEY]  (or --group NAME / --global)")
-
-    req = {"cmd": "show_setting", "query": node}
-    if key is not None:
-        req["key"] = key
-    data = _check(_rpc(ctx.obj["socket"], req))
-    if as_json:
-        _emit_json(data)
-        return
-    if key is None:
-        _render_config_all_keys(data)
-    else:
-        _render_config_single_key(key, data)
 
 
 # ---------------------------------------------------------------------------

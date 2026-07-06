@@ -34,6 +34,34 @@ existing nouns yet. 1017 tests pass, ruff + mypy clean.
 is already merged to `main`, proceed with no rebase; land each slice `--no-ff` to `main` locally
 (gh unavailable in sandbox; operator pushes/PR-reviews after).
 
+**RECOMMENDATIONS-4 — S5 done (2026-07-06, branch `feat-r4-slice5-status-views`).** The status
+views + grid verbs; the `config` noun is gone. 1025 tests pass, ruff + mypy clean. The grid is now
+complete — fleet/group/node each carry status + set/unset + sync + issues.
+- **node status NODE [KEY]** absorbs `config show NODE [KEY]`: no-KEY keeps the detail view (its
+  settings table already folds in every resolving key); a KEY does the single-scope trace via the
+  existing `show_setting` RPC. Chose *not* to add a FROM column to the detail table (would
+  contradict the deliberate no-SOURCE-column decision); the per-scope breakdown lives in the KEY
+  trace. No report-model change for node status → JSON contract untouched.
+- **group status [NAME]**: bare lists all registered groups with member counts (makes typo/empty
+  groups visible); NAME shows the group's desired rows + operations + member rollup. New
+  `group_status` RPC.
+- **fleet status** gains a compact **fleet defaults** section (only when non-empty, only on the
+  unfiltered view). Added `fleet_defaults` to `build_fleet_report` (additive; contract test still
+  passes since both sides share the builder; SCHEMA_VERSION left at 2 to avoid churning fixtures
+  for a purely-additive field). `--json` carries it.
+- **Grid verbs:** `group sync NAME` (a group-filtered background cycle — threaded a `group` filter
+  through `start_cycle`/`_run_cycle_locked`/`_run_cycle_body`, same one-node pacing); `group issues
+  NAME` and `node issues NODE` are filtered views of the fleet report via a shared
+  `_emit_issue_lists` helper (exit 2 on issues). Daemon `_handle_sync` validates the group exists
+  before syncing.
+- **Deleted:** `config show`, the `config` group, `_scope_from_flags`, the dead
+  `_render_config_all_keys`/`_render_config_scope`/`_age_short`, and daemon `_handle_show_scope` +
+  the scope branch of `_handle_show_setting`. Tests migrated (node-status-KEY, group-status,
+  fleet-defaults, grid verbs). Guard-doc command tokens for `config show` updated (README, man,
+  website) — full prose/grid sweep stays in S7. Gotcha recorded: two `test_queue` stubs replaced
+  `_run_cycle_body` with a zero-arg coroutine; the new `group` positional made them raise *before*
+  `started.set()`, which hung the suite — stubs now take `group=None`.
+
 **RECOMMENDATIONS-4 — S4 done (2026-07-06, branch `feat-r4-slice4-scope-grammar`).** `set`/`unset`
 move to the scope nouns. 1020 tests pass, ruff + mypy clean.
 - New: `node set/unset NODE KEY [VAL]`, `group set/unset NAME KEY [VAL]`, `fleet set/unset KEY

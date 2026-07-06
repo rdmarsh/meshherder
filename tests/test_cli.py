@@ -948,6 +948,75 @@ def _status_resp(
     }}
 
 
+def test_fleet_status_renders_fleet_defaults_section():
+    # R4 S5.3: fleet-scope desired rows show as a compact section, only when non-empty.
+    resp = _status_resp(nodes=[_summary()])
+    resp["data"]["fleet_defaults"] = [
+        {"key": "owner.info", "desired": "rdm", "policy": "enforce"},
+    ]
+    result = _run(["fleet", "status"], resp)
+    assert result.exit_code == 0
+    assert "fleet defaults" in result.output
+    assert "owner.info" in result.output
+
+
+def test_fleet_status_omits_defaults_section_when_empty():
+    resp = _status_resp(nodes=[_summary()])
+    resp["data"]["fleet_defaults"] = []
+    result = _run(["fleet", "status"], resp)
+    assert result.exit_code == 0
+    assert "fleet defaults" not in result.output
+
+
+def test_group_sync_sends_group_filter():
+    rpc = MagicMock(return_value={"ok": True, "data": "sync started"})
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "group", "sync", "deployed"])
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1] == {"cmd": "sync", "group": "deployed"}
+    assert "sync started" in result.output
+
+
+def test_node_issues_filters_to_one_node_and_exits_two():
+    resp = _status_resp(
+        nodes=[_summary(), _summary(pubkey="11" * 32, label="ridge", name="Ridge")],
+        bad_state=[{"pubkey": "11" * 32, "label": "ridge", "name": "Ridge",
+                    "state": "unreachable", "last_seen": None}],
+    )
+    result = _run(["node", "issues", "ridge"], resp)
+    assert result.exit_code == 2
+    assert "ridge" in result.output.lower()
+
+
+def test_node_issues_clean_node_exits_zero():
+    resp = _status_resp(nodes=[_summary(label="tower")])
+    result = _run(["node", "issues", "tower"], resp)
+    assert result.exit_code == 0
+    assert "no issues" in result.output
+
+
+def test_node_issues_unknown_node_errors():
+    resp = _status_resp(nodes=[_summary(label="tower")])
+    result = _run(["node", "issues", "nope"], resp)
+    assert result.exit_code == 1
+
+
+def test_group_issues_filters_to_group_members():
+    tower = _summary(label="tower")
+    tower["group"] = "deployed"
+    ridge = _summary(pubkey="11" * 32, label="ridge", name="Ridge")
+    ridge["group"] = "other"
+    resp = _status_resp(
+        nodes=[tower, ridge],
+        bad_state=[{"pubkey": "11" * 32, "label": "ridge", "name": "Ridge",
+                    "state": "unreachable", "last_seen": None}],
+    )
+    # ridge's issue is in group "other", so "deployed" is clean.
+    result = _run(["group", "issues", "deployed"], resp)
+    assert result.exit_code == 0
+    assert "no issues" in result.output
+
+
 def test_moved_commands_available_under_new_nouns():
     """Relocated commands live under their new noun; old paths are gone (alpha, no aliases)."""
     runner = CliRunner()
@@ -1111,11 +1180,11 @@ def test_node_show_json_emits_report_verbatim():
     assert json.loads(result.output) == node
 
 
-def test_config_show_json_emits_resolution_verbatim():
-    data = {"pubkey": "aabbccdd" * 8, "label": "tower", "name": "Tower",
+def test_node_status_key_json_emits_resolution_verbatim():
+    data = {"key": "name", "pubkey": "aabbccdd" * 8, "label": "tower", "name": "Tower",
             "configured": True, "resolved": {"policy": "enforce", "desired": "New",
             "desired_source": "node", "observed": "Old", "observed_at": None}, "scopes": []}
-    result = _run(["config", "show", "tower", "name", "--json"], {"ok": True, "data": data})
+    result = _run(["node", "status", "tower", "name", "--json"], {"ok": True, "data": data})
     assert result.exit_code == 0
     assert json.loads(result.output) == data
 
@@ -3645,7 +3714,8 @@ def test_unset_surfaces_daemon_error():
     assert "no DB-set" in result.output
 
 
-def test_show_sends_query_and_renders_resolution():
+def test_node_status_key_traces_resolution():
+    # `node status NODE KEY` absorbs the old `config show NODE KEY` single-key trace (R4 S5.1).
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
         "key": "txdelay",
@@ -3664,25 +3734,19 @@ def test_show_sends_query_and_renders_resolution():
         ],
     }})
     with patch("mch.cli._rpc", rpc):
-        result = runner.invoke(cli, [
-                            "--socket",
-                            "/fake.sock",
-                            "config",
-                            "show",
-                            "site-a",
-                            "txdelay",
-                        ])
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "node", "status", "site-a", "txdelay"]
+        )
 
     assert result.exit_code == 0
     assert rpc.call_args.args[1] == {"cmd": "show_setting", "query": "site-a", "key": "txdelay"}
     assert "policy=enforce" in result.output
     assert "desired='14'" in result.output
     assert "from node" in result.output
-    assert "global" in result.output
     assert "where it's set:" in result.output
 
 
-def test_show_reports_unconfigured_key():
+def test_node_status_key_reports_unconfigured_key():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
         "key": "txdelay", "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower",
@@ -3692,118 +3756,55 @@ def test_show_reports_unconfigured_key():
         "scopes": [],
     }})
     with patch("mch.cli._rpc", rpc):
-        result = runner.invoke(cli, [
-                            "--socket",
-                            "/fake.sock",
-                            "config",
-                            "show",
-                            "site-a",
-                            "txdelay",
-                        ])
+        result = runner.invoke(
+            cli, ["--socket", "/fake.sock", "node", "status", "site-a", "txdelay"]
+        )
 
     assert result.exit_code == 0
     assert "nothing is set for this key" in result.output
     assert "policy=audit (default)" in result.output
     assert "never read" in result.output
+    assert "mch node set site-a txdelay VALUE" in result.output
 
 
-def test_show_no_key_renders_all_keys_table():
+def test_group_status_bare_lists_groups_with_member_counts():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
-        "pubkey": "e2601d591517" + "00" * 26, "label": "corbin", "name": "Corb",
-        "group": "deployed", "all_keys": True,
-        "settings": [
-            {"key": "advert.interval", "policy": "enforce", "desired": "238",
-             "desired_source": "global", "observed": "238",
-             "observed_at": "2026-07-03T00:00:00+00:00", "directive": None},
-            {"key": "name", "policy": "enforce", "desired": "\U0001f9b7 Corb",
-             "desired_source": "node", "observed": "\U0001f9b7 Corb",
-             "observed_at": "2026-07-03T00:00:00+00:00",
-             "directive": "node value + name_prefix '\U0001f9b7 ' from group 'deployed'"},
-        ],
+        "groups": [{"name": "field", "member_count": 2}, {"name": "solar", "member_count": 0}],
     }})
     with patch("mch.cli._rpc", rpc):
-        result = runner.invoke(cli, [
-            "--socket", "/fake.sock", "config", "show", "corbin",
-        ])
-
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "group", "status"])
     assert result.exit_code == 0
-    assert rpc.call_args.args[1] == {"cmd": "show_setting", "query": "corbin"}
-    assert "settings for corbin" in result.output
-    assert "advert.interval" in result.output
-    assert "KEY" in result.output and "FROM" in result.output
-    # directive-transformed row is starred and footnoted
-    assert "\U0001f9b7 Corb *" in result.output
-    assert "* name:" in result.output
-    assert "name_prefix" in result.output
+    assert rpc.call_args.args[1] == {"cmd": "group_status", "name": ""}
+    assert "GROUP" in result.output and "MEMBERS" in result.output
+    assert "field" in result.output and "solar" in result.output
 
 
-def test_show_no_key_json_emits_settings_list():
-    runner = CliRunner()
-    payload = {"ok": True, "data": {
-        "pubkey": "e2601d591517" + "00" * 26, "label": "corbin", "name": "Corb",
-        "group": "deployed", "all_keys": True,
-        "settings": [{"key": "name", "policy": "enforce", "desired": "Corb",
-                      "desired_source": "node", "observed": "Corb",
-                      "observed_at": None, "directive": None}],
-    }}
-    with patch("mch.cli._rpc", MagicMock(return_value=payload)):
-        result = runner.invoke(cli, [
-            "--socket", "/fake.sock", "config", "show", "corbin", "--json",
-        ])
-    assert result.exit_code == 0
-    assert '"all_keys": true' in result.output
-
-
-def test_show_global_scope_lists_rows():
+def test_group_status_name_shows_rows_and_members():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
-        "scope": "global",
-        "settings": [
-            {"key": "owner.info", "desired": "rdm", "policy": "enforce"},
-        ],
-    }})
-    with patch("mch.cli._rpc", rpc):
-        result = runner.invoke(cli, [
-            "--socket", "/fake.sock", "config", "show", "--global",
-        ])
-    assert result.exit_code == 0
-    assert rpc.call_args.args[1] == {"cmd": "show_setting", "scope": "global"}
-    assert "global settings" in result.output
-    assert "owner.info" in result.output
-
-
-def test_show_group_scope_sends_group_request():
-    runner = CliRunner()
-    rpc = MagicMock(return_value={"ok": True, "data": {
-        "scope": "group", "group": "deployed",
+        "name": "deployed",
         "settings": [{"key": "txdelay", "desired": "10", "policy": "audit"}],
+        "operations": [{"command": "clock sync", "every_hours": 24}],
+        "members": [{"pubkey": "aabbccdd" * 8, "label": "corbin", "name": "Corb",
+                     "state": "configured"}],
     }})
     with patch("mch.cli._rpc", rpc):
-        result = runner.invoke(cli, [
-            "--socket", "/fake.sock", "config", "show", "--group", "deployed",
-        ])
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "group", "status", "deployed"])
     assert result.exit_code == 0
-    assert rpc.call_args.args[1] == {"cmd": "show_setting", "scope": "group", "group": "deployed"}
+    assert rpc.call_args.args[1] == {"cmd": "group_status", "name": "deployed"}
     assert "group 'deployed'" in result.output
+    assert "txdelay" in result.output
+    assert "clock sync" in result.output
+    assert "corbin" in result.output
 
 
-def test_show_node_with_scope_flag_is_usage_error():
-    runner = CliRunner()
-    with patch("mch.cli._rpc", MagicMock()) as rpc:
-        result = runner.invoke(cli, [
-            "--socket", "/fake.sock", "config", "show", "corbin", "--global",
-        ])
-    assert result.exit_code == 2
-    rpc.assert_not_called()
-
-
-def test_show_no_args_is_usage_error():
-    runner = CliRunner()
-    with patch("mch.cli._rpc", MagicMock()) as rpc:
-        result = runner.invoke(cli, ["--socket", "/fake.sock", "config", "show"])
-    assert result.exit_code == 2
-    rpc.assert_not_called()
+def test_group_status_json_emits_verbatim():
+    payload = {"ok": True, "data": {"groups": [{"name": "field", "member_count": 1}]}}
+    with patch("mch.cli._rpc", MagicMock(return_value=payload)):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "group", "status", "--json"])
+    assert result.exit_code == 0
+    assert '"member_count": 1' in result.output
 
 
 def test_group_set_sends_group_request():

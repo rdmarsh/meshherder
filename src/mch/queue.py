@@ -608,8 +608,12 @@ class WorkQueue:
             self._operation_name = None
             self._operation_lock.release()
 
-    async def start_cycle(self) -> str:
-        """Start a manual full sync cycle in the background."""
+    async def start_cycle(self, group: str | None = None) -> str:
+        """Start a manual sync cycle in the background.
+
+        With ``group`` set, only that group's member nodes are swept (a filtered fleet sync,
+        R4 S5.4); it is otherwise identical — same one-node-at-a-time pacing and locks.
+        """
         if self._manual_cycle_task and not self._manual_cycle_task.done():
             raise OperationBusyError("busy: sync cycle")
         if self._operation_lock.locked():
@@ -617,14 +621,15 @@ class WorkQueue:
             raise OperationBusyError(f"busy: {current}")
         await self._operation_lock.acquire()
         self._operation_name = "sync cycle"
+        scope_desc = f"group {group!r}" if group else "full cycle"
         try:
-            await self._db.write_log(None, "INFO", "manual sync started: full cycle")
+            await self._db.write_log(None, "INFO", f"manual sync started: {scope_desc}")
         except Exception:
             self._operation_name = None
             self._operation_lock.release()
             raise
 
-        task = asyncio.create_task(self._run_cycle_locked())
+        task = asyncio.create_task(self._run_cycle_locked(group))
         self._manual_cycle_task = task
         self._operation_tasks.add(task)
         task.add_done_callback(self._manual_cycle_done)
@@ -1372,25 +1377,27 @@ class WorkQueue:
         async with self.operation("sync cycle", wait=False):
             return await self._run_cycle_body()
 
-    async def _run_cycle_locked(self) -> list[NodeResult]:
+    async def _run_cycle_locked(self, group: str | None = None) -> list[NodeResult]:
+        scope_desc = f"group {group!r}" if group else "full cycle"
         try:
-            results = await self._run_cycle_body()
+            results = await self._run_cycle_body(group)
         except asyncio.CancelledError:
-            await self._db.write_log(None, "WARNING", "manual sync aborted: full cycle")
+            await self._db.write_log(None, "WARNING", f"manual sync aborted: {scope_desc}")
             raise
         except Exception as exc:
-            await self._db.write_log(None, "ERROR", f"manual sync failed: full cycle: {exc}")
+            await self._db.write_log(None, "ERROR", f"manual sync failed: {scope_desc}: {exc}")
             raise
         else:
             await self._db.write_log(
-                None, "INFO", f"manual sync completed: full cycle ({len(results)} nodes processed)"
+                None, "INFO",
+                f"manual sync completed: {scope_desc} ({len(results)} nodes processed)"
             )
             return results
         finally:
             self._operation_name = None
             self._operation_lock.release()
 
-    async def _run_cycle_body(self) -> list[NodeResult]:
+    async def _run_cycle_body(self, group: str | None = None) -> list[NodeResult]:
         log.info("--- cycle start ---")
         self._contacts = await self._gateway.get_contacts(managed_only=False)
         contact_by_pubkey = {c["public_key"]: c for c in self._contacts}
@@ -1406,6 +1413,9 @@ class WorkQueue:
         # entries. A DB node carries its full pubkey, so the gateway contact is a direct lookup.
         # Retired nodes are kept for history but never swept.
         nodes = [n for n in await self._db.get_all_nodes() if n.state != NodeState.RETIRED]
+        if group is not None:
+            # Filtered fleet sync: sweep only this group's members (R4 S5.4).
+            nodes = [n for n in nodes if n.group == group]
         for node in nodes:
             label = node.label or node.name or node.pubkey[:12]
             contact = contact_by_pubkey.get(node.pubkey) or self._find_contact(

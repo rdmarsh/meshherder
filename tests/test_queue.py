@@ -459,7 +459,7 @@ async def test_start_cycle_rejects_duplicate_manual_cycle(db):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_run_cycle_body():
+    async def fake_run_cycle_body(group=None):
         started.set()
         await release.wait()
         return []
@@ -483,7 +483,7 @@ async def test_stop_cancels_manual_cycle_and_releases_operation_lock(db):
     wq = WorkQueue(_make_config(), _make_gateway(), db)
     started = asyncio.Event()
 
-    async def blocked_cycle():
+    async def blocked_cycle(group=None):
         started.set()
         await asyncio.Event().wait()
 
