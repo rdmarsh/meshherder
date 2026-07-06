@@ -535,7 +535,7 @@ class Database:
         return [_row_to_desired_setting(r) for r in rows]
 
     async def get_all_desired_settings(self) -> list[DesiredSetting]:
-        """Return every desired setting across all scopes (for ``mch config export``)."""
+        """Return every desired setting across all scopes (for ``mch fleet export``)."""
         db = self._db_required()
         async with db.execute(
             "SELECT * FROM desired_settings ORDER BY scope_type, scope_id, key"
@@ -594,7 +594,7 @@ class Database:
         return [_row_to_desired_operation(r) for r in rows]
 
     async def get_all_desired_operations(self) -> list[DesiredOperation]:
-        """Return every desired operation across all scopes (for ``mch config export``)."""
+        """Return every desired operation across all scopes (for ``mch fleet export``)."""
         db = self._db_required()
         async with db.execute(
             "SELECT * FROM desired_operations ORDER BY scope_type, scope_id, command"
@@ -718,7 +718,7 @@ class Database:
         return _row_to_operation(row) if row else None
 
     async def get_operations(self, node_pubkey: str) -> list[OperationRecord]:
-        """Latest record per command for a node, most-recent first (for `mch node show`).
+        """Latest record per command for a node, most-recent first (for `mch node status`).
 
         Operations are updated in place, so in practice there is one row per command; this
         dedupes defensively and keeps only the newest per command.

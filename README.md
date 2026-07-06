@@ -80,7 +80,7 @@ Think Ansible for your nodes, running continuously in the background.
 - **`mch node new`** — guided wizard to add a fresh or replacement MeshCore node. Pauses
   the sync queue, switches to the factory default frequency, discovers the node, generates or restores
   a managed private key, pushes name/password/radio config, verifies the expected public key after
-  reboot, then prints an importable `nodes:` doc (apply with `mch config import`) and the
+  reboot, then prints an importable `nodes:` doc (apply with `mch fleet import`) and the
   `secrets.yaml` snippet. No need to stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see gateway contacts not yet managed.
 - **`--json` scripting surface** — every read command (`fleet status/issues/plan/logs`, `node show`,
@@ -109,11 +109,11 @@ There are two kinds of state, and they live in two different places:
 - **Desired state and inventory** — which nodes are managed, their groups and labels, the global and
   per-group defaults, the facts collected, and every desired setting — live in the **SQLite
   database**. You edit them with `mch config set` / `mch config unset` (see *Editing desired state in
-  the database* below), and back them up with `mch config export`.
+  the database* below), and back them up with `mch fleet export`.
 
 The daemon **refuses to start** if `config.yaml` still carries a `nodes:`, `groups:`, `global:`, or
 `facts:` desired-state block — those moved to the DB. If you have an older config, migrate it once
-with `mch config import` (see *Migrating an existing `config.yaml`* below), then strip those blocks.
+with `mch fleet import` (see *Migrating an existing `config.yaml`* below), then strip those blocks.
 `mchd` never edits `config.yaml` or `secrets.yaml`.
 
 A minimal working `config.yaml` (daemon settings only):
@@ -194,7 +194,7 @@ commissioning/replacement, where mchd intentionally sends the stored password or
 blank hardware as mesh commands as part of taking ownership of that node. It still does not edit
 the YAML files.
 
-`mch daemon validate` checks that each configured node's stored `prv_key`, when present, derives a public
+`mch service configtest` checks that each configured node's stored `prv_key`, when present, derives a public
 key matching the node's `pubkey_prefix`. A mismatch is reported as a warning with the prefix that
 the private key actually implies. Do not run replacement commissioning with a mismatched key unless
 you intend the replacement hardware to come back under that derived identity.
@@ -256,7 +256,7 @@ mch node adopt aabbccdd1122... --radio 915.075,125,9,5 --label MySite-East
    immediately without waiting for the scheduler.
 
    To onboard many nodes at once, write them into an `examples/desired.example.yaml`-style file and
-   seed the DB with `mch config import <file> --yes` instead of adopting each one.
+   seed the DB with `mch fleet import <file> --yes` instead of adopting each one.
 
 ### Commissioning a new node
 
@@ -278,7 +278,7 @@ stopping mchd. The wizard supports two modes:
 6. Commissioning verifies that the generated public key is visible on the target frequency before
    returning success.
 7. Add the password to `secrets.yaml`, reload mchd so it seeds the new node into the DB from gateway
-   favourites, then `mch config import <file> --yes` to record the desired state. Run
+   favourites, then `mch fleet import <file> --yes` to record the desired state. Run
    `mch fleet sync <prefix>` if you want to sync immediately.
 
 **Replacement node** — restoring a known identity onto new hardware:
@@ -309,16 +309,16 @@ password, add it to `secrets.yaml` before syncing.
 
 ```
 mch fleet status                  # fleet view: state, label, group, firmware, neighbours, last seen
-mch fleet status <label|prefix>   # filtered table (single match hints `mch node show`)
-mch node show <label|prefix>      # full detail for one node (facts, settings, schedule, activity)
-mch daemon validate                # validate the daemon's /etc/meshherder/config.yaml
+mch fleet status <label|prefix>   # filtered table (single match hints `mch node status`)
+mch node status <label|prefix>      # full detail for one node (facts, settings, schedule, activity)
+mch service configtest                # validate the daemon's /etc/meshherder/config.yaml
 mch fleet suggest                    # suggested txdelay for every node based on neighbour count
 mch fleet suggest <label|prefix>     # full suggestions + the `mch config set` commands to apply them
 mch gateway contacts                # gateway contacts not yet managed in the DB
 mch node discover --radio F,B,S,C  # active bounded scan on a temporary gateway radio
 ```
 
-`mch daemon validate` also warns about unrecognised names in `facts:` and suggests close known
+`mch service configtest` also warns about unrecognised names in `facts:` and suggests close known
 readable values, for example `powersavings` to `powersaving`. Unknown fact keys are still allowed
 so newly added firmware reads can be evaluated before mch metadata catches up.
 
@@ -327,7 +327,7 @@ so newly added firmware reads can be evaluated before mch metadata catches up.
 Desired state and inventory live in the SQLite database; `config.yaml` carries only daemon settings
 (gateway, scheduler, messenger, api, paths, profiles). **The daemon refuses to start if
 `config.yaml` still contains a `nodes:`, `groups:`, `global:`, or `facts:` desired-state block** — it points
-you at `mch config import`. The DB is edited directly by `mch`. Writes
+you at `mch fleet import`. The DB is edited directly by `mch`. Writes
 are synchronous, so `mch fleet status <node>` shows the new intent immediately; convergence still waits for
 the next sync (or `mch fleet sync <node>`).
 
@@ -341,24 +341,24 @@ mch config unset <prefix> txdelay           # remove a DB-set value (observed st
 mch config show <prefix>                    # list every key resolving for the node (policy, desired, from, observed)
 mch config show <prefix> txdelay            # explain one key: per-scope rows, resolved value, observed
 mch config show --global                    # list the rows set at global scope (or --group NAME)
-mch config import                           # preview seeding the DB from the daemon's config (dry run)
-mch config import legacy.yaml --yes         # seed from an explicit file (settings + label/group inventory)
-mch config export > backup.yaml             # complete fleet backup (inventory + desired state)
+mch fleet import                           # preview seeding the DB from the daemon's config (dry run)
+mch fleet import legacy.yaml --yes         # seed from an explicit file (settings + label/group inventory)
+mch fleet export > backup.yaml             # complete fleet backup (inventory + desired state)
 mch node clean settings <prefix>          # drop observed rows for keys no longer desired (dry run)
 ```
 
-**Migrating an existing `config.yaml`:** on the running daemon, `mch config import` (then `--yes`) to seed
-the DB, `mch config export` to verify, then delete the `nodes:`/`groups:`/`global:`/`facts:` blocks from
+**Migrating an existing `config.yaml`:** on the running daemon, `mch fleet import` (then `--yes`) to seed
+the DB, `mch fleet export` to verify, then delete the `nodes:`/`groups:`/`global:`/`facts:` blocks from
 `config.yaml` (keep the daemon settings) and restart. Import folds a legacy `facts:` list into global
 `policy: fact` rows. When importing a *legacy* config (nodes given
 by short `pubkey_prefix`), a node must already be in the DB — seen as a favourited gateway contact —
 for import to resolve its full pubkey; unseen nodes are skipped with a warning until they appear.
 
 **Backup and restore.** Because the DB is now the only copy of desired state, keep periodic
-`mch config export > backup.yaml` snapshots (a daily cron/systemd timer is ideal). The export is a complete
+`mch fleet export > backup.yaml` snapshots (a daily cron/systemd timer is ideal). The export is a complete
 backup — every node's full public key, label, group, desired settings, and operations, with retired
 nodes tagged `retired: true`. To restore after a server or gateway replacement, point a fresh daemon
-at a clean `config.yaml` (daemon settings only) and run `mch config import backup.yaml --yes`: because the
+at a clean `config.yaml` (daemon settings only) and run `mch fleet import backup.yaml --yes`: because the
 backup carries full public keys, import recreates every node up-front even before the new gateway has
 favourited them, and the favourite mirror re-pins each node as its contact reappears on the mesh.
 If the backup contains retired nodes, import makes you choose: `--retired keep` restores them as
@@ -586,7 +586,7 @@ code): it exits `2` when any issue is present. Firmware age is **advisory** — 
 Set the value at group or global scope in the DB — `mch config set --group repeaters powersaving on
 --policy enforce`, or `mch config set --global …` for the whole fleet — then run `mch fleet sync` to
 push the change to all nodes without waiting for the scheduler. (Assign a node to a group with
-`mch config import` or during commissioning.)
+`mch fleet import` or during commissioning.)
 
 ## CLI reference
 
@@ -605,18 +605,18 @@ mch help selectors                  How to name a node on the command line
 mch help concepts                   Desired vs reported, policy, scope, sync, exit codes
 mch help states                     What each node STATE means (configured, partial, unreachable, …)
 mch fleet status                    Fleet overview: state, label, group, firmware (VER, ! = outdated), neighbours, last seen
-mch fleet status <label|prefix>     Filtered table; a single match hints `mch node show`
+mch fleet status <label|prefix>     Filtered table; a single match hints `mch node status`
                               (add --json to fleet status/issues/plan/logs, node show, config show for scripting)
-mch node show <label|prefix>        Full detail for one node: facts, all desired settings (config +
+mch node status <label|prefix>        Full detail for one node: facts, all desired settings (config +
                               group, including pending ones not yet synced), last seen/last conn
                               and approximate next sync with timestamp + relative time, activity logs
-mch daemon validate                  Validate /etc/meshherder/config.yaml
-mch daemon validate --config <path>  Validate an explicit config file
+mch service configtest                  Validate /etc/meshherder/config.yaml
+mch service configtest --config <path>  Validate an explicit config file
 mch fleet plan                      Desired-vs-known changes; no mesh traffic and no writes
 mch fleet plan <label|prefix>       Filter planned writes/audit drift/unknown values
 mch fleet issues [label|prefix]     Just the issue sections; exits 2 when any issue is present
-mch node show <label|prefix>        Full detail for one node (facts, settings, schedule, activity)
-mch node group <label|prefix> [NAME]   Set (or, NAME omitted, clear) a node's DB group membership
+mch node status <label|prefix>        Full detail for one node (facts, settings, schedule, activity)
+mch node move <label|prefix> GROUP    Move a node into GROUP (must exist); `-` as GROUP ungroups it
 mch node label <label|prefix> [TEXT]   Set (or, TEXT omitted, clear) a node's host-only label
 mch node path <label|prefix>       Show cached gateway management route metadata; no mesh probe
 mch node path <node> --discover    Learn a fresh path-discovery candidate without applying it
@@ -631,9 +631,9 @@ mch fleet suggest <label|prefix>       Full suggestions + the `mch config set` c
 mch fleet logs                      Recent per-node activity across all nodes
 mch fleet logs <prefix>             Activity for one node
 mch gateway contacts                  Repeater nodes visible to the gateway not yet managed in the DB
-mch config import [FILE]             Seed DB inventory + desired state from config.yaml or a FILE (dry run)
-mch config import [FILE] --yes       Write it (idempotent; full-pubkey nodes created even if unseen)
-mch config export > backup.yaml      Complete fleet backup as YAML (inventory + desired; inverse of import)
+mch fleet import [FILE]             Seed DB inventory + desired state from config.yaml or a FILE (dry run)
+mch fleet import [FILE] --yes       Write it (idempotent; full-pubkey nodes created even if unseen)
+mch fleet export > backup.yaml      Complete fleet backup as YAML (inventory + desired; inverse of import)
 mch node retire <label|prefix>     Stop managing a node: skip sync + unfavourite, keep history
 mch node unretire <label|prefix>   Return a retired node to management (re-favourite + reconverge)
 mch node prune                     List all retired nodes (hard-delete candidates)
@@ -646,11 +646,11 @@ mch fleet sync <prefix>             Sync one node; stream progress while waiting
 mch node exec <label|prefix> <command>  Run one raw remote command through mchd over the mesh
 mch gateway admin                     Stop mchd, open local serial meshcore-cli, then restart mchd
 mch node new                       Add a fresh or replacement MeshCore node (interactive wizard)
-mch daemon start                     Start mchd via systemd (alias: sudo systemctl start mchd)
-mch daemon stop                      Stop mchd via systemd
-mch daemon restart                   Restart mchd via systemd
-mch daemon status                    Show service status (mirror of systemctl status mchd)
-mch daemon logs [-n N] [-f]          Show the daemon process log from journald (not per-node activity)
+mch service start                     Start mchd via systemd (alias: sudo systemctl start mchd)
+mch service stop                      Stop mchd via systemd
+mch service restart                   Restart mchd via systemd
+mch service status                    Show service status (mirror of systemctl status mchd)
+mch service logs [-n N] [-f]          Show the daemon process log from journald (not per-node activity)
 ```
 
 New to the vocabulary? `mch help selectors` explains how to name a node, and `mch help concepts`
@@ -669,8 +669,8 @@ cycle does, and the exit codes below.
 cron job can alert on it: `mch fleet issues >/dev/null || notify-me`. `mch fleet status` is a
 viewing command and always exits `0` — use `mch fleet issues` for health checks.
 
-`mch daemon validate` checks whatever it can read. On a production install, an ordinary operator account
-can validate the group-readable config file but may need `sudo mch daemon validate` to validate the
+`mch service configtest` checks whatever it can read. On a production install, an ordinary operator account
+can validate the group-readable config file but may need `sudo mch service configtest` to validate the
 mode-600 secrets file as well.
 
 `mch gateway admin` may need privilege to stop/start `mchd`. When run through `sudo`, it drops the

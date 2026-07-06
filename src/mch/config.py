@@ -225,7 +225,7 @@ class NodeConfig:
     via_radio: RadioConfig | None = None
     # Prepended to the desired name (no auto-space); overrides group/global when set.
     name_prefix: str | None = None
-    # Inventory lifecycle, not desired config: carried only so `mch config export`/`mch config
+    # Inventory lifecycle, not desired config: carried only so `mch fleet export`/`mch fleet
     # import` can round-trip a retired node (excluded from sync, unfavourited). True == retired.
     retired: bool = False
 
@@ -636,7 +636,7 @@ def config_to_desired_rows(
     cfg: Config,
     resolve_pubkey: Callable[[str], str | None],
 ) -> tuple[list[DesiredSetting], list[str]]:
-    """Flatten a loaded Config's desired state into desired_settings rows (for `mch config import`).
+    """Flatten a loaded Config's desired state into desired_settings rows (for `mch fleet import`).
 
     Emits one row per setting and per set directive at each scope: global (scope_id ``""``),
     each group (scope_id = group name), and each node (scope_id = full pubkey, resolved from
@@ -679,7 +679,7 @@ def config_to_desired_operations(
     cfg: Config,
     resolve_pubkey: Callable[[str], str | None],
 ) -> tuple[list[DesiredOperation], list[str]]:
-    """Flatten a loaded Config's operations into desired_operations rows (for `mch config import`).
+    """Flatten a loaded Config's operations into desired_operations rows (for `mch fleet import`).
 
     The operations analogue of config_to_desired_rows: one row per operation at each scope -
     global (scope_id ``""``), each group (scope_id = group name), and each node (scope_id =
@@ -743,7 +743,7 @@ def desired_rows_to_config_dict(
     listed node's ``label``/``group`` is emitted, every listed node appears even with no desired
     settings, and any group a node belongs to is emitted under ``groups:`` so the result
     re-imports cleanly (load() rejects a node referencing an undefined group). This is what lets
-    ``mch config export`` -> ``mch config import`` rebuild the fleet after a server/gateway loss.
+    ``mch fleet export`` -> ``mch fleet import`` rebuild the fleet after a server/gateway loss.
     """
     by_scope: dict[tuple[Scope, str], list[DesiredSetting]] = {}
     for row in rows:
@@ -885,7 +885,7 @@ def load(
     # Sunset: desired state now lives in the DB, not config.yaml. The daemon loads strict and
     # refuses to start if any desired-state block is still present, so an edited-but-not-imported
     # config can never silently diverge from the DB. Empty blocks (e.g. a leftover `nodes: []`)
-    # are tolerated so stripping is forgiving. The lenient default keeps the `mch config import`
+    # are tolerated so stripping is forgiving. The lenient default keeps the `mch fleet import`
     # on-ramp and the config-parser unit tests working.
     if strict:
         offenders = [key for key in ("nodes", "groups", "global", "facts") if raw.get(key)]
@@ -893,7 +893,7 @@ def load(
             raise ValueError(
                 f"config.yaml still carries desired state ({', '.join(offenders)}); "
                 "desired state now lives in the DB. Migrate it with "
-                "`mch config import <this-file>`, verify with `mch config export`, then delete "
+                "`mch fleet import <this-file>`, verify with `mch fleet export`, then delete "
                 "these blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md "
                 "slice 8. Facts are now a policy (`mch config set <node> <key> --policy fact`); "
                 "import "

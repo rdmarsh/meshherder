@@ -1,5 +1,5 @@
 [Unit]
-Description=Mesh Herder desired-state backup (mch config export)
+Description=Mesh Herder desired-state backup (mch fleet export)
 Documentation=https://github.com/rdmarsh/meshherder#readme
 # The export talks to mchd over its Unix socket, so the daemon must be up.
 After=mchd.service

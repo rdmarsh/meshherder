@@ -66,7 +66,7 @@ def test_ago_with_timestamp_is_not_padded_in_prose_output():
     seen = (datetime.now(UTC) - timedelta(minutes=7)).isoformat()
     detail = _detail()
     detail["data"]["last_seen"] = seen
-    result = _run(["node", "show", "site-a"], detail)
+    result = _run(["node", "status", "site-a"], detail)
 
     assert "(7m ago)" in result.output
     assert "(  7m ago)" not in result.output
@@ -415,7 +415,7 @@ def test_daemon_connection_failure_checks_default_config(tmp_path):
     assert f"checking config: {config}" in result.output
     assert "config check failed:" in result.output
     assert "unknown config key 'typo'" in result.output
-    assert "run: mch config validate" in result.output
+    assert "run: mch service configtest" in result.output
 
 
 def test_daemon_connection_failure_reports_config_ok(tmp_path):
@@ -436,7 +436,7 @@ def test_daemon_connection_failure_reports_config_ok(tmp_path):
     assert "config ok:" in result.output
 
 
-def test_daemon_down_hint_points_at_daemon_commands(tmp_path):
+def test_daemon_down_hint_points_at_service_commands(tmp_path):
     """The daemon-down hint suggests the real diagnostics, not the removed `mchd --help` (S1.7)."""
     config = tmp_path / "config.yaml"
     config.write_text("nodes: []\n")
@@ -449,8 +449,8 @@ def test_daemon_down_hint_points_at_daemon_commands(tmp_path):
          patch("mch.cli.DEFAULT_CONFIG", config):
         result = runner.invoke(cli, ["--socket", "/fake.sock", "fleet", "status"])
 
-    assert "mch daemon status" in result.output
-    assert "mch daemon logs" in result.output
+    assert "mch service status" in result.output
+    assert "mch service logs" in result.output
     assert "mchd --help" not in result.output
 
 
@@ -743,7 +743,7 @@ nodes:
 
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc:
-        result = runner.invoke(cli, ["daemon", "validate", "--config", str(config)])
+        result = runner.invoke(cli, ["service", "configtest", "--config", str(config)])
 
     mock_rpc.assert_not_called()
     assert result.exit_code == 0
@@ -771,7 +771,7 @@ nodes:
 
         with patch("mch.cli._rpc") as mock_rpc, \
              patch("mch.cli.DEFAULT_CONFIG", default_config):
-            result = runner.invoke(cli, ["daemon", "validate"])
+            result = runner.invoke(cli, ["service", "configtest"])
 
     mock_rpc.assert_not_called()
     assert result.exit_code == 0
@@ -786,7 +786,7 @@ def test_validate_invalid_config_exits_nonzero(tmp_path):
 
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc:
-        result = runner.invoke(cli, ["daemon", "validate", "--config", str(config)])
+        result = runner.invoke(cli, ["service", "configtest", "--config", str(config)])
 
     mock_rpc.assert_not_called()
     assert result.exit_code != 0
@@ -798,7 +798,7 @@ def test_validate_tab_indentation_explains_fix(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text("nodes:\n\t- pubkey_prefix: aabbccdd\n")
 
-    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["service", "configtest", "--config", str(config)])
 
     assert result.exit_code != 0
     assert "tab character in YAML indentation" in result.output
@@ -816,7 +816,7 @@ groups:
       radio: 915.800,250,10,5
 """)
 
-    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["service", "configtest", "--config", str(config)])
 
     assert result.exit_code != 0
     assert "duplicate YAML key 'settings' at line 5" in result.output
@@ -835,7 +835,7 @@ nodes:
     group: test
 """)
 
-    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["service", "configtest", "--config", str(config)])
 
     assert result.exit_code != 0
     assert "node '3134bf10' references unknown group 'test'" in result.output
@@ -853,8 +853,8 @@ def test_validate_explicit_missing_secrets_exits_nonzero(tmp_path):
         result = runner.invoke(
             cli,
             [
-                            "daemon",
-                            "validate",
+                            "service",
+                            "configtest",
                             "--config",
                             str(config),
                             "--secrets",
@@ -883,7 +883,7 @@ def test_validate_permission_denied_suggests_sudo(tmp_path):
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc, \
          patch("mch.cli.load_config", side_effect=[denied, config_only]):
-        result = runner.invoke(cli, ["daemon", "validate", "--config", str(config)])
+        result = runner.invoke(cli, ["service", "configtest", "--config", str(config)])
 
     mock_rpc.assert_not_called()
     assert result.exit_code != 0
@@ -891,7 +891,7 @@ def test_validate_permission_denied_suggests_sudo(tmp_path):
     assert "secrets: not checked" in result.output
     assert "did you mean 'powersaving'?" in result.output
     assert "cannot read secrets file" in result.output
-    assert "sudo mch config validate" in result.output
+    assert "sudo mch service configtest" in result.output
 
 
 def test_validate_warns_when_prv_key_does_not_match_config_prefix(tmp_path):
@@ -908,7 +908,7 @@ nodes:
     runner = CliRunner()
     with patch("mch.cli._rpc") as mock_rpc:
         result = runner.invoke(
-            cli, ["daemon", "validate", "--config", str(config), "--secrets", str(secrets)]
+            cli, ["service", "configtest", "--config", str(config), "--secrets", str(secrets)]
         )
 
     mock_rpc.assert_not_called()
@@ -921,7 +921,7 @@ def test_validate_warns_for_unknown_fact_and_suggests_typo(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text("facts:\n  - powersavings\n")
 
-    result = CliRunner().invoke(cli, ["daemon", "validate", "--config", str(config)])
+    result = CliRunner().invoke(cli, ["service", "configtest", "--config", str(config)])
 
     assert result.exit_code == 0
     assert "warning: facts contains unrecognised key 'powersavings'" in result.output
@@ -952,12 +952,18 @@ def test_moved_commands_available_under_new_nouns():
     """Relocated commands live under their new noun; old paths are gone (alpha, no aliases)."""
     runner = CliRunner()
     for path in (["gateway", "admin", "--help"], ["gateway", "contacts", "--help"],
-                 ["fleet", "suggest", "--help"], ["daemon", "validate", "--help"]):
+                 ["fleet", "suggest", "--help"], ["service", "configtest", "--help"],
+                 ["node", "status", "--help"], ["node", "move", "--help"],
+                 ["fleet", "export", "--help"], ["fleet", "import", "--help"]):
         assert runner.invoke(cli, path).exit_code == 0
     assert "gateway" in runner.invoke(cli, ["--help"]).output
-    # Old paths no longer resolve.
+    # Old paths no longer resolve (renamed in R4: daemon→service, node show→status,
+    # node group→move, config export/import→fleet).
     for path in (["node", "admin"], ["node", "contacts"],
-                 ["config", "suggest"], ["config", "validate"]):
+                 ["config", "suggest"], ["config", "validate"],
+                 ["daemon", "status"], ["daemon", "validate"],
+                 ["node", "show"], ["node", "group"],
+                 ["config", "export"], ["config", "import"]):
         assert runner.invoke(cli, [*path, "--help"]).exit_code != 0
 
 
@@ -1100,7 +1106,7 @@ def test_fleet_logs_json_emits_list():
 def test_node_show_json_emits_report_verbatim():
     node = _report_node()
     node["logs"] = []
-    result = _run(["node", "show", "tower", "--json"], {"ok": True, "data": node})
+    result = _run(["node", "status", "tower", "--json"], {"ok": True, "data": node})
     assert result.exit_code == 0
     assert json.loads(result.output) == node
 
@@ -1271,7 +1277,7 @@ def test_status_renders_canonical_fleet_api_response():
 
 def test_node_show_blank_mesh_name_renders_dash():
     # S2.7: a never-contacted node has no mesh name; render '-' not emptiness.
-    result = _run(["node", "show", "9635"], _detail(name=""))
+    result = _run(["node", "status", "9635"], _detail(name=""))
     assert "mesh name:   -" in result.output
 
 
@@ -1289,7 +1295,7 @@ def test_node_show_renders_known_path_from_detail_response():
         "cached_path": "stored (out_path=e260; out_path_len=1; hash-mode=1)",
         "path_repair_needed": False,
     }
-    result = _run(["node", "show", "site-a"], detail)
+    result = _run(["node", "status", "site-a"], detail)
 
     assert result.exit_code == 0
     assert "known path:  stored (out_path=e260; out_path_len=1; hash-mode=1)" in result.output
@@ -1301,7 +1307,7 @@ def test_node_show_marks_known_path_repair_needed():
         "cached_path": "flood",
         "path_repair_needed": True,
     }
-    result = _run(["node", "show", "site-a"], detail)
+    result = _run(["node", "status", "site-a"], detail)
 
     assert result.exit_code == 0
     assert "known path:  flood (path repair needed)" in result.output
@@ -1323,7 +1329,7 @@ def test_node_show_renders_canonical_node_api_unknown_fact():
         "logs": [],
     }}
 
-    result = _run(["node", "show", "site-a"], detail)
+    result = _run(["node", "status", "site-a"], detail)
 
     assert result.exit_code == 0
     assert "ver" in result.output
@@ -1457,7 +1463,7 @@ def test_issues_drift_footer_explains_zero_tries():
 def test_node_show_renders_last_tried_line():
     detail = _detail()
     detail["data"]["last_attempt_at"] = "2026-07-05T00:00:00+00:00"
-    result = _run(["node", "show", "site-a"], detail)
+    result = _run(["node", "status", "site-a"], detail)
     assert "last tried:" in result.output
 
 
@@ -1468,7 +1474,7 @@ def test_node_show_renders_operations_section():
         {"command": "clock sync", "run_at": "2026-07-04T00:00:00+00:00",
          "status": "failed", "response": "ERR: clock cannot go backwards"},
     ]
-    result = _run(["node", "show", "site-a"], detail)
+    result = _run(["node", "status", "site-a"], detail)
     assert "operations:" in result.output
     assert "clock sync" in result.output
     assert "failed" in result.output
@@ -1533,7 +1539,7 @@ def test_node_show_full_detail_fields():
     # The detail view (facts, identity, auth) is `mch node show` — the `fleet status` magic switch
     # that used to show it on a single match was dropped after 0.21.0.
     detail = _detail(facts={"ver": "v1.14.1", "board": "T-Beam"})
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert result.exit_code == 0
     assert "Tower" in result.output
     assert "site-a" in result.output
@@ -1546,7 +1552,7 @@ def test_node_show_full_detail_fields():
 
 def test_node_show_renders_detail():
     detail = _detail(facts={"ver": "v1.14.1", "board": "T-Beam"})
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert result.exit_code == 0
     assert "pubkey:" in result.output
     assert "pubkey full:" in result.output
@@ -1559,7 +1565,7 @@ def test_node_show_flags_outdated_firmware():
         facts={"ver": "v1.10.0"},
         fact_times={"ver": "2026-06-01T23:12:00+00:00"},
     )
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert result.exit_code == 0
     assert "behind" in result.output and "latest" in result.output
 
@@ -1572,7 +1578,7 @@ def test_node_show_marks_current_firmware_up_to_date():
         facts={"ver": latest},
         fact_times={"ver": "2026-06-01T23:12:00+00:00"},
     )
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert result.exit_code == 0
     assert "up to date" in result.output
 
@@ -1583,13 +1589,13 @@ def test_node_show_unknown_firmware_has_no_currency_note():
         facts={"ver": "v9.9.9"},
         fact_times={"ver": "2026-06-01T23:12:00+00:00"},
     )
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert result.exit_code == 0
     assert "behind" not in result.output and "up to date" not in result.output
 
 
-def test_status_single_match_shows_table_and_hints_node_show():
-    """A single match now renders the (1-row) table and points at `mch node show`, not detail.
+def test_status_single_match_shows_table_and_hints_node_status():
+    """A single match now renders the (1-row) table and points at `mch node status`, not detail.
 
     The magic detail switch was dropped after 0.21.0 shipped its deprecation hint (S1.3). Only one
     RPC (the fleet report) is made — no second detail call.
@@ -1599,14 +1605,14 @@ def test_status_single_match_shows_table_and_hints_node_show():
     assert result.exit_code == 0
     assert "PUBKEY" in result.output  # the table header, not the detail view
     assert "pubkey full:" not in result.output  # detail-only field
-    assert "mch node show aabb" in result.output
+    assert "mch node status aabb" in result.output
 
 
 def test_node_show_shows_next_sync_estimate():
     detail = _detail()
     detail["data"]["next_sync_at"] = (datetime.now(UTC) + timedelta(hours=19)).isoformat()
 
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "next sync:" in result.output
@@ -1622,7 +1628,7 @@ def test_node_show_facts_show_observed_time_and_clock_drift():
         },
     )
 
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "KEY" in result.output
@@ -1638,7 +1644,7 @@ def test_node_show_clock_within_one_minute_is_not_called_drift():
         fact_times={"clock": "2026-05-25T12:08:30+00:00"},
     )
 
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "within ±1m" in result.output
@@ -1651,7 +1657,7 @@ def test_node_show_clock_ahead_is_reported_as_fast():
         fact_times={"clock": "2026-05-25T12:04:00+00:00"},
     )
 
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "fast by 4m" in result.output
@@ -1663,7 +1669,7 @@ def test_node_show_activity_newest_at_bottom():
         {"level": "INFO", "timestamp": "2026-05-19T12:00:00", "message": "second event"},
         {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "first event"},
     ])
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert result.exit_code == 0
     assert result.output.index("first event") < result.output.index("second event")
 
@@ -1675,7 +1681,7 @@ def test_node_show_shows_settings_drift_status():
         "update_attempts": 20,
         "last_checked": None, "last_set": None,
     }])
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert "STATUS" in result.output
     assert "drifted" in result.output
     assert "owner.info" in result.output
@@ -1693,7 +1699,7 @@ def test_node_show_shows_unobserved_settings_in_yellow():
     with patch("mch.cli._rpc", side_effect=[detail]):
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "--color", "node", "show", "aabb"],
+            ["--socket", "/fake.sock", "--color", "node", "status", "aabb"],
             color=True,
         )
 
@@ -1711,7 +1717,7 @@ def test_node_show_shows_tries_as_not_applicable_for_audit():
         "observed": "wrong", "policy": "audit", "drift": True,
         "update_attempts": 0,
     }])
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert re.search(
         r"audit\s+owner\.info\s+Managed by mch\s+wrong\s+-\s+drifted", result.output
     )
@@ -1724,7 +1730,7 @@ def test_node_show_shows_approximate_settings_status():
         "drift": False, "approximate": True,
         "last_checked": None, "last_set": None,
     }])
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
     assert "* = nominal (within expected tolerance)" not in result.output
     assert "radio" in result.output
     assert re.search(
@@ -1744,7 +1750,7 @@ def test_node_show_shows_ok_settings_in_green():
     with patch("mch.cli._rpc", side_effect=[detail]):
         result = runner.invoke(
             cli,
-            ["--socket", "/fake.sock", "--color", "node", "show", "aabb"],
+            ["--socket", "/fake.sock", "--color", "node", "status", "aabb"],
             color=True,
         )
 
@@ -2200,7 +2206,7 @@ def test_node_show_activity_includes_relative_age():
         {"level": "INFO", "timestamp": "2026-05-19T10:00:00", "message": "event"},
     ])
 
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
 
     assert "recent activity:" in result.output
     assert "ago)" in result.output
@@ -2215,7 +2221,7 @@ def test_node_show_activity_uses_logs_shape_without_node_columns():
     ])
 
     with patch("mch.cli._ago", side_effect=["6h ago", "26m ago", "26m ago", "6h ago"]):
-        result = _run(["node", "show", "aabb"], detail)
+        result = _run(["node", "status", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "(26m ago) [INFO   ] first event" in result.output
@@ -2223,24 +2229,31 @@ def test_node_show_activity_uses_logs_shape_without_node_columns():
     assert "[aabbccddaabb]" not in result.output
 
 
-# ------ node group / label ------
+# ------ node move / label ------
 
-def test_node_group_set():
+def test_node_move_set():
     resp = {"ok": True, "data": {
         "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "group": "solar",
     }}
-    result = _run(["node", "group", "site-a", "solar"], resp)
+    result = _run(["node", "move", "site-a", "solar"], resp)
     assert result.exit_code == 0
-    assert "group set to 'solar'" in result.output
+    assert "moved to group 'solar'" in result.output
 
 
-def test_node_group_clear():
+def test_node_move_dash_ungroups():
     resp = {"ok": True, "data": {
         "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "group": None,
     }}
-    result = _run(["node", "group", "site-a"], resp)
+    result = _run(["node", "move", "site-a", "-"], resp)
     assert result.exit_code == 0
-    assert "group cleared" in result.output
+    # `-` sends an empty value (ungroup); the daemon clears membership.
+    assert "ungrouped" in result.output
+
+
+def test_node_move_requires_group_argument():
+    # Omitting GROUP is now a usage error — no silent-ungroup footgun.
+    result = _run(["node", "move", "site-a"], {"ok": True, "data": {}})
+    assert result.exit_code != 0
 
 
 def test_node_label_set():
@@ -2401,7 +2414,7 @@ def test_lifecycle_stop_paths_warn_while_current_sync_is_finishing(command: str,
     result_obj = SimpleNamespace(returncode=0, stderr="")
 
     with patch("mch.cli.subprocess.run", return_value=result_obj) as systemctl:
-        result = runner.invoke(cli, ["daemon", command])
+        result = runner.invoke(cli, ["service", command])
 
     assert result.exit_code == 0
     assert "stopping current sync, this may take some time" in result.output
@@ -2420,7 +2433,7 @@ def test_daemon_status_shows_systemctl_status_output():
     )
 
     with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
-        result = runner.invoke(cli, ["daemon", "status"])
+        result = runner.invoke(cli, ["service", "status"])
 
     assert result.exit_code == 0
     assert "Active: active (running)" in result.output
@@ -2439,7 +2452,7 @@ def test_daemon_status_passes_through_nonzero_code_without_failure_message():
     )
 
     with patch("mch.cli.subprocess.run", return_value=result_obj):
-        result = runner.invoke(cli, ["daemon", "status"])
+        result = runner.invoke(cli, ["service", "status"])
 
     assert result.exit_code == 3
     assert "Active: inactive (dead)" in result.output
@@ -2453,7 +2466,7 @@ def test_daemon_logs_shows_journal_lines():
     )
 
     with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
-        result = runner.invoke(cli, ["daemon", "logs"])
+        result = runner.invoke(cli, ["service", "logs"])
 
     assert result.exit_code == 0
     assert "mchd[123]: started" in result.output
@@ -2469,7 +2482,7 @@ def test_daemon_logs_respects_line_count():
     result_obj = SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
-        result = runner.invoke(cli, ["daemon", "logs", "-n", "200"])
+        result = runner.invoke(cli, ["service", "logs", "-n", "200"])
 
     assert result.exit_code == 0
     run.assert_called_once_with(
@@ -2484,7 +2497,7 @@ def test_daemon_logs_follow_streams_without_capture():
     result_obj = SimpleNamespace(returncode=0)
 
     with patch("mch.cli.subprocess.run", return_value=result_obj) as run:
-        result = runner.invoke(cli, ["daemon", "logs", "-f"])
+        result = runner.invoke(cli, ["service", "logs", "-f"])
 
     assert result.exit_code == 0
     # Follow mode must inherit stdio (no capture_output) so lines stream live
@@ -2927,7 +2940,7 @@ def test_commission_new_happy_path():
         result = runner.invoke(cli, ["--socket", "/fake.sock", "node", "new"], input=inp)
     assert result.exit_code == 0, result.output
     assert "a695e2be" in result.output  # pubkey_prefix shown
-    assert "mch config import" in result.output
+    assert "mch fleet import" in result.output
     assert "Reload mchd" in result.output
     assert "mch fleet status a695e2be" in result.output
     assert "Optional: mch fleet sync a695e2be" in result.output
@@ -3936,7 +3949,7 @@ def test_node_show_settings_table_has_no_source_column():
             "approximate": False, "update_attempts": 0,
         },
     ])
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
 
     assert result.exit_code == 0
     assert "SOURCE" not in result.output
@@ -3953,7 +3966,7 @@ def test_node_show_settings_show_desired_before_observed():
         "policy": "enforce", "source": "db", "drift": True,
         "approximate": False, "update_attempts": 1,
     }])
-    result = _run(["node", "show", "aabb"], detail)
+    result = _run(["node", "status", "aabb"], detail)
 
     assert result.exit_code == 0
     # desired (14) appears before observed (20) on the row
@@ -3990,7 +4003,7 @@ def _import_resp(counts=None, total=0, warnings=None, written=0, dry_run=True,
 
 def test_import_json_emits_payload_verbatim():
     resp = _import_resp(total=3, written=0)
-    result = _run(["config", "import", "--json"], resp)
+    result = _run(["fleet", "import", "--json"], resp)
     assert result.exit_code == 0
     assert json.loads(result.output) == resp["data"]
 
@@ -3999,7 +4012,7 @@ def test_import_retired_flag_passes_mode():
     rpc = MagicMock(return_value=_import_resp(written=1, dry_run=False, retired_mode="keep"))
     with patch("mch.cli._rpc", rpc):
         result = CliRunner().invoke(
-            cli, ["--socket", "/fake.sock", "config", "import", "--retired", "keep", "--yes"]
+            cli, ["--socket", "/fake.sock", "fleet", "import", "--retired", "keep", "--yes"]
         )
 
     assert result.exit_code == 0
@@ -4009,7 +4022,7 @@ def test_import_retired_flag_passes_mode():
 def test_import_dry_run_warns_about_retired_nodes():
     rpc = MagicMock(return_value=_import_resp(total=2, retired_in_backup=2))
     with patch("mch.cli._rpc", rpc):
-        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "config", "import"])
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "fleet", "import"])
 
     assert result.exit_code == 0
     assert "--retired keep" in result.output
@@ -4018,7 +4031,7 @@ def test_import_dry_run_warns_about_retired_nodes():
 
 def test_import_rejects_invalid_retired_choice():
     result = CliRunner().invoke(
-        cli, ["--socket", "/fake.sock", "config", "import", "--retired", "bogus"]
+        cli, ["--socket", "/fake.sock", "fleet", "import", "--retired", "bogus"]
     )
     assert result.exit_code != 0
 
@@ -4028,7 +4041,7 @@ def test_import_dry_run_previews_counts():
         counts={"global": 1, "group": 0, "node": 2}, total=3,
     ))
     with patch("mch.cli._rpc", rpc):
-        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "config", "import"])
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "fleet", "import"])
 
     assert result.exit_code == 0
     assert rpc.call_args.args[1] == {"cmd": "import", "dry_run": True}
@@ -4041,7 +4054,7 @@ def test_import_yes_applies_and_reports_written():
         counts={"global": 1, "group": 0, "node": 2}, total=3, written=3, dry_run=False,
     ))
     with patch("mch.cli._rpc", rpc):
-        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "config", "import", "--yes"])
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "fleet", "import", "--yes"])
 
     assert result.exit_code == 0
     assert rpc.call_args.args[1] == {"cmd": "import", "dry_run": False}
@@ -4054,7 +4067,7 @@ def test_import_with_explicit_path_sends_absolute_path(tmp_path):
     rpc = MagicMock(return_value=_import_resp())
     with patch("mch.cli._rpc", rpc):
         result = CliRunner().invoke(
-            cli, ["--socket", "/fake.sock", "config", "import", str(legacy), "--yes"]
+            cli, ["--socket", "/fake.sock", "fleet", "import", str(legacy), "--yes"]
         )
 
     assert result.exit_code == 0
@@ -4068,7 +4081,7 @@ def test_import_with_missing_path_errors_before_rpc():
     rpc = MagicMock(return_value=_import_resp())
     with patch("mch.cli._rpc", rpc):
         result = CliRunner().invoke(
-            cli, ["--socket", "/fake.sock", "config", "import", "/no/such/file.yaml"]
+            cli, ["--socket", "/fake.sock", "fleet", "import", "/no/such/file.yaml"]
         )
 
     assert result.exit_code != 0
@@ -4080,7 +4093,7 @@ def test_import_surfaces_warnings():
         warnings=["node 'ghost' (deadbeef) is not known to the DB yet - skipped"],
     ))
     with patch("mch.cli._rpc", rpc):
-        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "config", "import"])
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "fleet", "import"])
 
     assert result.exit_code == 0
     assert "ghost" in result.output
@@ -4092,7 +4105,7 @@ def test_export_prints_yaml():
     yaml_text = "global:\n  settings:\n    owner.info: rdm\n"
     rpc = MagicMock(return_value={"ok": True, "data": {"yaml": yaml_text, "total": 1}})
     with patch("mch.cli._rpc", rpc):
-        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "config", "export"])
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "fleet", "export"])
 
     assert result.exit_code == 0
     assert rpc.call_args.args[1] == {"cmd": "export"}
@@ -4102,7 +4115,7 @@ def test_export_prints_yaml():
 def test_export_empty_reports_nothing_to_export():
     rpc = MagicMock(return_value={"ok": True, "data": {"yaml": "", "total": 0}})
     with patch("mch.cli._rpc", rpc):
-        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "config", "export"])
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "fleet", "export"])
 
     assert result.exit_code == 0
     assert "nothing to export" in result.output.lower()

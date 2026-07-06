@@ -16,7 +16,7 @@ commissioning.
 .PP
 Commands are organised under noun groups so the top-level menu stays
 shallow:
-.B daemon
+.B service
 (process lifecycle and config validation),
 .B fleet
 (whole-fleet status, issues, sync, plan, logs, suggest),
@@ -70,33 +70,33 @@ Explain what each node STATE means (configured, partial, unreachable, offline,
 and the rest) and how TRIES relates to unreachable nodes.
 .SS daemon \(em process lifecycle
 .TP
-.B daemon start
+.B service start
 Start
 .B mchd
 through systemd.
 .TP
-.B daemon stop
+.B service stop
 Stop
 .B mchd
 through systemd.
 .TP
-.B daemon restart
+.B service restart
 Restart
 .B mchd
 through systemd.
 .TP
-.B daemon status
+.B service status
 Show the service status (a mirror of
 .BR "systemctl status mchd" ).
 .TP
-.B daemon logs \fR[\-n \fILINES\fR] [\-f]
+.B service logs \fR[\-n \fILINES\fR] [\-f]
 Show the daemon process journal (startup, crashes, tracebacks) from
 .BR journalctl ,
 distinct from
 .B "fleet logs"
 (per-node activity).
 .TP
-.B daemon validate \fR[\-\-config \fIPATH\fR]
+.B service configtest \fR[\-\-config \fIPATH\fR]
 Validate the daemon's
 .I config.yaml
 (and secrets if readable) without contacting
@@ -154,7 +154,7 @@ Show recent activity for one node.
 .B node new
 Interactively add a fresh or replacement MeshCore node.
 .TP
-.B node show \fILABEL_OR_PREFIX\fR
+.B node status \fILABEL_OR_PREFIX\fR
 Show full detail for one node: facts, all desired settings, schedule, and recent
 activity. This is the detail view (formerly reached by a single
 .B "fleet status"
@@ -162,10 +162,16 @@ match); add
 .B \-\-json
 to emit the node report for scripting.
 .TP
-.B node group \fILABEL_OR_PREFIX\fR \fR[\fINAME\fR]
-Set the node's DB group membership, or clear it when
-.I NAME
-is omitted. Inventory metadata only; run
+.B node move \fILABEL_OR_PREFIX\fR \fIGROUP\fR
+Move the node into
+.I GROUP
+(which must already exist; create it with
+.BR "mch group create" ).
+Pass
+.B \-
+as
+.I GROUP
+to ungroup the node. Inventory metadata only; run
 .B "fleet sync"
 to reconverge under the new group's settings.
 .TP
@@ -351,7 +357,7 @@ to list the rows stored at a group's or the global scope instead (no
 .I NODE
 in that form).
 .TP
-.B config import [\fIFILE\fR] [\-\-yes]
+.B fleet import [\fIFILE\fR] [\-\-yes]
 Seed the database's desired state and node label/group inventory from
 .IR config.yaml ,
 or from an explicit
@@ -375,7 +381,7 @@ to restore them as retired or
 .B \-\-retired skip
 to omit them; a write is refused until one is chosen.
 .TP
-.B config export
+.B fleet export
 Print the whole fleet as config.yaml-shaped YAML on standard output \(em a complete
 backup and the inverse of
 .BR "config import" .
@@ -383,9 +389,9 @@ Includes every node's full public key, label, group, desired settings, and
 operations (even a node with no desired settings); retired nodes are tagged
 .BR "retired: true" .
 Redirect to save, for example
-.BR "mch config export > backup.yaml" ,
+.BR "mch fleet export > backup.yaml" ,
 and rebuild after a server or gateway loss with
-.BR "mch config import backup.yaml \-\-yes" .
+.BR "mch fleet import backup.yaml \-\-yes" .
 .SH FILES
 .TP
 .I /etc/meshherder/config.yaml
@@ -417,10 +423,10 @@ so a cron job can alert on fleet health
 is a viewing command and always exits 0.
 .SH EXAMPLES
 .TP
-.B mch daemon validate
+.B mch service configtest
 Validate the active config file, and validate secrets too if they are readable.
 .TP
-.B sudo mch daemon validate
+.B sudo mch service configtest
 Validate both production config and mode-600 secrets.
 .TP
 .B mch fleet status qh
