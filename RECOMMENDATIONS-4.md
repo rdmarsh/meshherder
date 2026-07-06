@@ -54,6 +54,10 @@ The `config` noun is **removed entirely**.
 1. **Widest scope noun: `fleet`** (not `global`). `global` is an adjective and the grid only
    teaches "node beats group beats fleet" if the same three nouns appear in the grammar and the
    resolution rule. `fleet` already carries the flagship commands.
+   **Deliberate non-change:** the DB keeps `scope_type = 'global'` in
+   `desired_settings`/`desired_operations`. This rename is CLI surface only — do NOT migrate the
+   stored enum value to `'fleet'`; that would be a data migration for zero operator benefit.
+   (The word "global" in the schema is in fact where the synonym below comes from.)
 2. **Hidden synonym: `mch global …` ≡ `mch fleet …`** (operator preference; a deliberate,
    recorded exception to the no-hidden-commands rule). Implement as a root-group `get_command`
    mapping (`"global"` resolves to the fleet group object), so every fleet verb aliases for
