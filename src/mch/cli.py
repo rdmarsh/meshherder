@@ -1117,6 +1117,14 @@ def sync(ctx: click.Context, node: str | None) -> None:
     click.echo(data)
 
 
+@node_group.command("sync")
+@click.argument("node")
+@click.pass_context
+def node_sync(ctx: click.Context, node: str) -> None:
+    """Sync one NODE now. Completes the scope grid (same as `mch fleet sync NODE`)."""
+    ctx.invoke(sync, node=node)
+
+
 # Top-level shortcuts for the two highest-frequency commands (the daily loop). The noun tree
 # (service/fleet/group/node/gateway) stays the model; only these two get a bare alias because
 # operators run them dozens of times a day. They forward verbatim to the `fleet` versions.

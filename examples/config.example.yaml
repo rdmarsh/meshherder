@@ -11,7 +11,7 @@
 # global defaults, and the facts to collect — lives in the SQLite database, not here.
 # The daemon refuses to start if this file still carries `nodes:`, `groups:`, `global:`,
 # or `facts:` blocks. See examples/desired.example.yaml for that material and import it
-# with `mch config import`.
+# with `mch fleet import`.
 #
 # Project: https://github.com/rdmarsh/meshherder
 # Docs:    https://github.com/rdmarsh/meshherder#readme
@@ -99,4 +99,4 @@ messenger:
 
 # There is no HTTP API. For scripting/integration, the read commands emit the same
 # report model as JSON: `mch fleet status --json` (also fleet issues/plan/logs,
-# node show, config show). It goes over the Unix socket — no open port, no auth to design.
+# node status). It goes over the Unix socket — no open port, no auth to design.

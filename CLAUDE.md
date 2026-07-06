@@ -44,14 +44,17 @@ mypy src/
 # Run daemon (dev)
 mchd --config config.yaml
 
-# Control CLI — commands are grouped under nouns: daemon, fleet, node, config
+# Control CLI — desired-state scope is the noun: fleet / group / node share the
+# same verbs (status, set/unset, sync, issues); plus service, gateway, help.
 mch fleet status          # fleet overview
-mch daemon start
-mch daemon stop
-mch daemon status         # mirror of systemctl status mchd
-mch daemon logs -n 50     # daemon process journal (journalctl -u mchd), not per-node activity
+mch service start
+mch service stop
+mch service status         # mirror of systemctl status mchd
+mch service logs -n 50     # daemon process journal (journalctl -u mchd), not per-node activity
 mch fleet sync            # trigger immediate sync cycle
-mch fleet status <name>   # show detail for one node
+mch node status <name>    # detail for one node (add a KEY to trace its resolution)
+mch fleet set KEY VAL     # fleet-wide default; group set NAME KEY VAL; node set NODE KEY VAL
+mch group status          # list groups; group status NAME for one group's rows + members
 ```
 
 ## Testing
@@ -84,11 +87,13 @@ Managed repeater nodes
 
 **`mch` CLI**
 - Thin client: sends commands to `mchd` over the Unix socket and prints the response.
-- Commands are grouped under four nouns — `daemon` (lifecycle), `fleet` (status/sync/plan/logs),
-  `node` (inventory + per-node ops), `config` (desired state + backup). The top-level menu lists
-  only the groups; e.g. `mch --help` then `mch node --help`.
+- Desired-state *scope* is the noun: `fleet` / `group` / `node` share the same verbs (status,
+  set/unset, sync, issues); resolution is node > group > fleet. Plus `service` (daemon lifecycle),
+  `gateway`, and `help`. `fleet export`/`import` are the backup verbs. The top-level menu lists
+  only the groups; e.g. `mch --help` then `mch node --help`. (`mch global …` is a hidden synonym
+  for `mch fleet …`.)
 - `mch fleet status` — fleet overview: 8-column table (STATE, LABEL, GROUP, NAME, NBRS, VER, LAST SEEN, PUBKEY) + issue count; footer when issues > 0.
-- `mch daemon start` / `mch daemon stop` — lifecycle (for use outside systemd; systemd uses `systemctl`).
+- `mch service start` / `mch service stop` — lifecycle (for use outside systemd; systemd uses `systemctl`).
 - `mch fleet status <name-or-pubkey-prefix>` — per-node detail with command history.
 
 **Work queue**
@@ -182,7 +187,7 @@ Full reference: https://docs.meshcore.io/cli_commands
 
 ## systemd
 
-Install the service unit to `/etc/systemd/system/mchd.service`. The `mch daemon start/stop` commands are aliases for `systemctl start/stop mchd` when running under systemd; the daemon detects this from the environment.
+Install the service unit to `/etc/systemd/system/mchd.service`. The `mch service start/stop` commands are aliases for `systemctl start/stop mchd` when running under systemd; the daemon detects this from the environment.
 
 ## Future scope (not in current design)
 

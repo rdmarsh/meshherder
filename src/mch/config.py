@@ -375,7 +375,7 @@ DIRECTIVE_KEYS = frozenset(_DIRECTIVE_PARSERS)
 
 
 def settable_keys() -> frozenset[str]:
-    """Keys an operator may write via ``mch config set``: node CLI settings plus directives.
+    """Keys an operator may write via ``mch <scope> set``: node CLI settings plus directives.
 
     Directives (name_prefix, default_policy, via_radio) are not node CLI ``set``
     commands but are operator-authored desired state stored as desired_settings rows.
@@ -605,7 +605,7 @@ def _scope_rows(
 ) -> list[DesiredSetting]:
     """All desired_settings rows for one scope object (settings + directives).
 
-    A default poll_hours (24) stores as None (inherit) to match `mch config set` and keep rows
+    A default poll_hours (24) stores as None (inherit) to match `mch node set` and keep rows
     tidy; a non-default value is preserved. Policy-only group/global ``setting_overrides``
     become desired=None rows. The three directives serialise to their reserved keys.
     """
@@ -895,7 +895,7 @@ def load(
                 "desired state now lives in the DB. Migrate it with "
                 "`mch fleet import <this-file>`, verify with `mch fleet export`, then delete "
                 "these blocks from config.yaml (keep gateway/scheduler/etc.). See DESIGN.md "
-                "slice 8. Facts are now a policy (`mch config set <node> <key> --policy fact`); "
+                "slice 8. Facts are now a policy (`mch node set <node> <key> --policy fact`); "
                 "import "
                 "folds a legacy `facts:` list into global fact rows."
             )

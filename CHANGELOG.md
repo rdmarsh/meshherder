@@ -5,6 +5,28 @@ and backlog history. Dates use the project repository's commit dates.
 
 ## Unreleased
 
+- **Scope-as-noun CLI redesign (RECOMMENDATIONS-4) — breaking; ships as 0.23.0.** Desired-state
+  *scope* is now the noun: `fleet` / `group` / `node` share the same verbs (`status`, `set`/`unset`,
+  `sync`, `issues`), so the resolution hierarchy node > group > fleet reads straight off the grammar.
+  This is a breaking change with **no aliases** — old command paths are gone. Migration:
+  - `config set NODE …` → `node set NODE …`; `config set --group NAME …` → `group set NAME …`;
+    `config set --global …` → `fleet set …` (and the same for `unset`). `fleet set` echoes
+    `fleet default KEY = VAL (groups and nodes may override)`.
+  - `config show NODE [KEY]` → `node status NODE [KEY]`; `config show --group NAME` → `group status
+    NAME`; `config show --global` → the fleet-defaults section of `fleet status`. The `config` noun
+    is removed entirely.
+  - `daemon …` → `service …` (start/stop/restart/status/logs); `daemon validate` → `service
+    configtest`. The daemon also auto-validates config on start (refuses to boot on error) and on
+    SIGHUP reload (keeps the last valid config).
+  - `config export`/`config import` → `fleet export`/`fleet import`.
+  - `node show` → `node status`; `node group NODE [GROUP]` → `node move NODE GROUP` (GROUP required;
+    `-` ungroups — the silent-ungroup footgun is gone).
+  - **Groups are first-class:** a new `groups` registry (schema v3, seeded on upgrade). Create a
+    group before targeting it (`group create`); `group delete` (hard cascade, preview + `--yes`),
+    `group rename`, `group status`, `group sync`, `group issues`. New `node sync NODE` and
+    `node issues NODE` complete the grid.
+  - `mch global …` is a hidden synonym for `mch fleet …` (operator preference; not in `--help`).
+
 - **Docs cleanup (RECOMMENDATIONS-3 slice 5).** The `mchd(8)` man page no longer documents the
   retired HTTP API (the `api:` config block and the READ-ONLY API section are gone); a new docs-drift
   guard asserts the daemon man page mentions neither `api:` nor the HTTP endpoints, so retired daemon

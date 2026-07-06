@@ -34,6 +34,25 @@ existing nouns yet. 1017 tests pass, ruff + mypy clean.
 is already merged to `main`, proceed with no rebase; land each slice `--no-ff` to `main` locally
 (gh unavailable in sandbox; operator pushes/PR-reviews after).
 
+**RECOMMENDATIONS-4 — S7 done (2026-07-06, branch `feat-r4-slice7-docs-sweep`).** Shipped-artifact
+and docs sweep. 1027 tests pass, ruff + mypy clean.
+- README gains the scope × verb grid (the model, in a table). Command tokens + prose swept to the
+  new vocabulary across README, `docs/man/mch.1`, `www/index.html`, INSTALL, MANUAL_TESTS, ROADMAP,
+  `examples/*.yaml`, CLAUDE.md, and internal src docstrings/comments (incl. the operator-facing
+  strict-load error string). `mch help concepts`/`selectors`/`states` re-read — clean (the Scope
+  paragraph was already rewritten in S4).
+- DESIGN.md: new "CLI vocabulary: the scope-as-noun grid" section (added in S6) + new "Vendored
+  catalogues" section (networks.yaml ← CC0 data.json; repeater_commands.json ← MIT
+  repeaterCommands.js; refresh via `tools/refresh_meshcore_*.py`, vendored, never fetched at
+  runtime). Current-tense architecture refs updated; dated `[done …]` migration/facts records and
+  JOURNAL/CHANGELOG kept at point-in-time syntax.
+- Added **`node sync NODE`** (thin forward to the per-node sync) so the grid's uniform-verb promise
+  is literally true — S5.4 had left the node-sync cell to `fleet sync NODE`.
+- CHANGELOG: full RECOMMENDATIONS-4 migration entry under Unreleased (ships as 0.23.0 when the
+  operator says). systemd `mch-backup.sh`/unit were already updated in S2.
+- **Remaining: S8** — the `cli.py` (~3.7k-line, now larger) → `src/mch/cli/` package split, its own
+  PR, pure move.
+
 **RECOMMENDATIONS-4 — S6 done (2026-07-06, branch `feat-r4-slice6-global-synonym`).** Hidden
 `global` synonym: `cli._RootGroup.get_command` maps `"global"` → the `fleet` group, so `mch global
 …` ≡ `mch fleet …` for every fleet verb while `global` stays out of `list_commands`/`--help`/README/

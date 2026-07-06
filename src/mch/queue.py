@@ -1486,7 +1486,7 @@ class WorkQueue:
 
         # Resolve desired state entirely from the DB (DESIGN.md "Desired state in the DB"
         # / sunset): the node, its group, and global configs are rebuilt from DB rows, so
-        # a value set with `mch config set` (any scope) reconciles without any config.yaml entry.
+        # a value set with `mch node/group/fleet set` reconciles without any config.yaml entry.
         # Warnings flag malformed/duplicate DB rows; they are rare once config.yaml no
         # longer carries desired state.
         node_cfg, group_cfg, global_cfg, warnings = await resolve_desired_configs(

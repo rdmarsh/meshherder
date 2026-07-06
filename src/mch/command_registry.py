@@ -382,7 +382,7 @@ def fire_and_forget_prefixes() -> frozenset[str]:
 
 
 def writable_setting_keys() -> frozenset[str]:
-    """Keys an operator may set as desired state (e.g. via ``mch config set``).
+    """Keys an operator may set as desired state (e.g. via ``mch node set``).
 
     A writable setting maps to a node ``set <key> <value>`` CLI command. This
     excludes read-only facts and mch-internal directives (via_radio, name_prefix,

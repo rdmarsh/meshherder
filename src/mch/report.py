@@ -38,7 +38,7 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
         # Desired state is resolved entirely from the DB (DESIGN.md "Desired state in the
         # DB" / sunset): node, group, and global configs are all rebuilt from DB rows, so
         # `mch fleet status`/`mch fleet plan` show DB-authored intent immediately after
-        # `mch config set` and a node never listed in config.yaml still resolves fully.
+        # `mch node set` and a node never listed in config.yaml still resolves fully.
         node_cfg, group_cfg, global_cfg, _ = await resolve_desired_configs(db, node)
         fact_records = await db.get_fact_records(node.pubkey)
         facts = {fact.key: fact.value for fact in fact_records}

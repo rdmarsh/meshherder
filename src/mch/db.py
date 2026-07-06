@@ -546,7 +546,7 @@ class Database:
     async def delete_desired_setting(
         self, scope_type: Scope, scope_id: str, key: str
     ) -> None:
-        """Remove one desired setting (e.g. ``mch config unset``); leaves observed state alone."""
+        """Remove one desired setting (e.g. ``mch node unset``); leaves observed state alone."""
         db = self._db_required()
         await db.execute(
             "DELETE FROM desired_settings WHERE scope_type = ? AND scope_id = ? AND key = ?",
