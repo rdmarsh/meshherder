@@ -12,85 +12,30 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ## Next
 
-### CLI redesign: scope-as-noun (proposal — review next session)
+### CLI redesign: scope-as-noun (spec written — execute RECOMMENDATIONS-4.md)
 
-**Status:** design agreed in discussion 2026-07-06 (rdm + AI). Not yet started. A follow-up session
-will review this, poke holes, and produce a concrete migration plan. Breaking change, but alpha
-(no back-compat) so old command paths are deleted outright.
+**Status:** design reviewed and every open question resolved 2026-07-06 (rdm + AI). The full
+executable spec — locked decisions, old→new mapping, and eight slices — is
+**`RECOMMENDATIONS-4.md`**; do not track progress in two places. Breaking change (next release
+0.23.0); alpha rule applies, old paths deleted in the same change.
 
-**Problem.** `mch config set/unset/show` is the odd one out. Post-sunset, `config.yaml` holds only
-daemon settings — desired node/group/global state lives in the DB — so `config set NODE …` writes to
-the DB while its name says "config file." And group scope is a second-class `--group NAME` *flag*
-next to a node *positional*, which reads as asymmetric even though the underlying scope machinery is
-identical. Three parallel nouns are easier to learn than deciphering `--group`/`--global` flags.
-
-**Core idea.** Make the desired-state *scope* the noun. The resolution hierarchy Node > Group > Fleet
-maps directly onto three nouns, each with the same verbs. Verb-then-NAME order (Click-native; matches
-today's `node show NODE`). "fleet" is the widest scope (the help text already calls global scope
-"fleet-wide"), so **`global` is retired — `fleet` is both the collection and the widest scope**
-(`global` was more precise, `fleet` is more learnable and re-teaches nothing).
-
-**Scope × verb grid** (worth adding to README — it makes the model obvious):
-
-```
-              overview/detail   issues            desired state              sync          extras
-fleet         fleet status      fleet issues      fleet set KEY VAL          fleet sync    backup / restore
-group NAME    group status [N]  group issues N    group set N KEY VAL        group sync N  rename / delete
-node  NAME    node  status  N   node  issues  N   node  set  N KEY VAL       node  sync N  retire/prune/exec/probe/path/adopt/discover/label/…
-```
-
-Resolution reads straight off it: node beats group beats fleet. New capabilities fall out for free
-(`group sync deployed`, `node issues corbin`).
-
-**Old → new command mapping:**
-
-- `config set --global KEY VAL`   → `fleet set KEY VAL`
-- `config set --group NAME KEY V` → `group set NAME KEY VAL`
-- `config set NODE KEY VAL`       → `node set NODE KEY VAL`  (same for `unset`)
-- `config show --global`          → fleet-scope settings view (home TBD — see open questions)
-- `config show --group NAME`      → `group status NAME` (its desired rows + members + rollup)
-- `config show NODE` / `NODE KEY` → `node status NODE` / `node status NODE KEY`
-- `config export` / `import`      → `fleet backup` / `fleet restore` (fleet-wide only; per-group/node
-                                     backup considered and rejected — not worth the code)
-- `daemon …`                      → `service …`  (rename; "daemon" is jargon and awkward to type)
-- `daemon validate`               → `service configtest`  ("validate" begged the question "of what?";
-                                     `configtest` is self-explanatory, à la `nginx -t`)
-- `config` noun                   → **removed entirely**
-
-**Decisions locked this session:**
-- Winner: **`fleet`** (not `global`).
-- Lifecycle noun: **`service`** (not `daemon`, not `svc` — `mch service status` reads best).
-- Config validation: **auto-validate on start and on reload**, plus keep one pre-flight
-  `service configtest` (the reason a standalone check survives: test the *edited file before reload*
-  so a typo can't take the running daemon down — the `nginx -t` pattern). No `config` noun.
-- Backup/restore: **fleet-scope only**, under `fleet`.
-- Word order: **verb NAME** (`node set corbin txdelay 14`), Click-native — not NAME-verb.
-- `node` = everything about a node: lifecycle + observed + desired, all under the one noun.
-
-**Open questions for the review session:**
-- **Display verb: `status` vs `show`.** rdm leans `status` (more technical) but wrote `node show
-  corbin` illustrating order. Pick ONE display verb across all scopes. (Grid above tentatively uses
-  `status`; `node show` is the current name.)
-- **Where do fleet-scope (global) desired rows display?** `fleet status` is the node table; the
-  fleet-wide desired *settings* rows (old `config show --global`) need a home — a section within
-  `fleet status`, or a dedicated view.
-- **`fleet set` semantics clarity.** Ensure `fleet set KEY VAL` reads as "fleet-wide default,
-  overridable" not "force onto every node now" (help concepts already frames resolution this way).
-- Directives (`name_prefix`/`default_policy`/`via_radio`) move with `set`, e.g. `group set deployed
-  name_prefix "🦔 "` — confirm they still validate the same.
-
-**Resulting noun set:** `fleet` / `group` / `node` (scope, uniform verbs) + `gateway` + `service`
-+ `help`. `config` gone.
+Headline decisions (details in the spec): scope nouns `fleet`/`group`/`node` with uniform verbs;
+display verb `status` everywhere; `mch global …` as a **hidden synonym** for `fleet` (deliberate,
+DESIGN.md-recorded exception to the no-hidden-commands rule); groups become first-class (new
+`groups` registry table, `group create/rename/delete`, delete cascades to ungrouped with
+preview + `--yes`); `node move NODE GROUP` (`-` to ungroup) replaces `node group`;
+`fleet export`/`fleet import` keep the mechanics-honest verbs; `daemon` → `service` with
+`service configtest` + auto-validate on start/reload; `config` noun removed; `mch status`/
+`mch sync` shortcuts stay. S4.2 (cli.py split) is the spec's final slice, along the final nouns.
 
 ### RECOMMENDATIONS-3 slice 4 — remaining items
 
 - **S4.4: DONE** (Unreleased) — `--json` on `node path`, `node discover`, `fleet suggest`,
   `node probe`, `gateway contacts`, and the preview payloads of `node prune` / `node clean facts` /
   `node clean settings` / `config import`; each emits its daemon payload verbatim.
-- **S4.2 (deferred):** split `src/mch/cli.py` (~3.3k lines) into a `src/mch/cli/` package
-  (`render.py`, `fleet.py`, `node.py`, `config_cmds.py`, `daemon_cmds.py`, `gateway.py`, `wizard.py`,
-  `help_topics.py`). Pure-move refactor, its own PR; run `mch --help` diffs before/after and keep the
-  help-text/banned-jargon/docs-drift guards green.
+- **S4.2 (deferred → re-scoped):** the `cli.py` package split now happens *after* the scope-as-noun
+  redesign, along the final noun modules — it is RECOMMENDATIONS-4 slice 8. Do not split into
+  `config_cmds.py`/`daemon_cmds.py` modules the redesign deletes.
 - **S4.3: DONE** (Unreleased) — `daemon._dispatch` is now a `dict[str, Handler]` table (`_HANDLERS`)
   of `_handle_*` coroutines taking a bundled `_Dispatch` context; the repeated progress-callback
   closure and radio-tuple parsing were factored into `_progress_writer` / `_parse_radio_arg`. Pinned
