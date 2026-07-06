@@ -108,7 +108,7 @@ def test_strict_load_rejects_nodes_block(tmp_path):
             settings:
               txdelay: "14"
         """)
-    with pytest.raises(ValueError, match="mch config import"):
+    with pytest.raises(ValueError, match="mch fleet import"):
         load(p, strict=True)
 
 
@@ -119,7 +119,7 @@ def test_strict_load_rejects_groups_block(tmp_path):
             settings:
               advert.interval: "240"
         """)
-    with pytest.raises(ValueError, match="mch config import"):
+    with pytest.raises(ValueError, match="mch fleet import"):
         load(p, strict=True)
 
 
@@ -129,7 +129,7 @@ def test_strict_load_rejects_global_desired_block(tmp_path):
           settings:
             powersaving: "on"
         """)
-    with pytest.raises(ValueError, match="mch config import"):
+    with pytest.raises(ValueError, match="mch fleet import"):
         load(p, strict=True)
 
 
@@ -140,7 +140,7 @@ def test_strict_load_rejects_facts_block(tmp_path):
           - ver
           - neighbors
         """)
-    with pytest.raises(ValueError, match="mch config import"):
+    with pytest.raises(ValueError, match="mch fleet import"):
         load(p, strict=True)
 
 
@@ -960,7 +960,7 @@ def test_shipped_config_example_loads_strict():
 
 
 def test_shipped_desired_example_is_importable():
-    """desired.example.yaml is `mch config import` input: parsed leniently, carries inventory."""
+    """desired.example.yaml is `mch fleet import` input: parsed leniently, carries inventory."""
     example = _EXAMPLES_DIR / "desired.example.yaml"
     cfg = load(example, load_secrets=False)  # lenient, as the importer loads it
     assert cfg.nodes, "desired example should define managed nodes"
@@ -1304,7 +1304,7 @@ def test_overlay_via_radio_strips_surrounding_space():
 
 
 # ------------------------------------------------------------------
-# config_to_desired_rows: flatten loaded config -> desired_settings rows (mch config import)
+# config_to_desired_rows: flatten loaded config -> desired_settings rows (mch fleet import)
 # ------------------------------------------------------------------
 
 _PK = "aabbccdd" + "0" * 56  # a full 64-hex pubkey for prefix aabbccdd
@@ -1424,7 +1424,7 @@ def test_import_via_radio_row_round_trips_through_parser():
 
 
 # ------------------------------------------------------------------
-# desired_rows_to_config_dict: rows -> config.yaml structure (mch config export, inverse of import)
+# desired_rows_to_config_dict: rows -> config.yaml structure (mch fleet export, inverse of import)
 # ------------------------------------------------------------------
 
 def test_export_empty_rows_is_empty_dict():

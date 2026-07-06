@@ -30,10 +30,26 @@ existing nouns yet. 1017 tests pass, ruff + mypy clean.
   group name silently wrote desired state that never applied. Registry + create-first makes typos a
   loud error and lets a group exist before its first member.
 
-**S2+ coordination gate (from RECOMMENDATIONS-4):** the facts-as-policy work is already merged to
-`main` (SettingPolicy.FACT + fourth-policy handling present), so the "land first or rebase?"
-question in the plan appears moot — confirm with operator before starting S2, and confirm the
-per-slice branch+PR/merge handling given `gh` is unavailable in the sandbox.
+**S2+ coordination gate (from RECOMMENDATIONS-4):** RESOLVED (operator, 2026-07-06) — facts-as-policy
+is already merged to `main`, proceed with no rebase; land each slice `--no-ff` to `main` locally
+(gh unavailable in sandbox; operator pushes/PR-reviews after).
+
+**RECOMMENDATIONS-4 — S2 done (2026-07-06, branch `feat-r4-slice2-renames`).** Mechanical renames,
+old paths deleted in the same change (alpha rule); no behaviour change beyond the `node move`
+sentinel. 1018 tests pass, ruff + mypy clean.
+- `daemon` noun → `service` (all five verbs); `daemon validate` → `service configtest` (nginx `-t`
+  pattern). `node show` → `node status`. `config export`/`config import` → `fleet export`/`fleet
+  import`. `node group NODE [GROUP]` → `node move NODE GROUP` with `-` to ungroup — GROUP is now
+  required, removing the silent-ungroup footgun (omitting it is a usage error).
+- In-app hints updated (daemon-down hint, config-check hint, gateway-failure hint, commission
+  epilogue). Guard tests migrated (test_cli invocations + assertions, test_config strict-load
+  messages, test_docs_cli_reference stays green).
+- Docs forced green by the docs-drift guard: README, `docs/man/mch.1`, `www/index.html` command
+  tokens swapped; `systemd/mch-backup.sh` (+ its unit Description) updated (live caller of the
+  renamed backup command). **Deferred to S7 (planned docs sweep):** the prose/vocabulary rewrite in
+  INSTALL, MANUAL_TESTS, DESIGN, ROADMAP, CLAUDE.md command examples, the scope×verb grid, and the
+  `help concepts`/`selectors`/`states` re-read. RPC `cmd` names kept as-is (e.g. `set_group`) — the
+  alpha rule permits renaming them but S2 is CLI-surface only.
 
 ## >>> Earlier resume block (updated 2026-07-03) <<<
 

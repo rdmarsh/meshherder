@@ -589,7 +589,7 @@ async def _handle_show_setting(
     key = str(req.get("key") or "")
     if not key:
         # All-keys listing: configured keys plus observed-only setting leftovers, the same
-        # key set `mch node show` renders, but oriented around resolution (the FROM column).
+        # key set `mch node status` renders, but oriented around resolution (the FROM column).
         keys = sorted(all_setting_keys(node_cfg, group_cfg, global_cfg) | set(settings_by_key))
         return {"ok": True, "data": {
             "pubkey": node.pubkey,
@@ -682,7 +682,7 @@ async def _handle_import(
         match = next((n.pubkey for n in nodes if n.pubkey.startswith(prefix)), None)
         if match:
             return match
-        # Restore-from-backup: a full pubkey (as `mch config export` emits) is the node identity
+        # Restore-from-backup: a full pubkey (as `mch fleet export` emits) is the node identity
         # itself, so accept it even when the gateway/DB has not seen the node yet. The node row
         # is created below; the favourite mirror re-pins it once its contact reappears. A short
         # prefix still needs a known node (its full pubkey is unknowable) and is skipped+warned.
@@ -794,8 +794,8 @@ async def _handle_export(db: Database) -> dict[str, Any]:
     """Dump the whole fleet as config.yaml-shaped YAML — a complete, faithful backup.
 
     Includes every node's identity, label, group, desired settings, and operations, so
-    `mch config import` can rebuild the fleet after a server/gateway loss. Retired nodes are tagged
-    ``retired: true`` (the one inventory-state field carried in the file); `mch config import` then
+    `mch fleet import` can rebuild the fleet after a server/gateway loss. Retired nodes are tagged
+    ``retired: true`` (the one inventory-state field carried in the file); `mch fleet import` then
     lets the operator choose whether to restore or skip them.
     """
     rows = await db.get_all_desired_settings()
@@ -1242,7 +1242,7 @@ async def _handle_set_group(c: _Dispatch) -> dict[str, Any]:
     value = str(raw).strip() if raw is not None and str(raw).strip() else None
     if cmd == "set_group":
         # Assigning to a group requires the group to be registered first (R4 S1); clearing
-        # (value None) is always allowed. Enforced here so `node group`/`node move` can't put
+        # (value None) is always allowed. Enforced here so `node move` can't put
         # a node into a typo'd group that no group-scoped desired state will ever match.
         if value is not None and not await c.db.group_exists(value):
             return {"ok": False, "error": _unknown_group_error(value)}

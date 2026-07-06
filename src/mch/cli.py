@@ -229,8 +229,8 @@ async def _request(
         reader, writer = await asyncio.open_unix_connection(socket_path, limit=2**22)
     except (FileNotFoundError, ConnectionRefusedError):
         click.echo(f"error: cannot connect to daemon at {socket_path}", err=True)
-        click.echo("  is mchd running?  check: mch daemon status", err=True)
-        click.echo("  recent daemon log: mch daemon logs", err=True)
+        click.echo("  is mchd running?  check: mch service status", err=True)
+        click.echo("  recent service log: mch service logs", err=True)
         _check_default_config_when_daemon_unavailable()
         raise SystemExit(1) from None
 
@@ -278,7 +278,7 @@ def _check_default_config_when_daemon_unavailable() -> None:
         cfg = load_config(config_path, load_secrets=False)
     except (PermissionError, ValueError, OSError) as exc:
         click.echo(f"  config check failed: {exc}", err=True)
-        click.echo("  run: mch config validate", err=True)
+        click.echo("  run: mch service configtest", err=True)
         return
     click.echo(f"  config ok: {cfg.config_path}", err=True)
 
@@ -435,9 +435,9 @@ def cli(ctx: click.Context, socket: str, color: bool | None) -> None:
 # shadowing the many local `config`/`node` variables used below.
 # ---------------------------------------------------------------------------
 
-@cli.group("daemon")
-def daemon_group() -> None:
-    """Control the mchd daemon process (start, stop, restart, status, logs)."""
+@cli.group("service")
+def service_group() -> None:
+    """Control the mchd service process (start, stop, restart, status, logs, configtest)."""
 
 
 @cli.group("fleet")
@@ -513,14 +513,14 @@ A sync cycle
 
 Previewing changes
   Commands that delete or change local state show a preview first and only
-  act when you add --yes (`node prune`, `node clean`, `config import`,
+  act when you add --yes (`node prune`, `node clean`, `fleet import`,
   `node path --apply`). Interactive wizards (`node new`) and the
   typed-confirmation guard on destructive `node exec` commands are the
   exceptions.
 
 Where your data lives
   mch keeps its inventory and desired settings in a local database.
-  `mch config export` is your backup — keep it somewhere safe.
+  `mch fleet export` is your backup — keep it somewhere safe.
 
 Exit codes
   0  success
@@ -577,7 +577,7 @@ def help_states() -> None:
 # validate
 # ---------------------------------------------------------------------------
 
-@daemon_group.command("validate")
+@service_group.command("configtest")
 @click.option(
     "--config", "-c",
     "config_path",
@@ -627,7 +627,7 @@ def validate_config(config_path: Path | None, secrets_path: Path | None) -> None
             f"warning: cannot read secrets file: {exc.filename or cfg.secrets_path or exc}",
             err=True,
         )
-        click.echo("  try: sudo mch config validate", err=True)
+        click.echo("  try: sudo mch service configtest", err=True)
         raise SystemExit(1) from None
     except (ValueError, OSError) as exc:
         click.echo(f"error: config validation failed: {exc}", err=True)
@@ -780,7 +780,7 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
 
     filtered = bool(query and len(nodes) != len(all_nodes))
 
-    # Zero matches with a query: fail loudly (stderr + exit 1) like `node show`, so a typo
+    # Zero matches with a query: fail loudly (stderr + exit 1) like `node status`, so a typo
     # in a script does not look like success (S2.7).
     if query and not nodes:
         click.echo(f"no nodes matching '{query}'", err=True)
@@ -795,7 +795,7 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
 
         def _ver_text(n: dict[str, Any]) -> str:
             # Trailing "!" flags firmware behind the latest known release (advisory; see the
-            # footer line and `mch node show` for the detail). Kept in the raw text so the VER
+            # footer line and `mch node status` for the detail). Kept in the raw text so the VER
             # column width accounts for it.
             base = _short_ver(n.get("ver"))
             return f"{base}!" if n.get("firmware_outdated") and base != "-" else base
@@ -847,7 +847,7 @@ def status(ctx: click.Context, query: str | None, as_json: bool) -> None:
     # A single match no longer silently switches to the detail view (that magic switch was dropped
     # after 0.21.0 shipped its deprecation hint); point the operator at the explicit command.
     if query and len(nodes) == 1:
-        click.echo(f"(tip: `mch node show {query}` shows full detail for this node)", err=True)
+        click.echo(f"(tip: `mch node status {query}` shows full detail for this node)", err=True)
 
     # `fleet status` summarises issues; `fleet issues` keeps the full drift/problem-state
     # tables (S2.1). The STATE column already marks every problem node above.
@@ -1381,7 +1381,7 @@ def _render_firmware_advisory(firmware: dict[str, Any] | None, query: str | None
     click.echo("")
     click.echo(
         f"firmware: {n} node{'s' if n != 1 else ''} behind latest {latest} "
-        f"(advisory — `mch node show NODE` for detail)"
+        f"(advisory — `mch node status NODE` for detail)"
     )
 
 
@@ -1447,7 +1447,7 @@ def _render_outage_advisory(nodes: list[dict[str, Any]]) -> None:
     click.echo("")
     click.echo(
         f"note: {len(down)} of {len(non_retired)} nodes unreachable — if unexpected, "
-        "check the gateway (`mch daemon logs`, `mch gateway contacts`)"
+        "check the gateway (`mch service logs`, `mch gateway contacts`)"
     )
 
 
@@ -2188,11 +2188,11 @@ def unretire_node(ctx: click.Context, node: str) -> None:
     click.echo("re-favourited and queued for sync.")
 
 
-@node_group.command("show")
+@node_group.command("status")
 @click.argument("node")
 @click.option("--json", "as_json", is_flag=True, help="Emit the node report as JSON for scripting.")
 @click.pass_context
-def show_node(ctx: click.Context, node: str, as_json: bool) -> None:
+def node_status(ctx: click.Context, node: str, as_json: bool) -> None:
     """Show full detail for one node: facts, all desired settings, schedule, and recent activity.
 
     NODE is a pubkey prefix, label, or mesh-name substring; it must match exactly one node. This
@@ -2208,24 +2208,28 @@ def show_node(ctx: click.Context, node: str, as_json: bool) -> None:
     _render_node_detail(_node_detail_view(report))
 
 
-@node_group.command("group")
+@node_group.command("move")
 @click.argument("node")
-@click.argument("group", required=False, default=None)
+@click.argument("group")
 @click.pass_context
-def set_group(ctx: click.Context, node: str, group: str | None) -> None:
-    """Put NODE in a group, or take it out of one.
+def node_move(ctx: click.Context, node: str, group: str) -> None:
+    """Move NODE into GROUP, or ungroup it with `-`.
 
-    Pass a GROUP name to set it; omit GROUP (or pass an empty string) to remove the node
-    from its group, after which it inherits the fleet-wide defaults directly. This only
-    changes which group the node belongs to — run `mch fleet sync NODE` to apply the new
-    group's settings.
+    GROUP must be an existing group (create it first with `mch group create`). Pass `-` as the
+    GROUP to ungroup the node, after which it inherits the fleet-wide defaults directly. A node
+    belongs to at most one group, so this is a move, not add. GROUP is required — there is no
+    silent-ungroup from omitting it. This only changes membership; run `mch fleet sync NODE` to
+    apply the new group's settings.
     """
+    # `-` is the ungroup sentinel (matches the commission wizard's "- for none"); it maps to an
+    # empty value, which the daemon treats as clearing membership.
+    value = "" if group == "-" else group
     data = _check(_rpc(
-        ctx.obj["socket"], {"cmd": "set_group", "query": node, "value": group}
+        ctx.obj["socket"], {"cmd": "set_group", "query": node, "value": value}
     ))
     ident = data.get("label") or data.get("name") or _pk(data.get("pubkey"))
     grp = data.get("group")
-    click.echo(f"{ident} group set to {grp!r}" if grp else f"{ident} group cleared")
+    click.echo(f"{ident} moved to group {grp!r}" if grp else f"{ident} ungrouped")
 
 
 @node_group.command("label")
@@ -2250,7 +2254,7 @@ def set_label(ctx: click.Context, node: str, label: str | None) -> None:
 
 # ---------------------------------------------------------------------------
 # group registry management (R4 S1). Groups are first-class: a group must be
-# created before group-scope desired state or `node group` can target it.
+# created before group-scope desired state or `node move` can target it.
 # ---------------------------------------------------------------------------
 
 @group_group.command("create")
@@ -2968,7 +2972,7 @@ def plan(ctx: click.Context, query: str | None, as_json: bool) -> None:
 # import
 # ---------------------------------------------------------------------------
 
-@config_group.command("import")
+@fleet_group.command("import")
 @click.argument(
     "config_file",
     required=False,
@@ -2995,7 +2999,7 @@ def import_config(
     re-applies the same values. A node the gateway hasn't seen yet is skipped with a
     warning until it appears.
 
-    Pass a CONFIG_FILE (an old config.yaml or a `mch config export` backup) to load from
+    Pass a CONFIG_FILE (an old config.yaml or a `mch fleet export` backup) to load from
     it; the daemon process must be able to read the file. Restoring a full backup also
     recreates nodes the gateway hasn't seen yet; use --retired to choose what happens to
     any retired nodes it carries.
@@ -3052,13 +3056,13 @@ def import_config(
 # export
 # ---------------------------------------------------------------------------
 
-@config_group.command("export")
+@fleet_group.command("export")
 @click.pass_context
 def export_config(ctx: click.Context) -> None:
     """Back up all your desired settings to YAML — this is your disaster-recovery snapshot.
 
-    Prints to stdout — redirect to save (`mch config export > backup.yaml`). Restore it
-    later with `mch config import`. Since mch keeps your inventory and settings in one
+    Prints to stdout — redirect to save (`mch fleet export > backup.yaml`). Restore it
+    later with `mch fleet import`. Since mch keeps your inventory and settings in one
     local database, this backup is the only copy; keep it somewhere safe. The node's
     reported values and its history are not included.
     """
@@ -3526,7 +3530,7 @@ def _commission_new_wizard(
     click.echo("")
     click.echo("Node commissioned successfully.")
     click.echo("")
-    click.echo("Save this to a file (e.g. new-node.yaml) and apply it with `mch config import`:")
+    click.echo("Save this to a file (e.g. new-node.yaml) and apply it with `mch fleet import`:")
     click.echo("")
     click.echo(d.get("import_yaml", ""))
     click.echo("")
@@ -3537,7 +3541,7 @@ def _commission_new_wizard(
     click.echo("Next steps:")
     click.echo("  1. Add the secrets entry to secrets.yaml")
     click.echo("  2. Reload mchd so it seeds the new node from gateway favourites")
-    click.echo("  3. Run: mch config import new-node.yaml   (then again with --yes to write)")
+    click.echo("  3. Run: mch fleet import new-node.yaml   (then again with --yes to write)")
     click.echo(f"  4. Run: mch fleet status {pubkey_prefix}")
     click.echo(f"  5. Optional: mch fleet sync {pubkey_prefix}")
 
@@ -3618,7 +3622,7 @@ def _commission_replace_wizard(socket: str) -> None:
 # start / stop (via systemd)
 # ---------------------------------------------------------------------------
 
-@daemon_group.command("start")
+@service_group.command("start")
 def start() -> None:
     """Start the mchd daemon via systemd."""
     result = _systemctl("start")
@@ -3628,7 +3632,7 @@ def start() -> None:
     click.echo("mchd started")
 
 
-@daemon_group.command("stop")
+@service_group.command("stop")
 def stop() -> None:
     """Stop the mchd daemon via systemd."""
     click.echo("stopping current sync, this may take some time...")
@@ -3639,7 +3643,7 @@ def stop() -> None:
     click.echo("mchd stopped")
 
 
-@daemon_group.command("restart")
+@service_group.command("restart")
 def restart() -> None:
     """Restart the mchd daemon via systemd."""
     click.echo("stopping current sync, this may take some time...")
@@ -3650,7 +3654,7 @@ def restart() -> None:
     click.echo("mchd restarted")
 
 
-@daemon_group.command("status")
+@service_group.command("status")
 def daemon_status() -> None:
     """Show the mchd service status (systemctl status mchd)."""
     # Unlike start/stop/restart, this is read-only and needs no privilege, so
@@ -3667,7 +3671,7 @@ def daemon_status() -> None:
     raise SystemExit(result.returncode)
 
 
-@daemon_group.command("logs")
+@service_group.command("logs")
 @click.option(
     "--lines",
     "-n",

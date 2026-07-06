@@ -71,7 +71,7 @@ pip install -e .</code></pre>
     <h2>What it does</h2>
     <ul>
       <li><strong>Desired-state enforcement</strong> — declare readable/writable CLI settings; mchd enforces, audits, or skips them with Node &gt; Group &gt; Global precedence.</li>
-      <li><strong>Fact collection</strong> — firmware, hardware, role, location, neighbours, and other registered readable values are cached in SQLite. <code>mch daemon validate</code> warns about likely misspelled fact keys.</li>
+      <li><strong>Fact collection</strong> — firmware, hardware, role, location, neighbours, and other registered readable values are cached in SQLite. <code>mch service configtest</code> warns about likely misspelled fact keys.</li>
       <li><strong>Multi-frequency support</strong> — use <code>via_radio:</code> globally, per group, or per node; mchd temporarily switches the gateway when required and restores its home radio afterward.</li>
       <li><strong>Group name prefix</strong> — prepend a <code>name_prefix:</code> (usually an emoji) to each member's desired name, set globally, per group, or per node. No space is added, and mchd refuses to start if a prefix+name would overflow the 31-byte firmware name limit.</li>
       <li><strong>Staggered scheduler</strong> — nodes are spread randomly across the sync window so mchd restarts never cause a surge.</li>
@@ -108,7 +108,7 @@ scheduler:
       Run <code>mch gateway contacts</code> to list repeater nodes visible to the gateway that
       are not yet managed, then bring one under management with <code>mch node adopt</code> and set
       its desired state with <code>mch config set</code> (or seed many at once with
-      <code>mch config import</code>).
+      <code>mch fleet import</code>).
     </p>
   </section>
 
@@ -117,10 +117,10 @@ scheduler:
     <pre><code>mch status / mch sync              # shortcuts for `mch fleet status` / `mch fleet sync`
 mch help selectors / concepts      # learn how to name a node, and mch's vocabulary
 mch help states                    # what each node STATE means (configured, partial, unreachable, …)
-mch daemon validate                # validate config/secrets and warn about unknown facts
+mch service configtest                # validate config/secrets and warn about unknown facts
 mch fleet status                   # fleet overview: state, label, group, firmware, neighbours, last seen
-mch fleet status &lt;label|prefix&gt;    # filtered table (single match hints `mch node show`)
-mch node show &lt;label|prefix&gt;        # full detail for one node
+mch fleet status &lt;label|prefix&gt;    # filtered table (single match hints `mch node status`)
+mch node status &lt;label|prefix&gt;        # full detail for one node
 mch fleet plan                     # desired-vs-known diff, no mesh traffic, no writes
 mch fleet plan &lt;label|prefix&gt;      # filter to one node
 mch fleet sync                     # sweep all nodes in background
@@ -128,7 +128,7 @@ mch fleet sync &lt;prefix&gt;            # sync one node now; stream radio/path/
 mch fleet issues                   # just the issue sections; exits 2 when any issue is present
 mch gateway contacts               # gateway contacts not yet managed in the DB
 mch node adopt &lt;pubkey&gt; --radio R  # bring a discovered node under management
-mch node group &lt;node&gt; [name]       # set or clear a node's DB group
+mch node move &lt;node&gt; GROUP        # move node into GROUP (must exist); `-` ungroups
 mch node exec &lt;node&gt; &lt;command&gt;      # run a raw MeshCore CLI command on a managed node
 mch node new                       # add a fresh or replacement node (interactive)
 mch fleet logs                     # recent per-node activity across all nodes
