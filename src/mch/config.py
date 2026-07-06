@@ -106,6 +106,22 @@ def validate_node_label(label: str) -> None:
         )
 
 
+def validate_group_name(name: str) -> None:
+    """Reject group names that cannot be used safely as a scope id and CLI argument.
+
+    Same config-safe charset as node labels (letters/digits/dash/underscore/dot): a group
+    name is looked up on the command line and stored as ``scope_id``, so spaces or shell
+    metacharacters are a footgun. Empty is rejected outright.
+    """
+    if not name:
+        raise ValueError("group name cannot be empty")
+    if not _LABEL_RE.match(name):
+        raise ValueError(
+            f"group name {name!r} contains invalid characters - "
+            f"use letters, digits, dashes, underscores, or dots only"
+        )
+
+
 class _NoDuplicateKeysLoader(yaml.SafeLoader):
     """YAML loader that raises ValueError on duplicate mapping keys.
 

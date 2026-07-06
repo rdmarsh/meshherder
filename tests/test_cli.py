@@ -2252,6 +2252,62 @@ def test_node_label_set():
     assert "label set to 'east-hill'" in result.output
 
 
+# ------ group registry (create / delete / rename) — R4 S1 ------
+
+def test_group_create_reports_created():
+    result = _run(["group", "create", "field"], {"ok": True, "data": {
+        "name": "field", "created": True,
+    }})
+    assert result.exit_code == 0
+    assert "group 'field' created" in result.output
+
+
+def test_group_create_reports_existing():
+    result = _run(["group", "create", "field"], {"ok": True, "data": {
+        "name": "field", "created": False,
+    }})
+    assert result.exit_code == 0
+    assert "already exists" in result.output
+
+
+def test_group_delete_preview_lists_cascade():
+    result = _run(["group", "delete", "field"], {"ok": True, "data": {
+        "name": "field", "deleted": False,
+        "members": [{"pubkey": "aabbccdd" * 8, "label": "east-hill", "name": "Tower"}],
+        "settings": [{"key": "name", "desired": "x", "policy": None}],
+        "operations": [],
+    }})
+    assert result.exit_code == 0
+    assert "would delete group 'field'" in result.output
+    assert "east-hill" in result.output
+    assert "re-run with --yes" in result.output
+
+
+def test_group_delete_yes_reports_cascade_counts():
+    result = _run(["group", "delete", "field", "--yes"], {"ok": True, "data": {
+        "name": "field", "deleted": True,
+        "members": [{"pubkey": "aabbccdd" * 8, "label": "east-hill", "name": "Tower"}],
+        "settings": [{"key": "name", "desired": "x", "policy": None}],
+        "operations": [],
+    }})
+    assert result.exit_code == 0
+    assert "group 'field' deleted" in result.output
+    assert "1 node(s) ungrouped" in result.output
+
+
+def test_group_rename_reports_move():
+    result = _run(["group", "rename", "field", "perimeter"], {"ok": True, "data": {
+        "old": "field", "new": "perimeter",
+    }})
+    assert result.exit_code == 0
+    assert "group 'field' renamed to 'perimeter'" in result.output
+
+
+def test_group_noun_listed_in_help():
+    result = CliRunner().invoke(cli, ["--help"])
+    assert "group" in result.output
+
+
 # ------ contacts ------
 
 def test_contacts_no_contacts():

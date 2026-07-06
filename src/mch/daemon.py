@@ -45,6 +45,7 @@ from mch.config import (
     resolve_name_prefix,
     settable_keys,
     validate_directive_value,
+    validate_group_name,
     validate_node_label,
 )
 from mch.config import load as load_config
@@ -314,6 +315,19 @@ async def _resolve_setting_scope(
     return None, "", {}, f"invalid scope {scope_raw!r} (choose node, group, or global)"
 
 
+def _unknown_group_error(name: str) -> str:
+    """Uniform error for targeting a group that is not in the registry (R4 S1).
+
+    Groups are first-class: they must be created before `group set`/`node move` can target
+    them, so a typo'd or not-yet-created group is rejected with a create hint rather than
+    silently writing a dead row.
+    """
+    return (
+        f"unknown group {name!r} - create it first with `mch group create {name}` "
+        "(or check the spelling)"
+    )
+
+
 def _scope_target_label(data: dict[str, Any]) -> str:
     """Human label for a resolved scope, used in error messages."""
     if data.get("scope") == "node":
@@ -389,20 +403,11 @@ async def _handle_set_setting(
     scope, scope_id, data, error = await _resolve_setting_scope(req, db)
     if error or scope is None:
         return {"ok": False, "error": error or "could not resolve scope"}
-    # Catch a typo'd group name at write time: a desired row for a group that no node
-    # is in would silently never apply. Group membership lives in the DB now (nodes.group),
-    # so a group is "real" once at least one node belongs to it. unset does not check this
-    # (see resolver docstring).
-    if scope is Scope.GROUP:
-        group_names = {n.group for n in await db.get_all_nodes() if n.group}
-        if scope_id not in group_names:
-            return {
-                "ok": False,
-                "error": (
-                    f"group {scope_id!r} has no member nodes - assign a node to it first "
-                    "(via `mch config import` or commissioning), or check the spelling"
-                ),
-            }
+    # Catch a typo'd group name at write time: a desired row for an unregistered group would
+    # silently never apply. Groups are first-class now (R4 S1): a group must be created before
+    # it can be targeted. unset does not check this (see resolver docstring).
+    if scope is Scope.GROUP and not await db.group_exists(scope_id):
+        return {"ok": False, "error": _unknown_group_error(scope_id)}
 
     await db.set_desired_setting(
         DesiredSetting(scope_type=scope, scope_id=scope_id, key=key, desired=value, policy=policy)
@@ -542,17 +547,9 @@ async def _handle_show_scope(req: dict[str, Any], db: Database) -> dict[str, Any
     scope, scope_id, data, error = await _resolve_setting_scope(req, db)
     if error or scope is None:
         return {"ok": False, "error": error or "could not resolve scope"}
-    # Mirror `set`'s typo guard: a group nobody is in would silently never apply.
-    if scope is Scope.GROUP:
-        group_names = {n.group for n in await db.get_all_nodes() if n.group}
-        if scope_id not in group_names:
-            return {
-                "ok": False,
-                "error": (
-                    f"group {scope_id!r} has no member nodes - assign a node to it first "
-                    "(via `mch config import` or commissioning), or check the spelling"
-                ),
-            }
+    # Mirror `set`'s typo guard: an unregistered group would silently never apply.
+    if scope is Scope.GROUP and not await db.group_exists(scope_id):
+        return {"ok": False, "error": _unknown_group_error(scope_id)}
     rows = [
         {
             "key": row.key,
@@ -760,6 +757,17 @@ async def _handle_import(
             await db.set_desired_operation(op)
         for node in inventory_writes:
             await db.upsert_node(node)
+        # Register every group this import references so a later `group set`/`node move` accepts
+        # it — import writes group rows and node membership directly, bypassing the create-first
+        # gate, so it must seed the registry itself (the restore-from-backup on-ramp). R4 S1.
+        imported_groups = (
+            {r.scope_id for r in rows if r.scope_type is Scope.GROUP}
+            | {o.scope_id for o in operations if o.scope_type is Scope.GROUP}
+            | {n.group for n in inventory_writes if n.group}
+        )
+        for group_name in imported_groups:
+            if group_name:
+                await db.create_group(group_name)
 
     counts = {Scope.GLOBAL.value: 0, Scope.GROUP.value: 0, Scope.NODE.value: 0}
     for row in rows:
@@ -1233,6 +1241,11 @@ async def _handle_set_group(c: _Dispatch) -> dict[str, Any]:
     raw = c.req.get("value")
     value = str(raw).strip() if raw is not None and str(raw).strip() else None
     if cmd == "set_group":
+        # Assigning to a group requires the group to be registered first (R4 S1); clearing
+        # (value None) is always allowed. Enforced here so `node group`/`node move` can't put
+        # a node into a typo'd group that no group-scoped desired state will ever match.
+        if value is not None and not await c.db.group_exists(value):
+            return {"ok": False, "error": _unknown_group_error(value)}
         await c.db.set_node_group(node.pubkey, value)
         await c.db.write_log(
             node.pubkey, "INFO",
@@ -1346,6 +1359,70 @@ async def _handle_commission(c: _Dispatch) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+async def _handle_group_create(c: _Dispatch) -> dict[str, Any]:
+    """Register a group so group-scope desired state and `node move` can target it (R4 S1)."""
+    name = str(c.req.get("name") or "").strip()
+    try:
+        validate_group_name(name)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    existed = await c.db.group_exists(name)
+    await c.db.create_group(name)
+    return {"ok": True, "data": {"name": name, "created": not existed}}
+
+
+async def _handle_group_delete(c: _Dispatch) -> dict[str, Any]:
+    """Hard cascade delete of a group (R4 decision 6): preview by default, act on ``yes``.
+
+    Preview lists the member nodes and the group's desired rows so the operator sees exactly
+    what a delete would ungroup and drop. With ``yes`` true it performs the one-transaction
+    cascade (members ungrouped, desired rows deleted, registry row removed).
+    """
+    name = str(c.req.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "missing group name"}
+    if not await c.db.group_exists(name):
+        return {"ok": False, "error": f"no such group {name!r}"}
+    members = [n for n in await c.db.get_all_nodes() if n.group == name]
+    settings = await c.db.get_desired_settings(Scope.GROUP, name)
+    operations = await c.db.get_desired_operations(Scope.GROUP, name)
+    data: dict[str, Any] = {
+        "name": name,
+        "members": [{"pubkey": n.pubkey, "label": n.label, "name": n.name} for n in members],
+        "settings": [
+            {"key": s.key, "desired": s.desired, "policy": s.policy.value if s.policy else None}
+            for s in settings
+        ],
+        "operations": [{"command": o.command} for o in operations],
+    }
+    if not c.req.get("yes"):
+        data["deleted"] = False
+        return {"ok": True, "data": data}
+    await c.db.delete_group(name)
+    data["deleted"] = True
+    return {"ok": True, "data": data}
+
+
+async def _handle_group_rename(c: _Dispatch) -> dict[str, Any]:
+    """Rename a group and everything scoped to it in one transaction (R4 decision 6)."""
+    old = str(c.req.get("old") or "").strip()
+    new = str(c.req.get("new") or "").strip()
+    if not old or not new:
+        return {"ok": False, "error": "rename needs both OLD and NEW group names"}
+    try:
+        validate_group_name(new)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not await c.db.group_exists(old):
+        return {"ok": False, "error": f"no such group {old!r}"}
+    if old == new:
+        return {"ok": False, "error": "OLD and NEW are the same group"}
+    if await c.db.group_exists(new):
+        return {"ok": False, "error": f"group {new!r} already exists"}
+    await c.db.rename_group(old, new)
+    return {"ok": True, "data": {"old": old, "new": new}}
+
+
 # Command → handler table. The already-extracted DB-only handlers keep their (req, db, config)
 # signature and are adapted with a thin lambda; the rest take the bundled _Dispatch context.
 _HANDLERS: dict[str, Handler] = {
@@ -1373,6 +1450,9 @@ _HANDLERS: dict[str, Handler] = {
     "unretire": _handle_retire,
     "set_group": _handle_set_group,
     "set_label": _handle_set_group,
+    "group_create": _handle_group_create,
+    "group_delete": _handle_group_delete,
+    "group_rename": _handle_group_rename,
     "logs": _handle_logs,
     "suggest": _handle_suggest,
     "commission": _handle_commission,

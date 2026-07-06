@@ -45,6 +45,19 @@ class OperationStatus(Enum):
 
 
 @dataclass
+class GroupRecord:
+    """A registered group in the ``groups`` registry (first-class groups, R4 S1).
+
+    Groups became first-class so a group can exist before any node joins it and so
+    ``group set``/``node move`` can reject typo'd group names. ``member_count`` is a
+    resolve-time rollup of ``nodes.node_group``, not a stored column.
+    """
+    name: str
+    created_at: datetime | None = None
+    member_count: int = 0
+
+
+@dataclass
 class Node:
     pubkey: str           # stable identity — names can change
     name: str

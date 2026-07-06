@@ -110,6 +110,7 @@ async def _seed_node_with_facts(db: Database) -> Node:
 
 async def test_set_group_assigns_and_clears(db, wq, config):
     node = await _seed_node_with_facts(db)
+    await db.create_group("solar")  # groups are first-class: must exist before assignment
 
     resp = await _dispatch(
         {"cmd": "set_group", "query": node.pubkey[:8], "value": "solar"}, wq, db, config
@@ -147,6 +148,109 @@ async def test_set_label_updates_and_validates(db, wq, config):
 async def test_set_group_unknown_node_errors(db, wq, config):
     resp = await _dispatch(
         {"cmd": "set_group", "query": "nope", "value": "solar"}, wq, db, config
+    )
+    assert resp["ok"] is False
+
+
+async def test_set_group_unregistered_group_errors_with_create_hint(db, wq, config):
+    node = await _seed_node_with_facts(db)
+
+    resp = await _dispatch(
+        {"cmd": "set_group", "query": node.pubkey[:8], "value": "ghost"}, wq, db, config
+    )
+    assert resp["ok"] is False
+    assert "mch group create ghost" in resp["error"]
+    # node stays ungrouped — the bad assignment never landed
+    assert (await db.get_node(node.pubkey)).group is None
+
+
+async def test_set_group_clear_allowed_without_registry(db, wq, config):
+    node = await _seed_node_with_facts(db)
+    await db.create_group("solar")
+    await _dispatch(
+        {"cmd": "set_group", "query": node.pubkey[:8], "value": "solar"}, wq, db, config
+    )
+    # Clearing membership (empty value) never checks the registry.
+    resp = await _dispatch(
+        {"cmd": "set_group", "query": node.pubkey[:8], "value": ""}, wq, db, config
+    )
+    assert resp["ok"] is True
+    assert (await db.get_node(node.pubkey)).group is None
+
+
+# ------------------------------------------------------------------
+# group registry verbs (create / delete / rename) — R4 S1
+# ------------------------------------------------------------------
+
+async def test_group_create_registers_group(db, wq, config):
+    resp = await _dispatch({"cmd": "group_create", "name": "field"}, wq, db, config)
+    assert resp["ok"] is True
+    assert resp["data"]["created"] is True
+    assert await db.group_exists("field")
+
+    # Idempotent: re-creating reports created False but still succeeds.
+    resp = await _dispatch({"cmd": "group_create", "name": "field"}, wq, db, config)
+    assert resp["ok"] is True
+    assert resp["data"]["created"] is False
+
+
+async def test_group_create_rejects_invalid_name(db, wq, config):
+    resp = await _dispatch({"cmd": "group_create", "name": "bad name!"}, wq, db, config)
+    assert resp["ok"] is False
+    assert not await db.group_exists("bad name!")
+
+
+async def test_group_delete_previews_then_cascades(db, wq, config):
+    await db.create_group("field")
+    node = await _seed_node_with_facts(db)
+    await db.set_node_group(node.pubkey, "field")
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.GROUP, scope_id="field", key="name", desired="x")
+    )
+
+    # Preview (no yes): reports members/rows but does not delete.
+    preview = await _dispatch({"cmd": "group_delete", "name": "field"}, wq, db, config)
+    assert preview["ok"] is True
+    assert preview["data"]["deleted"] is False
+    assert len(preview["data"]["members"]) == 1
+    assert len(preview["data"]["settings"]) == 1
+    assert await db.group_exists("field")
+
+    # Confirmed delete cascades.
+    done = await _dispatch({"cmd": "group_delete", "name": "field", "yes": True}, wq, db, config)
+    assert done["ok"] is True
+    assert done["data"]["deleted"] is True
+    assert not await db.group_exists("field")
+    assert (await db.get_node(node.pubkey)).group is None
+    assert await db.get_desired_settings(Scope.GROUP, "field") == []
+
+
+async def test_group_delete_unknown_group_errors(db, wq, config):
+    resp = await _dispatch({"cmd": "group_delete", "name": "ghost", "yes": True}, wq, db, config)
+    assert resp["ok"] is False
+
+
+async def test_group_rename_moves_group_and_rejects_collision(db, wq, config):
+    await db.create_group("field")
+    await db.create_group("outdoor")
+
+    # Renaming onto an existing group is rejected.
+    resp = await _dispatch(
+        {"cmd": "group_rename", "old": "field", "new": "outdoor"}, wq, db, config
+    )
+    assert resp["ok"] is False
+
+    resp = await _dispatch(
+        {"cmd": "group_rename", "old": "field", "new": "perimeter"}, wq, db, config
+    )
+    assert resp["ok"] is True
+    assert await db.group_exists("perimeter")
+    assert not await db.group_exists("field")
+
+
+async def test_group_rename_unknown_old_errors(db, wq, config):
+    resp = await _dispatch(
+        {"cmd": "group_rename", "old": "ghost", "new": "perimeter"}, wq, db, config
     )
     assert resp["ok"] is False
 
@@ -1823,9 +1927,8 @@ async def test_set_setting_requires_value_or_policy(db, wq, config):
 
 
 async def test_set_setting_group_scope_writes_group_row(db, wq):
-    # Group membership lives in the DB now: a node assigned to "solar" makes the group real.
-    await db.upsert_node(Node(pubkey="aabbccdd" * 8, name="n", group="solar",
-                              state=NodeState.UNKNOWN))
+    # Groups are first-class now: the group must be registered before it can be targeted.
+    await db.create_group("solar")
     config = Config()
 
     resp = await _dispatch(
@@ -2057,7 +2160,7 @@ async def test_set_setting_name_prefix_all_spaces_stored_empty(db, wq, config):
 
 
 async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
-    # config fixture has no groups; a typo'd group must error, not silently write a dead row
+    # No group registered; a typo'd group must error with a create hint, not write a dead row.
     resp = await _dispatch(
         {"cmd": "set_setting", "scope": "group", "group": "ghost",
          "key": "txdelay", "value": "14"},
@@ -2065,13 +2168,12 @@ async def test_set_setting_group_scope_unknown_group_errors(db, wq, config):
     )
 
     assert resp["ok"] is False
-    assert "ghost" in resp["error"]
+    assert "mch group create ghost" in resp["error"]
 
 
 async def test_unset_setting_group_scope_removes_row(db, wq):
-    # A DB node in group "solar" makes the group real (membership lives in the DB now).
-    await db.upsert_node(Node(pubkey="aabbccdd" * 8, name="n", group="solar",
-                              state=NodeState.UNKNOWN))
+    # Register the group so the set below is accepted (groups are first-class now).
+    await db.create_group("solar")
     config = Config()
     await _dispatch(
         {"cmd": "set_setting", "scope": "group", "group": "solar",
@@ -2323,7 +2425,7 @@ async def test_show_setting_group_scope_unknown_group_errors(db, wq, config):
         {"cmd": "show_setting", "scope": "group", "group": "ghosts"}, wq, db, config
     )
     assert resp["ok"] is False
-    assert "no member nodes" in resp["error"]
+    assert "mch group create ghosts" in resp["error"]
 
 
 # ------------------------------------------------------------------

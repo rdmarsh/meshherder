@@ -141,6 +141,111 @@ async def test_delete_node_removes_local_state(db):
 
 
 # ------------------------------------------------------------------
+# groups registry (first-class groups, R4 S1)
+# ------------------------------------------------------------------
+
+async def test_create_group_is_idempotent_and_listed_with_member_count(db):
+    assert await db.group_exists("field") is False
+    await db.create_group("field")
+    await db.create_group("field")  # idempotent — no duplicate-key error
+    assert await db.group_exists("field") is True
+
+    await db.upsert_node(Node(pubkey="aa", name="A", group="field"))
+    await db.upsert_node(Node(pubkey="bb", name="B", group="field"))
+    await db.upsert_node(Node(pubkey="cc", name="C"))  # ungrouped
+
+    groups = await db.list_groups()
+    assert [g.name for g in groups] == ["field"]
+    assert groups[0].member_count == 2
+
+
+async def test_list_groups_orders_by_name(db):
+    await db.create_group("solar")
+    await db.create_group("field")
+    await db.create_group("rooftop")
+    assert [g.name for g in await db.list_groups()] == ["field", "rooftop", "solar"]
+
+
+async def test_delete_group_cascades_hard(db):
+    await db.create_group("field")
+    await db.upsert_node(Node(pubkey="aa", name="A", group="field"))
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.GROUP, scope_id="field", key="name", desired="x")
+    )
+    await db.set_desired_operation(
+        DesiredOperation(scope_type=Scope.GROUP, scope_id="field", command="clock sync")
+    )
+
+    await db.delete_group("field")
+
+    assert await db.group_exists("field") is False
+    # members become ungrouped, not deleted
+    node = await db.get_node("aa")
+    assert node is not None and node.group is None
+    # the group's desired rows are gone
+    assert await db.get_desired_settings(Scope.GROUP, "field") == []
+    assert await db.get_desired_operations(Scope.GROUP, "field") == []
+
+
+async def test_rename_group_moves_everything_in_one_transaction(db):
+    await db.create_group("field")
+    await db.upsert_node(Node(pubkey="aa", name="A", group="field"))
+    await db.set_desired_setting(
+        DesiredSetting(scope_type=Scope.GROUP, scope_id="field", key="name", desired="x")
+    )
+    await db.set_desired_operation(
+        DesiredOperation(scope_type=Scope.GROUP, scope_id="field", command="clock sync")
+    )
+
+    await db.rename_group("field", "outdoor")
+
+    assert await db.group_exists("outdoor") is True
+    assert await db.group_exists("field") is False
+    node = await db.get_node("aa")
+    assert node is not None and node.group == "outdoor"
+    assert [s.key for s in await db.get_desired_settings(Scope.GROUP, "outdoor")] == ["name"]
+    assert await db.get_desired_settings(Scope.GROUP, "field") == []
+    assert [o.command for o in await db.get_desired_operations(Scope.GROUP, "outdoor")] == [
+        "clock sync"
+    ]
+
+
+async def test_migration_seeds_groups_from_membership_and_scopes(tmp_path):
+    """A pre-registry DB (user_version 2) seeds the groups table from existing data on upgrade.
+
+    Sources: distinct nodes.node_group ∪ distinct group-scoped scope_ids in
+    desired_settings/desired_operations (R4 S1 decision 5).
+    """
+    path = tmp_path / "legacy_groups.db"
+    async with aiosqlite.connect(path) as conn:
+        await conn.executescript(_SCHEMA)
+        await conn.execute("INSERT INTO nodes (pubkey, name, node_group) VALUES ('aa','A','field')")
+        await conn.execute("INSERT INTO nodes (pubkey, name, node_group) VALUES ('bb','B','field')")
+        await conn.execute("INSERT INTO nodes (pubkey, name, node_group) VALUES ('cc','C',NULL)")
+        await conn.execute(
+            "INSERT INTO desired_settings (scope_type, scope_id, key, desired) "
+            "VALUES ('group','solar','name','x')"
+        )
+        await conn.execute(
+            "INSERT INTO desired_operations (scope_type, scope_id, command) "
+            "VALUES ('group','rooftop','clock sync')"
+        )
+        await conn.execute("PRAGMA user_version = 2")
+        await conn.commit()
+    assert await _user_version(path) == 2
+
+    d = Database(path)
+    await d.open()
+    groups = {g.name for g in await d.list_groups()}
+    field = next(g for g in await d.list_groups() if g.name == "field")
+    await d.close()
+
+    assert groups == {"field", "solar", "rooftop"}
+    assert field.member_count == 2
+    assert await _user_version(path) == _CURRENT_SCHEMA_VERSION
+
+
+# ------------------------------------------------------------------
 # desired_settings (layered, CLI/API-authored source of truth)
 # ------------------------------------------------------------------
 
