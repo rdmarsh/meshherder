@@ -108,7 +108,7 @@ There are two kinds of state, and they live in two different places:
   previous in-memory config stays active.
 - **Desired state and inventory** — which nodes are managed, their groups and labels, the global and
   per-group defaults, the facts collected, and every desired setting — live in the **SQLite
-  database**. You edit them with `mch config set` / `mch config unset` (see *Editing desired state in
+  database**. You edit them with `mch node set` / `mch node unset` (see *Editing desired state in
   the database* below), and back them up with `mch fleet export`.
 
 The daemon **refuses to start** if `config.yaml` still carries a `nodes:`, `groups:`, `global:`, or
@@ -135,7 +135,7 @@ scheduler:
 
 With the daemon running, bring nodes under management and set their desired state in the DB — see
 *Editing desired state in the database* and *Commissioning a new node* below. In short:
-`mch node adopt` / `mch node new` add a node to the inventory, then `mch config set` records desired
+`mch node adopt` / `mch node new` add a node to the inventory, then `mch node set` records desired
 settings. Run `mch gateway contacts` to list repeater nodes visible to the gateway that are not yet
 managed.
 
@@ -188,7 +188,7 @@ you an explicit record of the credential that node should accept and avoids acci
 fleet-wide password assumption to hardware that has drifted.
 
 As a rule of thumb: desired state (audited or enforced by mchd) lives in the DB, edited with
-`mch config set`; `secrets.yaml` is for credentials and identity material mchd can use to
+`mch node set`; `secrets.yaml` is for credentials and identity material mchd can use to
 authenticate or replace hardware. Secrets are not treated as normal drift-corrected settings. The exception is
 commissioning/replacement, where mchd intentionally sends the stored password or `prv_key` to
 blank hardware as mesh commands as part of taking ownership of that node. It still does not edit
@@ -250,8 +250,8 @@ mch node adopt aabbccdd1122... --radio 915.075,125,9,5 --label MySite-East
 
    `adopt` adds the node to the DB inventory, installs a direct route, and confirms it answers.
    If the node needs a login password, add it to `secrets.yaml` keyed by its pubkey prefix.
-4. Record any desired settings with `mch config set` (see *Editing desired state in the database*),
-   for example `mch config set MySite-East name "My Repeater" --policy enforce`.
+4. Record any desired settings with `mch node set` (see *Editing desired state in the database*),
+   for example `mch node set MySite-East name "My Repeater" --policy enforce`.
 5. Run `mch fleet status` to confirm the node is now known, then `mch fleet sync <prefix>` to sync it
    immediately without waiting for the scheduler.
 
@@ -313,7 +313,7 @@ mch fleet status <label|prefix>   # filtered table (single match hints `mch node
 mch node status <label|prefix>      # full detail for one node (facts, settings, schedule, activity)
 mch service configtest                # validate the daemon's /etc/meshherder/config.yaml
 mch fleet suggest                    # suggested txdelay for every node based on neighbour count
-mch fleet suggest <label|prefix>     # full suggestions + the `mch config set` commands to apply them
+mch fleet suggest <label|prefix>     # full suggestions + the `mch node set` commands to apply them
 mch gateway contacts                # gateway contacts not yet managed in the DB
 mch node discover --radio F,B,S,C  # active bounded scan on a temporary gateway radio
 ```
@@ -332,12 +332,12 @@ are synchronous, so `mch fleet status <node>` shows the new intent immediately; 
 the next sync (or `mch fleet sync <node>`).
 
 ```
-mch config set <prefix> txdelay 14          # node scope
-mch config set --group solar txdelay 20     # group scope
-mch config set --global default_policy audit
-mch config set --global ver --policy fact   # collect a read-only fact (no value); policy: enforce/audit/fact/skip
-mch config set <prefix> name_prefix "🌞 "    # directives: name_prefix, default_policy, via_radio
-mch config unset <prefix> txdelay           # remove a DB-set value (observed state untouched)
+mch node set <prefix> txdelay 14            # node scope
+mch group set solar txdelay 20              # group scope
+mch fleet set default_policy audit          # fleet-wide default (groups and nodes may override)
+mch fleet set ver --policy fact             # collect a read-only fact (no value); policy: enforce/audit/fact/skip
+mch node set <prefix> name_prefix "🌞 "      # directives: name_prefix, default_policy, via_radio
+mch node unset <prefix> txdelay             # remove a DB-set value (observed state untouched)
 mch config show <prefix>                    # list every key resolving for the node (policy, desired, from, observed)
 mch config show <prefix> txdelay            # explain one key: per-scope rows, resolved value, observed
 mch config show --global                    # list the rows set at global scope (or --group NAME)
@@ -583,8 +583,8 @@ code): it exits `2` when any issue is present. Firmware age is **advisory** — 
 
 ### Changing a setting fleet-wide
 
-Set the value at group or global scope in the DB — `mch config set --group repeaters powersaving on
---policy enforce`, or `mch config set --global …` for the whole fleet — then run `mch fleet sync` to
+Set the value at group or fleet scope in the DB — `mch group set repeaters powersaving on
+--policy enforce`, or `mch fleet set …` for the whole fleet — then run `mch fleet sync` to
 push the change to all nodes without waiting for the scheduler. (Assign a node to a group with
 `mch fleet import` or during commissioning.)
 
@@ -627,7 +627,7 @@ mch node discover --radio R --unknown-only  Hide fully managed discovery results
 mch node adopt PUBKEY --radio R    Add a discovered running node to DB + gateway contact (direct route)
 mch node probe <node> --radio R [--login] [--advert]  Read-only reachability check on a given radio
 mch fleet suggest                      Suggested txdelay for all nodes based on neighbour count
-mch fleet suggest <label|prefix>       Full suggestions + the `mch config set` commands for one node
+mch fleet suggest <label|prefix>       Full suggestions + the `mch node set` commands for one node
 mch fleet logs                      Recent per-node activity across all nodes
 mch fleet logs <prefix>             Activity for one node
 mch gateway contacts                  Repeater nodes visible to the gateway not yet managed in the DB

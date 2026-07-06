@@ -34,6 +34,23 @@ existing nouns yet. 1017 tests pass, ruff + mypy clean.
 is already merged to `main`, proceed with no rebase; land each slice `--no-ff` to `main` locally
 (gh unavailable in sandbox; operator pushes/PR-reviews after).
 
+**RECOMMENDATIONS-4 — S4 done (2026-07-06, branch `feat-r4-slice4-scope-grammar`).** `set`/`unset`
+move to the scope nouns. 1020 tests pass, ruff + mypy clean.
+- New: `node set/unset NODE KEY [VAL]`, `group set/unset NAME KEY [VAL]`, `fleet set/unset KEY
+  [VAL]`, each with explicit positionals (no nargs `ARGS…` hack) and a shared `--policy` option.
+  `config set`/`config unset` and the `--group`/`--global` flags are deleted. Core validation/RPC
+  factored into `_send_set` + `_value_policy_detail`; RPC verbs unchanged (`set_setting`/
+  `unset_setting` with scope node/group/global — fleet maps to scope `global`, decision 1).
+- `fleet set` echoes the decision-10 re-teach line: `fleet default KEY = VAL (groups and nodes may
+  override)`. Directives ride along unchanged — they're in `settable_keys()` (decision 11), pinned
+  by `test_fleet_set_accepts_name_prefix_directive`.
+- `_scope_from_flags` survives one more slice: only `config show` still uses `--group`/`--global`;
+  both die together in S5.
+- Live caller fixed: `fleet suggest` now emits runnable `mch node set …` recipes (was `mch config
+  set …`). `help concepts` Scope paragraph rewritten to scope-as-noun. Docs (README/man/website)
+  set/unset examples + prose swapped to the scope nouns to keep the docs-drift guard green; broader
+  vocabulary polish stays in S7.
+
 **RECOMMENDATIONS-4 — S3 done (2026-07-06, branch `feat-r4-slice3-autovalidate`).** Auto-validate
 on start and reload. The behaviour was already present — `main()` refuses to start on an invalid
 config (loud stderr + `CONFIG_ERROR_EXIT`), and `_reload_config` (which both the SIGHUP handler and
