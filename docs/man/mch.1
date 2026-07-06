@@ -134,7 +134,7 @@ nodes). Exits 0 when clean and 2 when any issue is present, for cron alerting.
 .B fleet suggest \fR[\fILABEL_OR_PREFIX\fR]
 Show suggested settings based on each node's neighbour count. With a match, shows
 detailed suggestions and the ready-to-run
-.B "mch config set"
+.B "mch node set"
 commands to apply them.
 .TP
 .B fleet plan
@@ -318,28 +318,29 @@ against the configured gateway serial device, then restart
 after the admin session.
 .SS config \(em desired state and backup
 .TP
-.B config set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|skip\fR]
-Record a desired setting in the database, the authoritative source of desired
-state. \fIKEY\fR is a writable setting (for example \fBname\fR or \fBtxdelay\fR) or
-a directive (\fBname_prefix\fR, \fBdefault_policy\fR, \fBvia_radio\fR). The write is
-synchronous and does not trigger a sync; run
+.B node set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|fact|skip\fR]
+Record a desired setting on one node in the database, the authoritative source
+of desired state. \fIKEY\fR is a writable setting (for example \fBname\fR or
+\fBtxdelay\fR) or a directive (\fBname_prefix\fR, \fBdefault_policy\fR,
+\fBvia_radio\fR). The write is synchronous and does not trigger a sync; run
 .B "fleet sync"
 .I NODE
-to converge. Use
-.B \-\-group
-.I NAME
+to converge. For wider scopes use
+.B "group set"
+.I "NAME KEY"
 or
-.B \-\-global
-to set the value at group or global scope instead of one node.
+.B "fleet set"
+.IR KEY .
 .TP
-.B config unset \fINODE KEY\fR
-Remove a database-set desired setting; observed state is left intact. Accepts
-.B \-\-group
-.I NAME
+.B node unset \fINODE KEY\fR
+Remove a node's database-set desired setting; observed state is left intact.
+The scope-matching verbs
+.B "group unset"
+.I "NAME KEY"
 and
-.B \-\-global
-like
-.BR "config set" .
+.B "fleet unset"
+.I KEY
+clear group and fleet defaults.
 .TP
 .B config show \fINODE\fR [\fIKEY\fR]
 Show desired state. With just

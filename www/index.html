@@ -107,7 +107,7 @@ scheduler:
     <p>
       Run <code>mch gateway contacts</code> to list repeater nodes visible to the gateway that
       are not yet managed, then bring one under management with <code>mch node adopt</code> and set
-      its desired state with <code>mch config set</code> (or seed many at once with
+      its desired state with <code>mch node set</code> (or seed many at once with
       <code>mch fleet import</code>).
     </p>
   </section>
@@ -134,7 +134,7 @@ mch node new                       # add a fresh or replacement node (interactiv
 mch fleet logs                     # recent per-node activity across all nodes
 mch fleet logs &lt;prefix&gt;            # activity for one node
 mch fleet suggest                 # suggested txdelay per node based on neighbour count
-mch fleet suggest &lt;label|prefix&gt;  # full suggestions + the mch config set commands to apply</code></pre>
+mch fleet suggest &lt;label|prefix&gt;  # full suggestions + the mch node set commands to apply</code></pre>
   </section>
 
   <section id="testing">

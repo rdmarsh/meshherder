@@ -500,11 +500,11 @@ Policy — what mch does about a setting
   skip      ignore this key
 
 Scope — who a setting applies to
-  Set a value on one node, on a group, or on the whole fleet. A node's own
-  value beats its group's, which beats the fleet-wide value.
-  Two flag words, one rule: --group/--global choose the *scope of a setting*
-  (`config set --global ...`); --all applies an *action* to the whole fleet
-  (`node clean facts --all`).
+  Set a value on one node, on a group, or on the whole fleet, using the
+  matching noun: `node set NODE ...`, `group set NAME ...`, `fleet set ...`.
+  A node's own value beats its group's, which beats the fleet-wide value.
+  (Scope is the noun; --all is different — it applies an *action* to the whole
+  fleet, e.g. `node clean facts --all`.)
 
 A sync cycle
   mch works through the nodes one at a time, reads the settings it cares
@@ -2136,7 +2136,7 @@ def clean_settings(
 
     Orphans appear when a key is unset, dropped from a group/global, or the node
     leaves config. Observed rows are a cache, so deleting them is safe - they are
-    re-observed next sync if still wanted. Desired state (mch config set) is untouched.
+    re-observed next sync if still wanted. Desired state (mch node set) is untouched.
     """
     scopes = sum(1 for value in (node, group_name, all_nodes) if value)
     if scopes != 1:
@@ -2328,10 +2328,10 @@ def suggest(ctx: click.Context, query: str | None, as_json: bool) -> None:
 
     Prints the matching profile (e.g. rooftop, tower), suggested txdelay
     and universal settings with one-line explanations, and the ready-to-run
-    `mch config set` commands to apply them.
+    `mch node set` commands to apply them.
 
-    Requires a `neighbors` fact-policy key (mch config set --global neighbors
-    --policy fact) and at least one completed sync cycle to populate the count.
+    Requires a `neighbors` fact-policy key (mch fleet set neighbors --policy fact)
+    and at least one completed sync cycle to populate the count.
     """
     _show_suggestions(ctx, query, as_json)
 
@@ -2388,7 +2388,7 @@ def _suggest_detail(n: dict[str, Any]) -> None:
     if count is None:
         click.echo(
             "(no neighbour data - collect it with"
-            " `mch config set --global neighbors --policy fact`"
+            " `mch fleet set neighbors --policy fact`"
             " and run mch fleet sync to start collecting it)"
         )
         click.echo("")
@@ -2423,14 +2423,14 @@ def _suggest_detail(n: dict[str, Any]) -> None:
     for key, val, desc in settings:
         click.echo(f"  {key:<{key_w}}  {val:<{val_w}}  {desc}")
 
-    # Desired state lives in the DB now (sunset), so emit runnable `mch config set` commands
+    # Desired state lives in the DB now (sunset), so emit runnable `mch node set` commands
     # instead of a config.yaml block. Prefer the local label as the selector; fall back to the
     # pubkey prefix when the node has no label.
     selector = n.get("label") or (n.get("pubkey") or "")[:12]
     click.echo("")
     click.echo("To apply, run:")
     for key, val, _ in settings:
-        click.echo(f'  mch config set {selector} {key} "{val}" --policy enforce')
+        click.echo(f'  mch node set {selector} {key} "{val}" --policy enforce')
 
 
 # ---------------------------------------------------------------------------
@@ -2521,18 +2521,55 @@ def exec_cmd(ctx: click.Context, node: str, command: tuple[str, ...], yes: bool)
 
 
 # ---------------------------------------------------------------------------
-# set / unset (DB-authored desired state)
+# set / unset (DB-authored desired state), one verb pair per scope noun.
+# The resolution hierarchy Node > Group > Fleet maps onto the three nouns; the
+# daemon still stores fleet scope as scope_type 'global' (R4 decision 1 — a
+# deliberate CLI-only rename, not a DB migration).
 # ---------------------------------------------------------------------------
 
-def _scope_from_flags(group_name: str | None, global_scope: bool) -> str:
-    """Validate the --group/--global flags and return the scope name."""
-    if group_name and global_scope:
-        raise click.UsageError("choose at most one of --group / --global")
-    if global_scope:
-        return "global"
-    if group_name:
-        return "group"
-    return "node"
+_SET_POLICY_HELP = (
+    "How mch treats this setting: enforce = write it to the node; audit = report drift but "
+    "don't change the node; fact = just collect and show the node's current value; skip = "
+    "ignore this key. Default: inherit."
+)
+
+
+def _policy_option(fn: Any) -> Any:
+    """Shared --policy option for the three scope `set` commands."""
+    return click.option(
+        "--policy",
+        type=click.Choice(["enforce", "audit", "fact", "skip"]),
+        default=None,
+        help=_SET_POLICY_HELP,
+    )(fn)
+
+
+def _value_policy_detail(data: dict[str, Any]) -> str:
+    """The '= VALUE policy=P' tail shown after a set, from the daemon's echoed data."""
+    parts = []
+    if data.get("value") is not None:
+        parts.append(f"= {data['value']!r}")
+    if data.get("policy"):
+        parts.append(f"policy={data['policy']}")
+    return " ".join(parts) or "(no change)"
+
+
+def _send_set(
+    ctx: click.Context, req: dict[str, Any], key: str, value: str | None, policy: str | None
+) -> dict[str, Any]:
+    """Validate then send a set_setting RPC. ``req`` carries the scope keys (query/scope/group)."""
+    if value is None and policy is None:
+        raise click.UsageError("provide a VALUE, --policy, or both")
+    # A read-only fact key (e.g. ver) is not a writable setting but may be collected with
+    # --policy fact/skip; let it through and let the daemon enforce the precise rules. A bare
+    # unknown key is a usage error here. Directives (name_prefix/default_policy/via_radio) are
+    # in settable_keys(), so they ride along unchanged (R4 decision 11).
+    if key not in settable_keys() | readable_observation_keys():
+        valid = ", ".join(sorted(settable_keys()))
+        raise click.UsageError(f"{key!r} is not a writable setting (choose from: {valid})")
+    req.update({"cmd": "set_setting", "key": key, "value": value, "policy": policy})
+    data: dict[str, Any] = _check(_rpc(ctx.obj["socket"], req))
+    return data
 
 
 def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) -> None:
@@ -2548,34 +2585,16 @@ def _scoped_target_echo(verb: str, key: str, detail: str, data: dict[str, Any]) 
         click.echo(f"{verb} {key}{suffix}  on {label} ({data['pubkey'][:8]})")
 
 
-@config_group.command("set")
-@click.argument("args", nargs=-1, required=True, metavar="[NODE] KEY [VALUE]")
-@click.option("--group", "group_name", default=None,
-              help="Set at group scope: applies to every node in the group.")
-@click.option("--global", "global_scope", is_flag=True,
-              help="Set at global scope: applies to every managed node.")
-@click.option(
-    "--policy",
-    type=click.Choice(["enforce", "audit", "fact", "skip"]),
-    default=None,
-    help="How mch treats this setting: enforce = write it to the node; "
-         "audit = report drift but don't change the node; fact = just collect and "
-         "show the node's current value; skip = ignore this key. Default: inherit.",
-)
+@node_group.command("set")
+@click.argument("node")
+@click.argument("key")
+@click.argument("value", required=False, default=None)
+@_policy_option
 @click.pass_context
-def set_setting(
-    ctx: click.Context,
-    args: tuple[str, ...],
-    group_name: str | None,
-    global_scope: bool,
-    policy: str | None,
+def node_set(
+    ctx: click.Context, node: str, key: str, value: str | None, policy: str | None
 ) -> None:
-    """Set a desired value for a node, a group, or the whole fleet.
-
-    \b
-    One node:    mch config set NODE KEY [VALUE]
-    A group:     mch config set --group NAME KEY [VALUE]
-    Every node:  mch config set --global KEY [VALUE]
+    """Set a desired value on one NODE.
 
     \b
     NODE   see `mch help selectors`.
@@ -2585,94 +2604,83 @@ def set_setting(
            policy with --policy; --policy fact/skip never take a value.
 
     A node's own value beats its group's, which beats the fleet-wide value.
-    The change is saved at once (`mch fleet status` shows it immediately);
-    nodes catch up on the next sync, or run `mch fleet sync` to catch up now.
+    The change is saved at once (`mch node status NODE` shows it immediately);
+    the node catches up on the next sync, or run `mch fleet sync NODE` to catch up now.
     """
-    scope = _scope_from_flags(group_name, global_scope)
-    # With nargs the positionals shift: group/global drop the NODE arg, so KEY is first.
-    if scope == "node":
-        if not 2 <= len(args) <= 3:
-            raise click.UsageError("usage: mch config set NODE KEY [VALUE]")
-        node, key, value = args[0], args[1], (args[2] if len(args) == 3 else None)
-    else:
-        if not 1 <= len(args) <= 2:
-            raise click.UsageError(
-                "usage: mch config set --group NAME KEY [VALUE]  (or --global KEY [VALUE])"
-            )
-        node, key, value = None, args[0], (args[1] if len(args) == 2 else None)
-
-    if value is None and policy is None:
-        raise click.UsageError("provide a VALUE, --policy, or both")
-    # A read-only fact key (e.g. ver) is not a writable setting but may be collected
-    # with --policy fact/skip; let it through and let the daemon enforce the precise
-    # rules (no value, only fact/skip). A bare unknown key is still a usage error here.
-    if key not in settable_keys() | readable_observation_keys():
-        valid = ", ".join(sorted(settable_keys()))
-        raise click.UsageError(f"{key!r} is not a writable setting (choose from: {valid})")
-
-    req: dict[str, Any] = {"cmd": "set_setting", "key": key, "value": value, "policy": policy}
-    if scope == "group":
-        req.update({"scope": "group", "group": group_name})
-    elif scope == "global":
-        req["scope"] = "global"
-    else:
-        req["query"] = node
-
-    data = _check(_rpc(ctx.obj["socket"], req))
-    parts = []
-    if data.get("value") is not None:
-        parts.append(f"= {data['value']!r}")
-    if data.get("policy"):
-        parts.append(f"policy={data['policy']}")
-    detail = " ".join(parts) or "(no change)"
-    _scoped_target_echo("set", key, detail, data)
-    if data.get("scope", "node") == "node":
-        click.echo(f"run: mch fleet sync {data['pubkey'][:8]}  to converge now")
-    else:
-        click.echo("run: mch fleet sync  to converge the fleet now")
+    data = _send_set(ctx, {"query": node}, key, value, policy)
+    _scoped_target_echo("set", key, _value_policy_detail(data), data)
+    click.echo(f"run: mch fleet sync {data['pubkey'][:8]}  to converge now")
 
 
-@config_group.command("unset")
-@click.argument("args", nargs=-1, required=True, metavar="[NODE] KEY")
-@click.option("--group", "group_name", default=None,
-              help="Unset at group scope.")
-@click.option("--global", "global_scope", is_flag=True,
-              help="Unset at global scope.")
+@node_group.command("unset")
+@click.argument("node")
+@click.argument("key")
 @click.pass_context
-def unset_setting(
-    ctx: click.Context,
-    args: tuple[str, ...],
-    group_name: str | None,
-    global_scope: bool,
+def node_unset(ctx: click.Context, node: str, key: str) -> None:
+    """Clear a desired value on one NODE (leaves the node's reported value alone)."""
+    data = _check(_rpc(
+        ctx.obj["socket"], {"cmd": "unset_setting", "key": key, "query": node}
+    ))
+    _scoped_target_echo("unset", key, "", data)
+
+
+@group_group.command("set")
+@click.argument("name")
+@click.argument("key")
+@click.argument("value", required=False, default=None)
+@_policy_option
+@click.pass_context
+def group_set(
+    ctx: click.Context, name: str, key: str, value: str | None, policy: str | None
 ) -> None:
-    """Clear a desired value you set earlier (leaves the node's reported value alone).
+    """Set a desired value on every node in GROUP NAME.
 
-    \b
-    One node:    mch config unset NODE KEY
-    A group:     mch config unset --group NAME KEY
-    Every node:  mch config unset --global KEY
+    The group must exist (create it with `mch group create`). A node's own value beats its
+    group's; run `mch fleet sync` to converge the fleet now.
     """
-    scope = _scope_from_flags(group_name, global_scope)
-    if scope == "node":
-        if len(args) != 2:
-            raise click.UsageError("usage: mch config unset NODE KEY")
-        node, key = args[0], args[1]
-    else:
-        if len(args) != 1:
-            raise click.UsageError(
-                "usage: mch config unset --group NAME KEY  (or --global KEY)"
-            )
-        node, key = None, args[0]
+    data = _send_set(ctx, {"scope": "group", "group": name}, key, value, policy)
+    _scoped_target_echo("set", key, _value_policy_detail(data), data)
+    click.echo("run: mch fleet sync  to converge the fleet now")
 
-    req: dict[str, Any] = {"cmd": "unset_setting", "key": key}
-    if scope == "group":
-        req.update({"scope": "group", "group": group_name})
-    elif scope == "global":
-        req["scope"] = "global"
-    else:
-        req["query"] = node
 
-    data = _check(_rpc(ctx.obj["socket"], req))
+@group_group.command("unset")
+@click.argument("name")
+@click.argument("key")
+@click.pass_context
+def group_unset(ctx: click.Context, name: str, key: str) -> None:
+    """Clear a desired value on GROUP NAME (leaves nodes' reported values alone)."""
+    data = _check(_rpc(
+        ctx.obj["socket"], {"cmd": "unset_setting", "key": key, "scope": "group", "group": name}
+    ))
+    _scoped_target_echo("unset", key, "", data)
+
+
+@fleet_group.command("set")
+@click.argument("key")
+@click.argument("value", required=False, default=None)
+@_policy_option
+@click.pass_context
+def fleet_set(ctx: click.Context, key: str, value: str | None, policy: str | None) -> None:
+    """Set a fleet-wide default KEY (groups and nodes may override it).
+
+    KEY/VALUE work exactly as for `mch node set`. This is the widest, least-specific scope:
+    a group or node value beats it. Run `mch fleet sync` to converge the fleet now.
+    """
+    data = _send_set(ctx, {"scope": "global"}, key, value, policy)
+    # Decision 10: re-teach resolution on every use. The fleet value is a *default*, not a force —
+    # this one line heads off the "does this force every node now?" misreading.
+    click.echo(f"fleet default {key} {_value_policy_detail(data)} (groups and nodes may override)")
+    click.echo("run: mch fleet sync  to converge the fleet now")
+
+
+@fleet_group.command("unset")
+@click.argument("key")
+@click.pass_context
+def fleet_unset(ctx: click.Context, key: str) -> None:
+    """Clear a fleet-wide default KEY."""
+    data = _check(_rpc(
+        ctx.obj["socket"], {"cmd": "unset_setting", "key": key, "scope": "global"}
+    ))
     _scoped_target_echo("unset", key, "", data)
 
 
@@ -2791,6 +2799,21 @@ def _render_config_single_key(key: str, data: dict[str, Any]) -> None:
             sd = repr(s["desired"]) if s["desired"] is not None else "-"
             sp = s["policy"] or "(inherit)"
             click.echo(f"    {label:<16}  policy={sp:<9}  desired={sd}")
+
+
+def _scope_from_flags(group_name: str | None, global_scope: bool) -> str:
+    """Validate the --group/--global flags and return the scope name.
+
+    Only `config show` still uses this — `set`/`unset` moved to the scope nouns (R4 S4). It
+    dies with `config show` in S5.
+    """
+    if group_name and global_scope:
+        raise click.UsageError("choose at most one of --group / --global")
+    if global_scope:
+        return "global"
+    if group_name:
+        return "group"
+    return "node"
 
 
 @config_group.command("show")

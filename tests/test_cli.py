@@ -1281,11 +1281,11 @@ def test_node_show_blank_mesh_name_renders_dash():
     assert "mesh name:   -" in result.output
 
 
-def test_config_set_usage_shows_positional_metavar():
-    # S2.7: usage reads with the real positionals, not the nargs `ARGS...` hack.
+def test_node_set_usage_shows_positional_metavar():
+    # Scope-noun set (R4 S4): each scope's set has explicit positionals, no nargs `ARGS...` hack.
     runner = CliRunner()
-    result = runner.invoke(cli, ["config", "set"])
-    assert "[NODE] KEY [VALUE]" in result.output
+    result = runner.invoke(cli, ["node", "set"])
+    assert "NODE KEY [VALUE]" in result.output
     assert "ARGS..." not in result.output
 
 
@@ -2637,8 +2637,8 @@ def test_suggest_detail_single_node():
     assert result.exit_code == 0
     assert "neighbours:" in result.output
     assert "rooftop" in result.output
-    # Suggest emits runnable `mch config set` commands (desired state lives in the DB now).
-    assert "mch config set site-a" in result.output
+    # Suggest emits runnable `mch node set` commands (desired state lives in the DB now).
+    assert "mch node set site-a" in result.output
     assert "--policy enforce" in result.output
 
 
@@ -3461,7 +3461,7 @@ def test_set_sends_node_key_value_and_reports():
         result = runner.invoke(cli, [
                             "--socket",
                             "/fake.sock",
-                            "config",
+                            "node",
                             "set",
                             "site-a",
                             "txdelay",
@@ -3490,7 +3490,7 @@ def test_set_passes_policy():
             [
                             "--socket",
                             "/fake.sock",
-                            "config",
+                            "node",
                             "set",
                             "site-a",
                             "txdelay",
@@ -3513,7 +3513,7 @@ def test_set_policy_only_override():
             cli, [
                             "--socket",
                             "/fake.sock",
-                            "config",
+                            "node",
                             "set",
                             "site-a",
                             "txdelay",
@@ -3537,7 +3537,7 @@ def test_set_rejects_unknown_key_before_rpc():
     rpc = MagicMock(return_value=_set_resp())
     with patch("mch.cli._rpc", rpc):
         result = runner.invoke(
-            cli, ["--socket", "/fake.sock", "config", "set", "site-a", "nonsense", "1"]
+            cli, ["--socket", "/fake.sock", "node", "set", "site-a", "nonsense", "1"]
         )
 
     assert result.exit_code != 0
@@ -3552,7 +3552,7 @@ def test_set_requires_value_or_policy():
         result = runner.invoke(cli, [
                             "--socket",
                             "/fake.sock",
-                            "config",
+                            "node",
                             "set",
                             "site-a",
                             "txdelay",
@@ -3569,7 +3569,7 @@ def test_set_invalid_policy_choice_rejected():
         cli, [
                         "--socket",
                         "/fake.sock",
-                        "config",
+                        "node",
                         "set",
                         "site-a",
                         "txdelay",
@@ -3585,7 +3585,7 @@ def test_set_fact_policy_accepted_in_choice():
     # 'fact' is a valid --policy choice and Click must not reject it.
     runner = CliRunner()
     result = runner.invoke(
-        cli, ["--socket", "/fake.sock", "config", "set", "site-a", "txdelay", "--policy", "fact"]
+        cli, ["--socket", "/fake.sock", "node", "set", "site-a", "txdelay", "--policy", "fact"]
     )
     assert "'fact'" not in result.output or "invalid choice" not in result.output.lower()
 
@@ -3597,7 +3597,7 @@ def test_set_readonly_fact_key_passes_gate_to_daemon():
     rpc = MagicMock(return_value=_set_resp(value=None, policy="fact"))
     with patch("mch.cli._rpc", rpc):
         result = runner.invoke(
-            cli, ["--socket", "/fake.sock", "config", "set", "site-a", "ver", "--policy", "fact"]
+            cli, ["--socket", "/fake.sock", "node", "set", "site-a", "ver", "--policy", "fact"]
         )
 
     assert result.exit_code == 0
@@ -3615,7 +3615,7 @@ def test_unset_sends_query_and_key():
         result = runner.invoke(cli, [
                             "--socket",
                             "/fake.sock",
-                            "config",
+                            "node",
                             "unset",
                             "site-a",
                             "txdelay",
@@ -3635,7 +3635,7 @@ def test_unset_surfaces_daemon_error():
         result = runner.invoke(cli, [
                             "--socket",
                             "/fake.sock",
-                            "config",
+                            "node",
                             "unset",
                             "site-a",
                             "txdelay",
@@ -3806,14 +3806,14 @@ def test_show_no_args_is_usage_error():
     rpc.assert_not_called()
 
 
-def test_set_group_scope_sends_group_request():
+def test_group_set_sends_group_request():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
         "scope": "group", "group": "solar", "key": "txdelay", "value": "14", "policy": None,
     }})
     with patch("mch.cli._rpc", rpc):
         result = runner.invoke(
-            cli, ["--socket", "/fake.sock", "config", "set", "--group", "solar", "txdelay", "14"]
+            cli, ["--socket", "/fake.sock", "group", "set", "solar", "txdelay", "14"]
         )
 
     assert result.exit_code == 0
@@ -3824,14 +3824,14 @@ def test_set_group_scope_sends_group_request():
     assert "group 'solar'" in result.output
 
 
-def test_set_global_scope_sends_global_request():
+def test_fleet_set_sends_global_request_and_reteaches():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
         "scope": "global", "key": "txdelay", "value": "14", "policy": None,
     }})
     with patch("mch.cli._rpc", rpc):
         result = runner.invoke(
-            cli, ["--socket", "/fake.sock", "config", "set", "--global", "txdelay", "14"]
+            cli, ["--socket", "/fake.sock", "fleet", "set", "txdelay", "14"]
         )
 
     assert result.exit_code == 0
@@ -3839,27 +3839,20 @@ def test_set_global_scope_sends_global_request():
         "cmd": "set_setting", "scope": "global",
         "key": "txdelay", "value": "14", "policy": None,
     }
-    assert "all managed nodes" in result.output
+    # Decision 10: fleet set re-teaches that it is a default, not a force.
+    assert "fleet default txdelay = '14' (groups and nodes may override)" in result.output
 
 
-def test_set_accepts_name_prefix_directive():
+def test_fleet_set_accepts_name_prefix_directive():
     # name_prefix is a directive but still operator-settable; it must not be rejected
-    # as "not a writable setting" before the RPC.
+    # as "not a writable setting" before the RPC (R4 decision 11).
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
         "scope": "global", "key": "name_prefix", "value": "\U0001f31e", "policy": None,
     }})
     with patch("mch.cli._rpc", rpc):
         result = runner.invoke(
-            cli, [
-                            "--socket",
-                            "/fake.sock",
-                            "config",
-                            "set",
-                            "--global",
-                            "name_prefix",
-                            "\U0001f31e",
-                        ]
+            cli, ["--socket", "/fake.sock", "fleet", "set", "name_prefix", "\U0001f31e"]
         )
 
     assert result.exit_code == 0
@@ -3867,35 +3860,12 @@ def test_set_accepts_name_prefix_directive():
     assert rpc.call_args.args[1]["scope"] == "global"
 
 
-def test_set_rejects_group_and_global_together():
-    runner = CliRunner()
-    rpc = MagicMock()
-    with patch("mch.cli._rpc", rpc):
-        result = runner.invoke(
-            cli,
-            [
-                            "--socket",
-                            "/fake.sock",
-                            "config",
-                            "set",
-                            "--group",
-                            "g",
-                            "--global",
-                            "txdelay",
-                            "14",
-                        ],
-        )
-
-    assert result.exit_code != 0
-    rpc.assert_not_called()
-
-
-def test_set_group_scope_validates_key_before_rpc():
+def test_group_set_validates_key_before_rpc():
     runner = CliRunner()
     rpc = MagicMock(return_value=_set_resp())
     with patch("mch.cli._rpc", rpc):
         result = runner.invoke(
-            cli, ["--socket", "/fake.sock", "config", "set", "--group", "g", "nonsense", "1"]
+            cli, ["--socket", "/fake.sock", "group", "set", "g", "nonsense", "1"]
         )
 
     assert result.exit_code != 0
@@ -3903,14 +3873,14 @@ def test_set_group_scope_validates_key_before_rpc():
     rpc.assert_not_called()
 
 
-def test_unset_group_scope_sends_group_request():
+def test_group_unset_sends_group_request():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {
         "scope": "group", "group": "solar", "key": "txdelay",
     }})
     with patch("mch.cli._rpc", rpc):
         result = runner.invoke(
-            cli, ["--socket", "/fake.sock", "config", "unset", "--group", "solar", "txdelay"]
+            cli, ["--socket", "/fake.sock", "group", "unset", "solar", "txdelay"]
         )
 
     assert result.exit_code == 0
@@ -3920,18 +3890,11 @@ def test_unset_group_scope_sends_group_request():
     assert "group 'solar'" in result.output
 
 
-def test_unset_global_scope_sends_global_request():
+def test_fleet_unset_sends_global_request():
     runner = CliRunner()
     rpc = MagicMock(return_value={"ok": True, "data": {"scope": "global", "key": "txdelay"}})
     with patch("mch.cli._rpc", rpc):
-        result = runner.invoke(cli, [
-                            "--socket",
-                            "/fake.sock",
-                            "config",
-                            "unset",
-                            "--global",
-                            "txdelay",
-                        ])
+        result = runner.invoke(cli, ["--socket", "/fake.sock", "fleet", "unset", "txdelay"])
 
     assert result.exit_code == 0
     assert rpc.call_args.args[1] == {
