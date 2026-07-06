@@ -13,12 +13,17 @@ partial. Each slice merged `--no-ff` to `main`. 994 tests pass, ruff + mypy clea
   by group/label, `help states`, fleet-outage advisory, `gateway contacts` table, `nodes.last_attempt_at`
   (schema v2) + TRIED column, output polish.
 - **S3:** clock fact refreshed after a *failed* `clock sync`; `operations:` section in `node show`.
-- **S4 (partial):** DONE — deleted dead `status`/`plan`/`issues`/`node` RPC verbs + `legacy_*`
+- **S4 (mostly done):** DONE — deleted dead `status`/`plan`/`issues`/`node` RPC verbs + `legacy_*`
   builders (all reads go through `fleet`/`fleet_node`), retired the hidden `node remove` alias
-  (`--force` moved to `mch node prune NODE --force`), `--json` on `node path`/`discover`/`fleet suggest`/
-  `node probe`, `ensure_ascii=False` in `--json`. DEFERRED to BACKLOG — the `cli.py` package split
-  (S4.2), the `_dispatch` handler-table refactor (S4.3), and `--json` on the prune/clean/import
-  preview payloads (S4.4 tail). These are large pure-move refactors best done as their own PRs.
+  (`--force` moved to `mch node prune NODE --force`) [S4.1]; `--json` on all read stragglers and the
+  prune/clean/import preview payloads [S4.4]; `ensure_ascii=False` in `--json` [S4.5]; and
+  `daemon._dispatch` is now a `dict[str, Handler]` table of `_handle_*` coroutines taking a bundled
+  `_Dispatch` context, with the repeated socket progress-callback + radio parsing factored out [S4.3].
+  DEFERRED (scoped in BACKLOG) — **S4.2**, the `cli.py` (~3.7k lines) → `src/mch/cli/` package split.
+  Evaluated this session: the render/base/wizard seams are clean, but `ruff` (F403/F405) and
+  `mypy --strict` reject the star-import ergonomics, so it becomes a large explicit-import exercise
+  across every module for zero behaviour change — best done as a focused PR with the app driven
+  end-to-end, not rushed alongside behavioural work.
 - **S5:** removed the retired HTTP API from `mchd.8` + added a docs-drift guard.
 
 **Bench-confirm owed (S3.1):** the failed-`clock sync` clock re-read is unit-tested but not yet
