@@ -34,6 +34,16 @@ existing nouns yet. 1017 tests pass, ruff + mypy clean.
 is already merged to `main`, proceed with no rebase; land each slice `--no-ff` to `main` locally
 (gh unavailable in sandbox; operator pushes/PR-reviews after).
 
+**RECOMMENDATIONS-4 — S3 done (2026-07-06, branch `feat-r4-slice3-autovalidate`).** Auto-validate
+on start and reload. The behaviour was already present — `main()` refuses to start on an invalid
+config (loud stderr + `CONFIG_ERROR_EXIT`), and `_reload_config` (which both the SIGHUP handler and
+the file-watcher call) loads strict, keeps the previous config on failure, and logs the rejection
+via `log.exception`. S3 adds the missing safety-net coverage: startup refuse-to-start (invalid +
+missing config, asserting the loud stderr) and reload-rejects-and-keeps-previous (asserting the old
+config survives, nothing is re-applied downstream, and the rejection is logged). `service
+configtest` stays the manual pre-flight for an edited file. No code change — coverage only.
+1021 tests pass, ruff + mypy clean.
+
 **RECOMMENDATIONS-4 — S2 done (2026-07-06, branch `feat-r4-slice2-renames`).** Mechanical renames,
 old paths deleted in the same change (alpha rule); no behaviour change beyond the `node move`
 sentinel. 1018 tests pass, ruff + mypy clean.
