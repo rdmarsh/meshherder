@@ -1866,7 +1866,7 @@ def probe(
     _render_probe_result(data)
 
 
-def _prune_one(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
+def _prune_one(ctx: click.Context, node: str, yes: bool, force: bool, as_json: bool) -> None:
     """Prune a single node. Refuses a still-managed node — retire it first, or use --force.
 
     Reuses the daemon's `remove` (dry-run preview + --yes execute). ``--force`` is the only
@@ -1885,16 +1885,21 @@ def _prune_one(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
         raise SystemExit(1)
     data = resp["data"]
 
-    click.echo("node to delete (history and all):")
-    click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
-    click.echo(f"  label:     {data.get('label') or '-'}")
-    click.echo(f"  mesh name: {data.get('name') or '-'}")
-    click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
-    if force and not data.get("retired"):
-        click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
-    click.echo("")
+    # Human view: show what would be / is being deleted. Suppressed under --json.
+    if not as_json:
+        click.echo("node to delete (history and all):")
+        click.echo(f"  pubkey:    {_pk(data.get('pubkey'))}")
+        click.echo(f"  label:     {data.get('label') or '-'}")
+        click.echo(f"  mesh name: {data.get('name') or '-'}")
+        click.echo(f"  last seen: {_ago(data.get('last_seen'))}")
+        if force and not data.get("retired"):
+            click.echo("  note:      still managed (not retired) — forced delete; it may re-seed")
+        click.echo("")
 
     if not yes:
+        if as_json:
+            _emit_json(data)
+            return
         again = f"mch node prune {node} --yes" + (" --force" if force else "")
         click.echo(f"run again with --yes to delete: {again}")
         click.echo("secrets.yaml entries are left unchanged")
@@ -1904,8 +1909,11 @@ def _prune_one(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
         ctx.obj["socket"],
         {"cmd": "remove", "query": data["pubkey"], "dry_run": False, "force": force},
     )
-    deleted = _check(del_resp).get("deleted", 0)
-    click.echo(f"deleted {deleted} node(s)")
+    del_data = _check(del_resp)
+    if as_json:
+        _emit_json(del_data)
+        return
+    click.echo(f"deleted {del_data.get('deleted', 0)} node(s)")
     click.echo("secrets.yaml entries are left unchanged")
 
 
@@ -1917,8 +1925,9 @@ def _prune_one(ctx: click.Context, node: str, yes: bool, force: bool) -> None:
     is_flag=True,
     help="With NODE: delete even a still-managed node (not retired); it may re-seed.",
 )
+@click.option("--json", "as_json", is_flag=True, help="Emit the candidate/result payload as JSON.")
 @click.pass_context
-def prune(ctx: click.Context, node: str | None, yes: bool, force: bool) -> None:
+def prune(ctx: click.Context, node: str | None, yes: bool, force: bool, as_json: bool) -> None:
     """Permanently delete retired nodes (the cleanup step after `mch node retire`).
 
     With no NODE, lists every retired node and deletes them all with --yes. Pass a NODE to
@@ -1928,10 +1937,13 @@ def prune(ctx: click.Context, node: str | None, yes: bool, force: bool) -> None:
     if force and not node:
         raise click.UsageError("--force applies to a single node: mch node prune NODE --force")
     if node:
-        _prune_one(ctx, node, yes, force)
+        _prune_one(ctx, node, yes, force, as_json)
         return
     resp = _rpc(ctx.obj["socket"], {"cmd": "prune", "dry_run": not yes})
     data = _check(resp)
+    if as_json:
+        _emit_json(data)
+        return
     candidates = data.get("candidates", [])
 
     if not candidates:
@@ -2062,6 +2074,7 @@ def _render_stale_table(
 @click.option("--all", "all_nodes", is_flag=True, help="Clean stale facts across the fleet.")
 @click.option("--fact", "fact_key", help="Only consider one fact key, e.g. powersavings.")
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed stale facts.")
+@click.option("--json", "as_json", is_flag=True, help="Emit the candidate/result payload as JSON.")
 @click.pass_context
 def clean_facts(
     ctx: click.Context,
@@ -2070,6 +2083,7 @@ def clean_facts(
     all_nodes: bool,
     fact_key: str | None,
     yes: bool,
+    as_json: bool,
 ) -> None:
     """List or delete cached facts no longer present in facts: config."""
     scopes = sum(1 for value in (node, group_name, all_nodes) if value)
@@ -2088,6 +2102,9 @@ def clean_facts(
         },
     )
     data = _check(resp)
+    if as_json:
+        _emit_json(data)
+        return
     _render_stale_table(
         data, noun_plural="facts", noun_singular="fact", key_header="FACT", yes=yes
     )
@@ -2099,6 +2116,7 @@ def clean_facts(
 @click.option("--all", "all_nodes", is_flag=True, help="Clean orphaned settings across the fleet.")
 @click.option("--setting", "setting_key", help="Only consider one setting key, e.g. txdelay.")
 @click.option("--yes", "-y", is_flag=True, help="Delete the listed orphaned settings.")
+@click.option("--json", "as_json", is_flag=True, help="Emit the candidate/result payload as JSON.")
 @click.pass_context
 def clean_settings(
     ctx: click.Context,
@@ -2107,6 +2125,7 @@ def clean_settings(
     all_nodes: bool,
     setting_key: str | None,
     yes: bool,
+    as_json: bool,
 ) -> None:
     """List or delete observed settings whose key is no longer desired.
 
@@ -2130,6 +2149,9 @@ def clean_settings(
         },
     )
     data = _check(resp)
+    if as_json:
+        _emit_json(data)
+        return
     _render_stale_table(
         data, noun_plural="settings", noun_singular="setting", key_header="SETTING", yes=yes
     )
@@ -2895,9 +2917,10 @@ def plan(ctx: click.Context, query: str | None, as_json: bool) -> None:
     help="For a backup that contains retired nodes: keep (restore them as retired) or skip "
     "(omit them). Required to write when the backup has retired nodes.",
 )
+@click.option("--json", "as_json", is_flag=True, help="Emit the preview/result payload as JSON.")
 @click.pass_context
 def import_config(
-    ctx: click.Context, config_file: Path | None, yes: bool, retired: str | None
+    ctx: click.Context, config_file: Path | None, yes: bool, retired: str | None, as_json: bool
 ) -> None:
     """Load desired settings from a YAML file — restore a backup, or migrate an old config.yaml.
 
@@ -2918,6 +2941,9 @@ def import_config(
     if retired is not None:
         cmd["retired"] = retired
     data = _check(_rpc(ctx.obj["socket"], cmd))
+    if as_json:
+        _emit_json(data)
+        return
     counts = data["counts"]
     total = data["total"]
     operations = data.get("operations", 0)

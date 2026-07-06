@@ -14,10 +14,9 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
 
 ### RECOMMENDATIONS-3 slice 4 — remaining items
 
-- **S4.4 tail:** `--json` was added to the read commands `node path`, `node discover`,
-  `fleet suggest`, `node probe` (and `gateway contacts` in S2.6). Still owed: `--json` on the
-  *preview payloads* of `node prune` / `node clean` / `config import`, plus short shape docstrings
-  on those daemon handlers and socket-contract coverage.
+- **S4.4: DONE** (Unreleased) — `--json` on `node path`, `node discover`, `fleet suggest`,
+  `node probe`, `gateway contacts`, and the preview payloads of `node prune` / `node clean facts` /
+  `node clean settings` / `config import`; each emits its daemon payload verbatim.
 - **S4.2 (deferred):** split `src/mch/cli.py` (~3.3k lines) into a `src/mch/cli/` package
   (`render.py`, `fleet.py`, `node.py`, `config_cmds.py`, `daemon_cmds.py`, `gateway.py`, `wizard.py`,
   `help_topics.py`). Pure-move refactor, its own PR; run `mch --help` diffs before/after and keep the
