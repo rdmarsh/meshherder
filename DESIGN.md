@@ -262,6 +262,31 @@ available. It is not designed around datacenter-style immediate reachability.
 - Recovery logic must be conservative around writes because a response can be lost after a write
   has taken effect.
 
+## CLI vocabulary: the scope-as-noun grid (R4, 2026-07-06)
+
+Desired-state *scope* is the noun. The resolution hierarchy Node > Group > Fleet maps onto three
+nouns that share the same verbs, so the model reads straight off the grammar:
+
+```
+              overview/detail    issues            desired state           sync           extras
+fleet         fleet status       fleet issues      fleet set KEY VAL       fleet sync     export / import
+group NAME    group status [N]   group issues N    group set N KEY VAL     group sync N   create / rename / delete
+node  NAME    node  status  N     node  issues  N   node  set  N KEY VAL    node  sync  N  retire/prune/exec/…
+```
+
+Plus `service` (daemon lifecycle) and `gateway`. The old `config` noun was removed entirely.
+
+**Deliberate non-change (decision 1):** the widest CLI noun is `fleet`, but the DB keeps
+`scope_type = 'global'` in `desired_settings`/`desired_operations`. The rename is CLI surface only —
+migrating the stored enum to `'fleet'` would be a data migration for zero operator benefit.
+
+**Hidden `global` synonym (decision 2, S6):** `mch global …` ≡ `mch fleet …`. This is an
+operator-preference exception to the no-hidden-commands rule. It is implemented as a root-group
+`get_command` mapping (`cli._RootGroup`), so `"global"` resolves to the `fleet` group object and
+every fleet verb aliases for free, while `global` never appears in `list_commands` / `--help` /
+README / man page. The word comes from the schema's `scope_type = 'global'` above. Pinned by
+`test_global_is_a_hidden_synonym_for_fleet`.
+
 ## Shared internal report model
 
 `mch` uses a single daemon-side report/action model rendered by the CLI (human tables and `--json`)

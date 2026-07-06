@@ -403,7 +403,23 @@ def _run_admin_session(
 # group
 # ---------------------------------------------------------------------------
 
-@click.group()
+class _RootGroup(click.Group):
+    """Root command group with one deliberate hidden synonym: ``global`` ≡ ``fleet`` (R4 S6).
+
+    This is an operator-preference exception to the no-hidden-commands rule, recorded in
+    DESIGN.md. It resolves in ``get_command`` only, so every fleet verb aliases for free
+    (`mch global status` ≡ `mch fleet status`, `mch global set …` ≡ `mch fleet set …`) while
+    ``global`` never appears in ``list_commands`` — so it stays out of ``--help``, the README,
+    and the man page. The word comes from the DB's ``scope_type = 'global'`` (decision 1).
+    """
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        if cmd_name == "global":
+            return super().get_command(ctx, "fleet")
+        return super().get_command(ctx, cmd_name)
+
+
+@click.group(cls=_RootGroup)
 @click.version_option(__version__, "-V", "--version")
 @click.option(
     "--socket", "-s",
