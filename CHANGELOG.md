@@ -16,7 +16,9 @@ and backlog history. Dates use the project repository's commit dates.
   `fleet_node` report model), `node exec` resolves via `fleet_node`, and the CLI's legacy shape
   fallbacks were removed. The hidden `node remove` alias was retired; its `--force` escape hatch
   (delete a still-managed node) moved onto `mch node prune NODE --force`. `--json` now emits readable
-  UTF-8 instead of `\uXXXX` surrogate escapes.
+  UTF-8 instead of `\uXXXX` surrogate escapes, and covers the read stragglers `node path` /
+  `node discover` / `fleet suggest` / `node probe` plus the preview payloads of `node prune` /
+  `node clean facts|settings` / `config import`.
 
 - **Stale observations no longer contradict reality (RECOMMENDATIONS-3 slice 3).** A failed
   `clock sync` now re-reads the clock too (not only a successful one), so a node whose sync keeps

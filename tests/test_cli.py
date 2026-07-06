@@ -1877,6 +1877,15 @@ def test_clean_facts_lists_candidates_without_deleting():
     assert "run again with --yes" in result.output
 
 
+def test_clean_facts_json_emits_payload_verbatim():
+    payload = {"candidates": [{"pubkey": "aa" * 32, "label": "site-a", "name": "Tower",
+                               "group": "default", "key": "powersavings", "value": "on",
+                               "collected_at": None}], "deleted": 0}
+    result = _run(["node", "clean", "facts", "--all", "--json"], {"ok": True, "data": payload})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
+
+
 def test_clean_facts_yes_reports_deleted_count():
     result = _run(["node", "clean", "facts", "site-a", "--yes"], _clean_facts_resp(
         candidates=[{
@@ -1924,6 +1933,21 @@ def test_prune_force_deletes_still_managed_node():
 def test_prune_force_requires_a_node():
     result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "node", "prune", "--force"])
     assert result.exit_code == 2  # usage error: --force applies to a single node
+
+
+def test_prune_bulk_json_emits_payload_verbatim():
+    # S4.4 tail: preview payloads honour --json.
+    payload = {"candidates": [{"pubkey": "aa" * 32, "label": "old", "name": "Old",
+                               "state": "retired", "last_seen": None}], "deleted": 0}
+    result = _run(["node", "prune", "--json"], {"ok": True, "data": payload})
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
+
+
+def test_prune_single_json_emits_candidate_verbatim():
+    result = _run(["node", "prune", "old-site", "--json"], _remove_resp())
+    assert result.exit_code == 0
+    assert json.loads(result.output) == _remove_resp()["data"]
 
 
 def _retire_resp(state="retired"):
@@ -3906,6 +3930,13 @@ def _import_resp(counts=None, total=0, warnings=None, written=0, dry_run=True,
         "retired_in_backup": retired_in_backup,
         "retired_mode": retired_mode,
     }}
+
+
+def test_import_json_emits_payload_verbatim():
+    resp = _import_resp(total=3, written=0)
+    result = _run(["config", "import", "--json"], resp)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == resp["data"]
 
 
 def test_import_retired_flag_passes_mode():
