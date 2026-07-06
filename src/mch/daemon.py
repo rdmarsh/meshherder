@@ -18,8 +18,9 @@ import logging
 import os
 import signal
 import sys
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import fields
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -802,6 +803,582 @@ async def _handle_export(db: Database) -> dict[str, Any]:
     }
 
 
+@dataclass
+class _Dispatch:
+    """Everything a request handler might need, bundled so the table has one signature."""
+    req: dict[str, Any]
+    wq: WorkQueue
+    db: Database
+    config: Config
+    writer: asyncio.StreamWriter | None = None
+    reader: asyncio.StreamReader | None = None
+
+
+# A handler takes the bundled context and returns the RPC response envelope.
+Handler = Callable[[_Dispatch], Awaitable[dict[str, Any]]]
+
+
+def _progress_writer(
+    writer: asyncio.StreamWriter | None, disconnect_label: str
+) -> Callable[[str], Awaitable[None]] | None:
+    """Build a progress callback that streams ``{type:progress,msg}`` lines to a socket client.
+
+    Returns None when there is no writer (a non-streaming call), so a handler can pass the result
+    straight through as ``progress=``. Raises ClientDisconnected if the client has gone away, so the
+    caller aborts the in-flight operation. Factored from five identical inline closures.
+    """
+    if writer is None:
+        return None
+
+    async def cb(msg: str) -> None:
+        try:
+            writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
+            await writer.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            raise ClientDisconnected(disconnect_label) from None
+
+    return cb
+
+
+def _parse_radio_arg(raw: Any) -> tuple[float, float, int, int] | None:
+    """Parse an RPC ``radio`` argument ([freq,bw,sf,cr]); None if malformed."""
+    if not isinstance(raw, list | tuple) or len(raw) != 4:
+        return None
+    try:
+        return (float(raw[0]), float(raw[1]), int(raw[2]), int(raw[3]))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _handle_fleet(c: _Dispatch) -> dict[str, Any]:
+    return {"ok": True, "data": await build_fleet_report(c.db, c.config)}
+
+
+async def _handle_fleet_node(c: _Dispatch) -> dict[str, Any]:
+    query = c.req.get("query", "")
+    try:
+        node = await _resolve_node(query, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {query!r} not found"}
+    report = await build_node_report(c.db, c.config, node)
+    report["management_path"] = c.wq.management_path_status(node)
+    return {"ok": True, "data": report}
+
+
+async def _handle_path(c: _Dispatch) -> dict[str, Any]:
+    query = c.req.get("query", "")
+    try:
+        node = await _resolve_node(query, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {query!r} not found"}
+    return {"ok": True, "data": c.wq.management_path_status(node)}
+
+
+async def _handle_path_discover(c: _Dispatch) -> dict[str, Any]:
+    query = c.req.get("query", "")
+    source = c.req.get("source", "discovery")
+    try:
+        node = await _resolve_node(query, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {query!r} not found"}
+    try:
+        return {"ok": True, "data": await c.wq.discover_management_path(node, source=source)}
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_path_apply(c: _Dispatch) -> dict[str, Any]:
+    query = c.req.get("query", "")
+    path = c.req.get("path", "")
+    try:
+        node = await _resolve_node(query, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {query!r} not found"}
+    try:
+        return {"ok": True, "data": await c.wq.apply_management_path(node, path)}
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_probe(c: _Dispatch) -> dict[str, Any]:
+    query = c.req.get("query", "")
+    advert = bool(c.req.get("advert", False))
+    login = bool(c.req.get("login", False))
+    radio = _parse_radio_arg(c.req.get("radio"))
+    if radio is None:
+        return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
+    try:
+        node = await _resolve_node(query, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {query!r} not found"}
+    progress = _progress_writer(c.writer, "probe client disconnected")
+    try:
+        return {
+            "ok": True,
+            "data": await c.wq.probe_node(
+                node, radio=radio, advert=advert, login=login, progress=progress
+            ),
+        }
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_discover(c: _Dispatch) -> dict[str, Any]:
+    radio = _parse_radio_arg(c.req.get("radio"))
+    if radio is None:
+        return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
+    try:
+        dwell = float(c.req.get("dwell", 5.0))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "radio and dwell must be numeric"}
+    if dwell <= 0 or dwell > 30:
+        return {"ok": False, "error": "dwell must be between 0 and 30 seconds"}
+    progress = _progress_writer(c.writer, "discover client disconnected")
+    try:
+        return {
+            "ok": True,
+            "data": await c.wq.discover_nodes(radio, dwell=dwell, progress=progress),
+        }
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_adopt(c: _Dispatch) -> dict[str, Any]:
+    pubkey = c.req.get("pubkey", "")
+    label = c.req.get("label")
+    radio = _parse_radio_arg(c.req.get("radio"))
+    if radio is None:
+        return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
+    progress = _progress_writer(c.writer, "adopt client disconnected")
+    try:
+        return {
+            "ok": True,
+            "data": await c.wq.adopt_node(
+                pubkey,
+                radio=radio,
+                label=label if isinstance(label, str) and label else None,
+                progress=progress,
+            ),
+        }
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_sync(c: _Dispatch) -> dict[str, Any]:
+    prefix = c.req.get("prefix")
+    if prefix:
+        # resolve label/name/pubkey-prefix to a full pubkey so run_node gets an
+        # unambiguous key regardless of whether the user typed a label or hex prefix
+        try:
+            node = await _resolve_node(prefix, c.db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if node is None:
+            return {"ok": False, "error": f"no node found matching {prefix!r}"}
+        progress = _progress_writer(c.writer, "sync client disconnected")
+        try:
+            sync_awaitable = (
+                c.wq.run_node(node.pubkey, progress=progress)
+                if progress is not None
+                else c.wq.run_node(node.pubkey)
+            )
+            if c.reader is None:
+                result = await sync_awaitable
+            else:
+                sync_task = asyncio.create_task(sync_awaitable)
+                disconnect_task = asyncio.create_task(c.reader.read())
+                done, _ = await asyncio.wait(
+                    {sync_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if sync_task in done:
+                    disconnect_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await disconnect_task
+                    result = await sync_task
+                else:
+                    with suppress(ConnectionResetError, BrokenPipeError):
+                        await disconnect_task
+                    sync_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await sync_task
+                    raise ClientDisconnected("sync client disconnected")
+            return _sync_result_response(result)
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        except ClientDisconnected as exc:
+            log.info("%s", exc)
+            return {"ok": False, "error": str(exc)}
+    # no prefix — full cycle in background
+    try:
+        return {"ok": True, "data": await c.wq.start_cycle()}
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_exec(c: _Dispatch) -> dict[str, Any]:
+    pubkey = c.req.get("pubkey", "")
+    command = (c.req.get("command") or "").strip()
+    blocked = blocked_exec_command(command)
+    if blocked:
+        return {"ok": False, "error": f"{blocked!r} is blocked - use config operations"}
+    try:
+        node = await _resolve_node(pubkey, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"node {pubkey!r} not found"}
+    try:
+        return {"ok": True, "data": await c.wq.exec_command(node.pubkey, command)}
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_contacts(c: _Dispatch) -> dict[str, Any]:
+    return {"ok": True, "data": await c.wq.unfiled_contacts()}
+
+
+async def _handle_prune(c: _Dispatch) -> dict[str, Any]:
+    # Sunset: the DB is the inventory, so "prune" no longer means "not in config.yaml".
+    # It hard-deletes retired nodes (history and all) — the deliberate purge step after
+    # `mch node retire`. Active nodes are never prune candidates.
+    dry_run = bool(c.req.get("dry_run", True))
+    nodes = await c.db.get_all_nodes()
+    candidate_nodes = [n for n in nodes if n.state == NodeState.RETIRED]
+    candidates = [
+        {
+            "pubkey": n.pubkey,
+            "label": n.label,
+            "name": n.name,
+            "state": n.state.value,
+            "last_seen": n.last_seen.isoformat() if n.last_seen else None,
+        }
+        for n in candidate_nodes
+    ]
+    if not dry_run:
+        for node in candidate_nodes:
+            await c.db.delete_node(node.pubkey)
+    return {
+        "ok": True,
+        "data": {
+            "candidates": candidates,
+            "deleted": 0 if dry_run else len(candidates),
+        },
+    }
+
+
+async def _handle_clean_facts(c: _Dispatch) -> dict[str, Any]:
+    dry_run = bool(c.req.get("dry_run", True))
+    query = c.req.get("query")
+    group = c.req.get("group")
+    fact_key = c.req.get("fact")
+    try:
+        candidates = await _stale_fact_candidates(
+            c.db,
+            c.config,
+            query=str(query) if query else None,
+            group=str(group) if group else None,
+            fact_key=str(fact_key) if fact_key else None,
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not dry_run:
+        for candidate in candidates:
+            # pubkey and key are always non-None strings here (node.pubkey / fact.key);
+            # the candidate dict's mixed value types widen to str | None, so pin them.
+            await c.db.delete_fact(str(candidate["pubkey"]), str(candidate["key"]))
+    return {
+        "ok": True,
+        "data": {
+            "candidates": candidates,
+            "deleted": 0 if dry_run else len(candidates),
+        },
+    }
+
+
+async def _handle_clean_settings(c: _Dispatch) -> dict[str, Any]:
+    dry_run = bool(c.req.get("dry_run", True))
+    query = c.req.get("query")
+    group = c.req.get("group")
+    setting_key = c.req.get("setting")
+    try:
+        # Fresh variable name (not the shared `candidates`) so mypy keeps the accurate
+        # list[dict[str, Any]] element type for the delete_setting call below.
+        stale_settings = await _stale_setting_candidates(
+            c.db,
+            c.config,
+            query=str(query) if query else None,
+            group=str(group) if group else None,
+            setting_key=str(setting_key) if setting_key else None,
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not dry_run:
+        # Fresh loop variable (not the shared `candidate`) so mypy keeps the
+        # dict[str, Any] element type for the delete_setting call.
+        for row in stale_settings:
+            await c.db.delete_setting(row["pubkey"], row["key"])
+    return {
+        "ok": True,
+        "data": {
+            "candidates": stale_settings,
+            "deleted": 0 if dry_run else len(stale_settings),
+        },
+    }
+
+
+async def _handle_remove(c: _Dispatch) -> dict[str, Any]:
+    query = str(c.req.get("query") or "")
+    if not query:
+        return {"ok": False, "error": "missing node"}
+    node = await _resolve_node(query, c.db)
+    if not node:
+        return {"ok": False, "error": f"no such node: {query}"}
+
+    # Sunset: a still-managed (non-retired) node is protected — deleting it loses history
+    # and it is just re-seeded from gateway favourites on the next restart. Retire it first
+    # (keeps history, unfavourites it), or force through.
+    active = node.state != NodeState.RETIRED
+    if active and not bool(c.req.get("force", False)):
+        return {
+            "ok": False,
+            "error": (
+                f"{node.label or node.name or node.pubkey[:8]!r} is still managed"
+                " - `mch node retire` it first (keeps history, unfavourites it),"
+                " or use --force. An un-retired node is re-seeded from gateway favourites"
+                " on restart."
+            ),
+        }
+
+    data = {
+        "pubkey": node.pubkey,
+        "label": node.label,
+        "name": node.name,
+        "state": node.state.value,
+        "last_seen": node.last_seen.isoformat() if node.last_seen else None,
+        "retired": node.state == NodeState.RETIRED,
+        "deleted": 0,
+    }
+    if not bool(c.req.get("dry_run", True)):
+        await c.db.delete_node(node.pubkey)
+        data["deleted"] = 1
+    return {"ok": True, "data": data}
+
+
+async def _handle_retire(c: _Dispatch) -> dict[str, Any]:
+    cmd = c.req.get("cmd", "")
+    query = str(c.req.get("query") or "")
+    if not query:
+        return {"ok": False, "error": "missing node"}
+    try:
+        node = await _resolve_node(query, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"no such node: {query}"}
+    ident = node.label or node.name or node.pubkey[:8]
+
+    if cmd == "retire":
+        if node.state is NodeState.RETIRED:
+            return {"ok": False, "error": f"{ident!r} is already retired"}
+        node = await c.wq.retire_node(node.pubkey)
+    else:
+        if node.state is not NodeState.RETIRED:
+            return {"ok": False, "error": f"{ident!r} is not retired"}
+        node = await c.wq.unretire_node(node.pubkey)
+
+    return {"ok": True, "data": {
+        "pubkey": node.pubkey,
+        "label": node.label,
+        "name": node.name,
+        "state": node.state.value,
+    }}
+
+
+async def _handle_set_group(c: _Dispatch) -> dict[str, Any]:
+    cmd = c.req.get("cmd", "")
+    query = str(c.req.get("query") or "")
+    if not query:
+        return {"ok": False, "error": "missing node"}
+    try:
+        node = await _resolve_node(query, c.db)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not node:
+        return {"ok": False, "error": f"no such node: {query}"}
+    # Empty string clears the field (ungroup / drop label); a value sets it.
+    raw = c.req.get("value")
+    value = str(raw).strip() if raw is not None and str(raw).strip() else None
+    if cmd == "set_group":
+        await c.db.set_node_group(node.pubkey, value)
+        await c.db.write_log(
+            node.pubkey, "INFO",
+            f"group set to {value!r}" if value else "group cleared",
+        )
+    else:
+        if value is not None:
+            try:
+                validate_node_label(value)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+        await c.db.set_node_label(node.pubkey, value)
+        await c.db.write_log(
+            node.pubkey, "INFO",
+            f"label set to {value!r}" if value else "label cleared",
+        )
+    updated = await c.db.get_node(node.pubkey)
+    assert updated is not None  # just written above; row must exist
+    return {"ok": True, "data": {
+        "pubkey": updated.pubkey,
+        "label": updated.label,
+        "name": updated.name,
+        "group": updated.group,
+    }}
+
+
+async def _handle_logs(c: _Dispatch) -> dict[str, Any]:
+    pubkey = c.req.get("pubkey")
+    limit = int(c.req.get("limit", 50))
+    if pubkey:
+        try:
+            node = await _resolve_node(pubkey, c.db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        pubkey = node.pubkey if node else pubkey
+    logs = await c.db.get_logs(pubkey, limit=limit)
+    labels = {node.pubkey: node.label for node in await c.db.get_all_nodes()}
+    return {
+        "ok": True,
+        "data": [
+            {
+                **entry,
+                "display_pubkey": entry.get("display_pubkey") or entry["node_pubkey"],
+                "label": labels.get(entry["node_pubkey"], ""),
+            }
+            if entry.get("node_pubkey") else entry
+            for entry in logs
+        ],
+    }
+
+
+async def _handle_suggest(c: _Dispatch) -> dict[str, Any]:
+    from pathlib import Path as _Path
+
+    from mch.recommend import get_profile, load_profiles
+    profiles_file = _Path(c.config.profiles_file) if c.config.profiles_file else None
+    profiles, universal = load_profiles(
+        profiles_url=c.config.profiles_url,
+        profiles_file=profiles_file,
+    )
+    pubkey = c.req.get("pubkey")
+    nodes = await c.db.get_all_nodes()
+    if pubkey:
+        try:
+            node = await _resolve_node(pubkey, c.db)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not node:
+            return {"ok": False, "error": f"node {pubkey!r} not found"}
+        nodes = [node]
+    suggest_results: list[dict[str, Any]] = []
+    for n in nodes:
+        facts = await c.db.get_facts(n.pubkey)
+        raw_count = facts.get("neighbors")
+        count = int(raw_count) if raw_count is not None else None
+        # treat unknown neighbour count as 0 for profile lookup (mobile = most conservative)
+        # count stays None so NBRS displays as '-' in the table
+        profile = get_profile(count if count is not None else 0, profiles)
+        suggest_results.append({
+            "pubkey": n.pubkey,
+            "label": n.label,
+            "name": n.name,
+            "neighbour_count": count,
+            "profile": {
+                "name": profile.name,
+                "txdelay": profile.txdelay,
+                "direct_txdelay": profile.direct_txdelay,
+                "description": profile.description,
+            } if profile else None,
+            "universal": [
+                {"key": u.key, "value": u.value, "description": u.description}
+                for u in universal
+            ],
+        })
+    return {"ok": True, "data": suggest_results}
+
+
+async def _handle_commission(c: _Dispatch) -> dict[str, Any]:
+    from mch.commission import handle_commission
+    progress = _progress_writer(
+        c.writer if c.req.get("mode") in ("new", "replace") else None,
+        "commission client disconnected",
+    )
+    try:
+        async with c.wq.operation("commission", wait=False):
+            return await handle_commission(c.req, c.wq, c.db, c.config, progress=progress)
+    except OperationBusyError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ClientDisconnected as exc:
+        log.info("%s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+# Command → handler table. The already-extracted DB-only handlers keep their (req, db, config)
+# signature and are adapted with a thin lambda; the rest take the bundled _Dispatch context.
+_HANDLERS: dict[str, Handler] = {
+    "fleet": _handle_fleet,
+    "fleet_node": _handle_fleet_node,
+    "path": _handle_path,
+    "path_discover": _handle_path_discover,
+    "path_apply": _handle_path_apply,
+    "probe": _handle_probe,
+    "discover": _handle_discover,
+    "adopt": _handle_adopt,
+    "sync": _handle_sync,
+    "exec": _handle_exec,
+    "contacts": _handle_contacts,
+    "prune": _handle_prune,
+    "clean_facts": _handle_clean_facts,
+    "clean_settings": _handle_clean_settings,
+    "set_setting": lambda c: _handle_set_setting(c.req, c.db, c.config),
+    "unset_setting": lambda c: _handle_unset_setting(c.req, c.db, c.config),
+    "show_setting": lambda c: _handle_show_setting(c.req, c.db, c.config),
+    "import": lambda c: _handle_import(c.req, c.db, c.config),
+    "export": lambda c: _handle_export(c.db),
+    "remove": _handle_remove,
+    "retire": _handle_retire,
+    "unretire": _handle_retire,
+    "set_group": _handle_set_group,
+    "set_label": _handle_set_group,
+    "logs": _handle_logs,
+    "suggest": _handle_suggest,
+    "commission": _handle_commission,
+}
+
+
 async def _dispatch(
     req: dict[str, Any],
     wq: WorkQueue,
@@ -811,560 +1388,12 @@ async def _dispatch(
     reader: asyncio.StreamReader | None = None,
 ) -> dict[str, Any]:
     cmd = req.get("cmd", "")
-
-    if cmd == "fleet":
-        return {"ok": True, "data": await build_fleet_report(db, config)}
-
-    if cmd == "fleet_node":
-        query = req.get("query", "")
-        try:
-            node = await _resolve_node(query, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"node {query!r} not found"}
-        report = await build_node_report(db, config, node)
-        report["management_path"] = wq.management_path_status(node)
-        return {"ok": True, "data": report}
-
-    if cmd == "path":
-        query = req.get("query", "")
-        try:
-            node = await _resolve_node(query, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"node {query!r} not found"}
-        return {"ok": True, "data": wq.management_path_status(node)}
-
-    if cmd == "path_discover":
-        query = req.get("query", "")
-        source = req.get("source", "discovery")
-        try:
-            node = await _resolve_node(query, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"node {query!r} not found"}
-        try:
-            return {"ok": True, "data": await wq.discover_management_path(node, source=source)}
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "path_apply":
-        query = req.get("query", "")
-        path = req.get("path", "")
-        try:
-            node = await _resolve_node(query, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"node {query!r} not found"}
-        try:
-            return {"ok": True, "data": await wq.apply_management_path(node, path)}
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "probe":
-        query = req.get("query", "")
-        raw_radio = req.get("radio")
-        advert = bool(req.get("advert", False))
-        login = bool(req.get("login", False))
-        if not isinstance(raw_radio, list | tuple) or len(raw_radio) != 4:
-            return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
-        try:
-            radio = (
-                float(raw_radio[0]),
-                float(raw_radio[1]),
-                int(raw_radio[2]),
-                int(raw_radio[3]),
-            )
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "radio must be numeric"}
-        try:
-            node = await _resolve_node(query, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"node {query!r} not found"}
-        probe_progress_cb = None
-        if writer is not None:
-            async def probe_progress_cb(msg: str) -> None:
-                try:
-                    writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
-                    await writer.drain()
-                except (ConnectionResetError, BrokenPipeError):
-                    raise ClientDisconnected("probe client disconnected") from None
-        try:
-            return {
-                "ok": True,
-                "data": await wq.probe_node(
-                    node, radio=radio, advert=advert, login=login, progress=probe_progress_cb
-                ),
-            }
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "discover":
-        raw_radio = req.get("radio")
-        if not isinstance(raw_radio, list | tuple) or len(raw_radio) != 4:
-            return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
-        try:
-            radio = (
-                float(raw_radio[0]),
-                float(raw_radio[1]),
-                int(raw_radio[2]),
-                int(raw_radio[3]),
-            )
-            dwell = float(req.get("dwell", 5.0))
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "radio and dwell must be numeric"}
-        if dwell <= 0 or dwell > 30:
-            return {"ok": False, "error": "dwell must be between 0 and 30 seconds"}
-        discover_progress_cb = None
-        if writer is not None:
-            async def discover_progress_cb(msg: str) -> None:
-                try:
-                    writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
-                    await writer.drain()
-                except (ConnectionResetError, BrokenPipeError):
-                    raise ClientDisconnected("discover client disconnected") from None
-        try:
-            return {
-                "ok": True,
-                "data": await wq.discover_nodes(
-                    radio,
-                    dwell=dwell,
-                    progress=discover_progress_cb,
-                ),
-            }
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "adopt":
-        pubkey = req.get("pubkey", "")
-        raw_radio = req.get("radio")
-        label = req.get("label")
-        if not isinstance(raw_radio, list | tuple) or len(raw_radio) != 4:
-            return {"ok": False, "error": "radio must be [freq,bw,sf,cr]"}
-        try:
-            radio = (
-                float(raw_radio[0]),
-                float(raw_radio[1]),
-                int(raw_radio[2]),
-                int(raw_radio[3]),
-            )
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "radio must be numeric"}
-        adopt_progress_cb = None
-        if writer is not None:
-            async def adopt_progress_cb(msg: str) -> None:
-                try:
-                    writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
-                    await writer.drain()
-                except (ConnectionResetError, BrokenPipeError):
-                    raise ClientDisconnected("adopt client disconnected") from None
-        try:
-            return {
-                "ok": True,
-                "data": await wq.adopt_node(
-                    pubkey,
-                    radio=radio,
-                    label=label if isinstance(label, str) and label else None,
-                    progress=adopt_progress_cb,
-                ),
-            }
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "sync":
-        prefix = req.get("prefix")
-        if prefix:
-            # resolve label/name/pubkey-prefix to a full pubkey so run_node gets an
-            # unambiguous key regardless of whether the user typed a label or hex prefix
-            try:
-                node = await _resolve_node(prefix, db)
-            except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
-            if node is None:
-                return {"ok": False, "error": f"no node found matching {prefix!r}"}
-            sync_progress_cb = None
-            if writer is not None:
-                async def sync_progress_cb(msg: str) -> None:
-                    try:
-                        writer.write(
-                            (json.dumps({"type": "progress", "msg": msg}) + "\n").encode()
-                        )
-                        await writer.drain()
-                    except (ConnectionResetError, BrokenPipeError):
-                        raise ClientDisconnected("sync client disconnected") from None
-            try:
-                sync_awaitable = (
-                    wq.run_node(node.pubkey, progress=sync_progress_cb)
-                    if sync_progress_cb is not None
-                    else wq.run_node(node.pubkey)
-                )
-                if reader is None:
-                    result = await sync_awaitable
-                else:
-                    sync_task = asyncio.create_task(sync_awaitable)
-                    disconnect_task = asyncio.create_task(reader.read())
-                    done, _ = await asyncio.wait(
-                        {sync_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED
-                    )
-                    if sync_task in done:
-                        disconnect_task.cancel()
-                        with suppress(asyncio.CancelledError):
-                            await disconnect_task
-                        result = await sync_task
-                    else:
-                        with suppress(ConnectionResetError, BrokenPipeError):
-                            await disconnect_task
-                        sync_task.cancel()
-                        with suppress(asyncio.CancelledError):
-                            await sync_task
-                        raise ClientDisconnected("sync client disconnected")
-                return _sync_result_response(result)
-            except OperationBusyError as exc:
-                return {"ok": False, "error": str(exc)}
-            except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
-            except ClientDisconnected as exc:
-                log.info("%s", exc)
-                return {"ok": False, "error": str(exc)}
-        # no prefix — full cycle in background
-        try:
-            return {"ok": True, "data": await wq.start_cycle()}
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "exec":
-        pubkey = req.get("pubkey", "")
-        command = (req.get("command") or "").strip()
-        blocked = blocked_exec_command(command)
-        if blocked:
-            return {"ok": False, "error": f"{blocked!r} is blocked - use config operations"}
-        try:
-            node = await _resolve_node(pubkey, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"node {pubkey!r} not found"}
-        try:
-            return {"ok": True, "data": await wq.exec_command(node.pubkey, command)}
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "contacts":
-        return {"ok": True, "data": await wq.unfiled_contacts()}
-
-    if cmd == "prune":
-        # Sunset: the DB is the inventory, so "prune" no longer means "not in config.yaml".
-        # It hard-deletes retired nodes (history and all) — the deliberate purge step after
-        # `mch node retire`. Active nodes are never prune candidates.
-        dry_run = bool(req.get("dry_run", True))
-        nodes = await db.get_all_nodes()
-        candidate_nodes = [n for n in nodes if n.state == NodeState.RETIRED]
-        candidates = [
-            {
-                "pubkey": n.pubkey,
-                "label": n.label,
-                "name": n.name,
-                "state": n.state.value,
-                "last_seen": n.last_seen.isoformat() if n.last_seen else None,
-            }
-            for n in candidate_nodes
-        ]
-        if not dry_run:
-            for node in candidate_nodes:
-                await db.delete_node(node.pubkey)
-        return {
-            "ok": True,
-            "data": {
-                "candidates": candidates,
-                "deleted": 0 if dry_run else len(candidates),
-            },
-        }
-
-    if cmd == "clean_facts":
-        dry_run = bool(req.get("dry_run", True))
-        query = req.get("query")
-        group = req.get("group")
-        fact_key = req.get("fact")
-        try:
-            candidates = await _stale_fact_candidates(
-                db,
-                config,
-                query=str(query) if query else None,
-                group=str(group) if group else None,
-                fact_key=str(fact_key) if fact_key else None,
-            )
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not dry_run:
-            for candidate in candidates:
-                # pubkey and key are always non-None strings here (node.pubkey / fact.key);
-                # the candidate dict's mixed value types widen to str | None, so pin them.
-                await db.delete_fact(str(candidate["pubkey"]), str(candidate["key"]))
-        return {
-            "ok": True,
-            "data": {
-                "candidates": candidates,
-                "deleted": 0 if dry_run else len(candidates),
-            },
-        }
-
-    if cmd == "clean_settings":
-        dry_run = bool(req.get("dry_run", True))
-        query = req.get("query")
-        group = req.get("group")
-        setting_key = req.get("setting")
-        try:
-            # Fresh variable name (not the shared `candidates`) so mypy keeps the accurate
-            # list[dict[str, Any]] element type for the delete_setting call below.
-            stale_settings = await _stale_setting_candidates(
-                db,
-                config,
-                query=str(query) if query else None,
-                group=str(group) if group else None,
-                setting_key=str(setting_key) if setting_key else None,
-            )
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not dry_run:
-            # Fresh loop variable (not the shared `candidate`) so mypy keeps the
-            # dict[str, Any] element type for the delete_setting call.
-            for row in stale_settings:
-                await db.delete_setting(row["pubkey"], row["key"])
-        return {
-            "ok": True,
-            "data": {
-                "candidates": stale_settings,
-                "deleted": 0 if dry_run else len(stale_settings),
-            },
-        }
-
-    if cmd == "set_setting":
-        return await _handle_set_setting(req, db, config)
-
-    if cmd == "unset_setting":
-        return await _handle_unset_setting(req, db, config)
-
-    if cmd == "show_setting":
-        return await _handle_show_setting(req, db, config)
-
-    if cmd == "import":
-        return await _handle_import(req, db, config)
-
-    if cmd == "export":
-        return await _handle_export(db)
-
-    if cmd == "remove":
-        query = str(req.get("query") or "")
-        if not query:
-            return {"ok": False, "error": "missing node"}
-        node = await _resolve_node(query, db)
-        if not node:
-            return {"ok": False, "error": f"no such node: {query}"}
-
-        # Sunset: a still-managed (non-retired) node is protected — deleting it loses history
-        # and it is just re-seeded from gateway favourites on the next restart. Retire it first
-        # (keeps history, unfavourites it), or force through.
-        active = node.state != NodeState.RETIRED
-        if active and not bool(req.get("force", False)):
-            return {
-                "ok": False,
-                "error": (
-                    f"{node.label or node.name or node.pubkey[:8]!r} is still managed"
-                    " - `mch node retire` it first (keeps history, unfavourites it),"
-                    " or use --force. An un-retired node is re-seeded from gateway favourites"
-                    " on restart."
-                ),
-            }
-
-        data = {
-            "pubkey": node.pubkey,
-            "label": node.label,
-            "name": node.name,
-            "state": node.state.value,
-            "last_seen": node.last_seen.isoformat() if node.last_seen else None,
-            "retired": node.state == NodeState.RETIRED,
-            "deleted": 0,
-        }
-        if not bool(req.get("dry_run", True)):
-            await db.delete_node(node.pubkey)
-            data["deleted"] = 1
-        return {"ok": True, "data": data}
-
-    if cmd in ("retire", "unretire"):
-        query = str(req.get("query") or "")
-        if not query:
-            return {"ok": False, "error": "missing node"}
-        try:
-            node = await _resolve_node(query, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"no such node: {query}"}
-        ident = node.label or node.name or node.pubkey[:8]
-
-        if cmd == "retire":
-            if node.state is NodeState.RETIRED:
-                return {"ok": False, "error": f"{ident!r} is already retired"}
-            node = await wq.retire_node(node.pubkey)
-        else:
-            if node.state is not NodeState.RETIRED:
-                return {"ok": False, "error": f"{ident!r} is not retired"}
-            node = await wq.unretire_node(node.pubkey)
-
-        return {"ok": True, "data": {
-            "pubkey": node.pubkey,
-            "label": node.label,
-            "name": node.name,
-            "state": node.state.value,
-        }}
-
-    if cmd in ("set_group", "set_label"):
-        query = str(req.get("query") or "")
-        if not query:
-            return {"ok": False, "error": "missing node"}
-        try:
-            node = await _resolve_node(query, db)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not node:
-            return {"ok": False, "error": f"no such node: {query}"}
-        # Empty string clears the field (ungroup / drop label); a value sets it.
-        raw = req.get("value")
-        value = str(raw).strip() if raw is not None and str(raw).strip() else None
-        if cmd == "set_group":
-            await db.set_node_group(node.pubkey, value)
-            await db.write_log(
-                node.pubkey, "INFO",
-                f"group set to {value!r}" if value else "group cleared",
-            )
-        else:
-            if value is not None:
-                try:
-                    validate_node_label(value)
-                except ValueError as exc:
-                    return {"ok": False, "error": str(exc)}
-            await db.set_node_label(node.pubkey, value)
-            await db.write_log(
-                node.pubkey, "INFO",
-                f"label set to {value!r}" if value else "label cleared",
-            )
-        updated = await db.get_node(node.pubkey)
-        assert updated is not None  # just written above; row must exist
-        return {"ok": True, "data": {
-            "pubkey": updated.pubkey,
-            "label": updated.label,
-            "name": updated.name,
-            "group": updated.group,
-        }}
-
-    if cmd == "logs":
-        pubkey = req.get("pubkey")
-        limit = int(req.get("limit", 50))
-        if pubkey:
-            try:
-                node = await _resolve_node(pubkey, db)
-            except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
-            pubkey = node.pubkey if node else pubkey
-        logs = await db.get_logs(pubkey, limit=limit)
-        labels = {node.pubkey: node.label for node in await db.get_all_nodes()}
-        return {
-            "ok": True,
-            "data": [
-                {
-                    **entry,
-                    "display_pubkey": entry.get("display_pubkey") or entry["node_pubkey"],
-                    "label": labels.get(entry["node_pubkey"], ""),
-                }
-                if entry.get("node_pubkey") else entry
-                for entry in logs
-            ],
-        }
-
-
-    if cmd == "suggest":
-        from pathlib import Path as _Path
-
-        from mch.recommend import get_profile, load_profiles
-        profiles_file = _Path(config.profiles_file) if config.profiles_file else None
-        profiles, universal = load_profiles(
-            profiles_url=config.profiles_url,
-            profiles_file=profiles_file,
-        )
-        pubkey = req.get("pubkey")
-        nodes = await db.get_all_nodes()
-        if pubkey:
-            try:
-                node = await _resolve_node(pubkey, db)
-            except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
-            if not node:
-                return {"ok": False, "error": f"node {pubkey!r} not found"}
-            nodes = [node]
-        suggest_results: list[dict[str, Any]] = []
-        for n in nodes:
-            facts = await db.get_facts(n.pubkey)
-            raw_count = facts.get("neighbors")
-            count = int(raw_count) if raw_count is not None else None
-            # treat unknown neighbour count as 0 for profile lookup (mobile = most conservative)
-            # count stays None so NBRS displays as '-' in the table
-            profile = get_profile(count if count is not None else 0, profiles)
-            suggest_results.append({
-                "pubkey": n.pubkey,
-                "label": n.label,
-                "name": n.name,
-                "neighbour_count": count,
-                "profile": {
-                    "name": profile.name,
-                    "txdelay": profile.txdelay,
-                    "direct_txdelay": profile.direct_txdelay,
-                    "description": profile.description,
-                } if profile else None,
-                "universal": [
-                    {"key": u.key, "value": u.value, "description": u.description}
-                    for u in universal
-                ],
-            })
-        return {"ok": True, "data": suggest_results}
-
-    if cmd == "commission":
-        from mch.commission import handle_commission
-        progress_cb = None
-        if writer is not None and req.get("mode") in ("new", "replace"):
-            async def progress_cb(msg: str) -> None:
-                try:
-                    writer.write((json.dumps({"type": "progress", "msg": msg}) + "\n").encode())
-                    await writer.drain()
-                except (ConnectionResetError, BrokenPipeError):
-                    raise ClientDisconnected("commission client disconnected") from None
-        try:
-            async with wq.operation("commission", wait=False):
-                return await handle_commission(req, wq, db, config, progress=progress_cb)
-        except OperationBusyError as exc:
-            return {"ok": False, "error": str(exc)}
-        except ClientDisconnected as exc:
-            log.info("%s", exc)
-            return {"ok": False, "error": str(exc)}
-
-    return {"ok": False, "error": f"unknown command: {cmd!r}"}
+    handler = _HANDLERS.get(cmd)
+    if handler is None:
+        return {"ok": False, "error": f"unknown command: {cmd!r}"}
+    return await handler(
+        _Dispatch(req=req, wq=wq, db=db, config=config, writer=writer, reader=reader)
+    )
 
 
 # ---------------------------------------------------------------------------

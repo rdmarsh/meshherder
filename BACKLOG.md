@@ -21,8 +21,10 @@ in `CHANGELOG.md`, dated investigation notes in `JOURNAL.md`, and stable behavio
   (`render.py`, `fleet.py`, `node.py`, `config_cmds.py`, `daemon_cmds.py`, `gateway.py`, `wizard.py`,
   `help_topics.py`). Pure-move refactor, its own PR; run `mch --help` diffs before/after and keep the
   help-text/banned-jargon/docs-drift guards green.
-- **S4.3 (deferred):** turn `daemon._dispatch`'s if-chain into a `dict[str, Handler]` table, extracting
-  the remaining inline blocks into `_handle_*` coroutines. Mechanical; socket contract tests pin it.
+- **S4.3: DONE** (Unreleased) — `daemon._dispatch` is now a `dict[str, Handler]` table (`_HANDLERS`)
+  of `_handle_*` coroutines taking a bundled `_Dispatch` context; the repeated progress-callback
+  closure and radio-tuple parsing were factored into `_progress_writer` / `_parse_radio_arg`. Pinned
+  by the socket contract tests.
 
 ### Commission flow: finish the config.yaml sunset
 

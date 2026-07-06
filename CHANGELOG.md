@@ -18,7 +18,9 @@ and backlog history. Dates use the project repository's commit dates.
   (delete a still-managed node) moved onto `mch node prune NODE --force`. `--json` now emits readable
   UTF-8 instead of `\uXXXX` surrogate escapes, and covers the read stragglers `node path` /
   `node discover` / `fleet suggest` / `node probe` plus the preview payloads of `node prune` /
-  `node clean facts|settings` / `config import`.
+  `node clean facts|settings` / `config import`. Internally, the ~560-line `daemon._dispatch`
+  if-chain became a `dict[str, Handler]` table of extracted `_handle_*` coroutines (S4.3), with the
+  repeated socket progress-callback and radio parsing factored into helpers.
 
 - **Stale observations no longer contradict reality (RECOMMENDATIONS-3 slice 3).** A failed
   `clock sync` now re-reads the clock too (not only a successful one), so a node whose sync keeps
