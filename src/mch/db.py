@@ -12,6 +12,7 @@ import aiosqlite
 from mch.models import (
     DesiredOperation,
     DesiredSetting,
+    GroupRecord,
     Node,
     NodeFact,
     NodeState,
@@ -116,6 +117,11 @@ CREATE TABLE IF NOT EXISTS setting_history (
     changed_at      TEXT NOT NULL,
     FOREIGN KEY (node_pubkey) REFERENCES nodes(pubkey)
 );
+
+CREATE TABLE IF NOT EXISTS groups (
+    name            TEXT PRIMARY KEY,   -- the group name (stable identifier for group scope)
+    created_at      TEXT                -- when registered; best-effort for seeded (upgraded) rows
+);
 """
 
 
@@ -140,6 +146,22 @@ _MIGRATIONS: list[tuple[int, list[str]]] = [
         # when mch last *tried* to reach the node (any probe outcome), so an "unreachable"
         # row can say when the verdict was reached rather than implying it just happened (S2.4)
         "ALTER TABLE nodes ADD COLUMN last_attempt_at TEXT",
+    ]),
+    (3, [
+        # Groups become first-class (R4 S1): the `groups` table (created by _SCHEMA above) is the
+        # registry. Seed it from every group already implied by existing data so an upgrade never
+        # loses a group — distinct node membership ∪ distinct group-scoped desired scope_ids. The
+        # ISO-ish created_at marks these as seeded-at-upgrade; code-created groups use a full
+        # datetime.now(UTC).isoformat(). INSERT OR IGNORE dedupes across the three sources.
+        "INSERT OR IGNORE INTO groups (name, created_at) "
+        "SELECT DISTINCT node_group, strftime('%Y-%m-%dT%H:%M:%S', 'now') || '+00:00' "
+        "FROM nodes WHERE node_group IS NOT NULL AND node_group != ''",
+        "INSERT OR IGNORE INTO groups (name, created_at) "
+        "SELECT DISTINCT scope_id, strftime('%Y-%m-%dT%H:%M:%S', 'now') || '+00:00' "
+        "FROM desired_settings WHERE scope_type = 'group' AND scope_id != ''",
+        "INSERT OR IGNORE INTO groups (name, created_at) "
+        "SELECT DISTINCT scope_id, strftime('%Y-%m-%dT%H:%M:%S', 'now') || '+00:00' "
+        "FROM desired_operations WHERE scope_type = 'group' AND scope_id != ''",
     ]),
 ]
 
@@ -310,6 +332,82 @@ class Database:
         await db.execute("DELETE FROM operations WHERE node_pubkey = ?", (pubkey,))
         await db.execute("DELETE FROM logs WHERE node_pubkey = ?", (pubkey,))
         await db.execute("DELETE FROM nodes WHERE pubkey = ?", (pubkey,))
+        await db.commit()
+
+    # ------------------------------------------------------------------
+    # groups (first-class registry, R4 S1)
+    # ------------------------------------------------------------------
+
+    async def create_group(self, name: str) -> None:
+        """Register a group. Idempotent — re-creating an existing group is a no-op."""
+        db = self._db_required()
+        await db.execute(
+            "INSERT OR IGNORE INTO groups (name, created_at) VALUES (?, ?)",
+            (name, _dt(datetime.now(UTC))),
+        )
+        await db.commit()
+
+    async def group_exists(self, name: str) -> bool:
+        """True when a group is registered (the gate for group-scope writes / node moves)."""
+        db = self._db_required()
+        async with db.execute("SELECT 1 FROM groups WHERE name = ?", (name,)) as cur:
+            return await cur.fetchone() is not None
+
+    async def list_groups(self) -> list[GroupRecord]:
+        """All registered groups with live member counts, ordered by name."""
+        db = self._db_required()
+        async with db.execute(
+            """
+            SELECT g.name, g.created_at,
+                   (SELECT COUNT(*) FROM nodes n WHERE n.node_group = g.name) AS members
+            FROM groups g
+            ORDER BY g.name
+            """
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            GroupRecord(
+                name=r["name"],
+                created_at=_parse_dt(r["created_at"]),
+                member_count=int(r["members"]),
+            )
+            for r in rows
+        ]
+
+    async def delete_group(self, name: str) -> None:
+        """Hard cascade delete (R4 decision 6), one transaction: ungroup members, drop the
+        group's desired settings + operations, then remove the registry row.
+
+        Hard (not retire-style) because groups carry no observation history of their own;
+        `fleet export` snapshots are the recovery path. Ungrouped is a supported node state.
+        """
+        db = self._db_required()
+        await db.execute("UPDATE nodes SET node_group = NULL WHERE node_group = ?", (name,))
+        await db.execute(
+            "DELETE FROM desired_settings WHERE scope_type = 'group' AND scope_id = ?", (name,)
+        )
+        await db.execute(
+            "DELETE FROM desired_operations WHERE scope_type = 'group' AND scope_id = ?", (name,)
+        )
+        await db.execute("DELETE FROM groups WHERE name = ?", (name,))
+        await db.commit()
+
+    async def rename_group(self, old: str, new: str) -> None:
+        """Rename a group in one transaction (R4 decision 6): the registry row, every member's
+        ``nodes.node_group``, and the ``scope_id`` of its group-scoped desired settings/operations.
+        """
+        db = self._db_required()
+        await db.execute("UPDATE groups SET name = ? WHERE name = ?", (new, old))
+        await db.execute("UPDATE nodes SET node_group = ? WHERE node_group = ?", (new, old))
+        await db.execute(
+            "UPDATE desired_settings SET scope_id = ? WHERE scope_type = 'group' AND scope_id = ?",
+            (new, old),
+        )
+        await db.execute(
+            "UPDATE desired_operations SET scope_id = ? "
+            "WHERE scope_type = 'group' AND scope_id = ?",
+            (new, old),
+        )
         await db.commit()
 
     # ------------------------------------------------------------------

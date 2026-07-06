@@ -450,6 +450,11 @@ def node_group() -> None:
     """Manage individual nodes: inventory, lifecycle, diagnostics."""
 
 
+@cli.group("group")
+def group_group() -> None:
+    """Manage groups: the middle scope between one node and the whole fleet."""
+
+
 @cli.group("config")
 def config_group() -> None:
     """Set desired values for nodes, groups, or the whole fleet, and back them up."""
@@ -2241,6 +2246,67 @@ def set_label(ctx: click.Context, node: str, label: str | None) -> None:
     lbl = data.get("label")
     click.echo(f"{_pk(data.get('pubkey'))} label set to {lbl!r}" if lbl
                else f"{ident} label cleared")
+
+
+# ---------------------------------------------------------------------------
+# group registry management (R4 S1). Groups are first-class: a group must be
+# created before group-scope desired state or `node group` can target it.
+# ---------------------------------------------------------------------------
+
+@group_group.command("create")
+@click.argument("name")
+@click.pass_context
+def group_create(ctx: click.Context, name: str) -> None:
+    """Register a new group NAME.
+
+    A group must exist before you can set group-scope desired state on it or put a node in
+    it — this catches typo'd group names instead of silently writing state that never applies.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "group_create", "name": name}))
+    if data.get("created"):
+        click.echo(f"group {data['name']!r} created")
+    else:
+        click.echo(f"group {data['name']!r} already exists")
+
+
+@group_group.command("delete")
+@click.argument("name")
+@click.option("--yes", is_flag=True, help="Actually delete (default previews the cascade).")
+@click.pass_context
+def group_delete(ctx: click.Context, name: str, yes: bool) -> None:
+    """Delete group NAME, ungrouping its members and dropping its desired state.
+
+    This is a hard cascade: members become ungrouped (they fall back to fleet defaults) and
+    the group's desired settings/operations are removed. Without --yes this only previews what
+    would happen. `mch fleet export` is the recovery path if you delete the wrong group.
+    """
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "group_delete", "name": name, "yes": yes}))
+    members = data.get("members", [])
+    settings = data.get("settings", [])
+    operations = data.get("operations", [])
+    if data.get("deleted"):
+        click.echo(f"group {data['name']!r} deleted "
+                   f"({len(members)} node(s) ungrouped, "
+                   f"{len(settings) + len(operations)} desired row(s) removed)")
+        return
+    # Preview.
+    click.echo(f"would delete group {data['name']!r}:")
+    click.echo(f"  {len(members)} member node(s) would be ungrouped:")
+    for m in members:
+        click.echo(f"    - {m.get('label') or m.get('name') or _pk(m.get('pubkey'))}")
+    click.echo(f"  {len(settings)} desired setting(s) and "
+               f"{len(operations)} operation(s) would be removed")
+    click.echo("re-run with --yes to delete")
+
+
+@group_group.command("rename")
+@click.argument("old")
+@click.argument("new")
+@click.pass_context
+def group_rename(ctx: click.Context, old: str, new: str) -> None:
+    """Rename group OLD to NEW, moving its members and desired state with it."""
+    data = _check(_rpc(ctx.obj["socket"], {"cmd": "group_rename", "old": old, "new": new}))
+    click.echo(f"group {data['old']!r} renamed to {data['new']!r}")
 
 
 # ---------------------------------------------------------------------------

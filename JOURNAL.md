@@ -4,7 +4,38 @@ This journal records project decisions and lessons learned without preserving pr
 details, node identities, generated private keys, local hostnames, or operator passwords.
 Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and explicit non-goals.
 
-## >>> RESUME HERE (updated 2026-07-03) - update or clear this block when you pick up <<<
+## >>> RESUME HERE (updated 2026-07-06) - update or clear this block when you pick up <<<
+
+**RECOMMENDATIONS-4 (scope-as-noun CLI redesign) — S1 done (2026-07-06).** On branch
+`feat-r4-slice1-groups`. Groups are now first-class (DB + daemon + minimal CLI); no renames of
+existing nouns yet. 1017 tests pass, ruff + mypy clean.
+- **Schema v3:** new `groups(name PK, created_at)` registry, seeded on upgrade from
+  `DISTINCT nodes.node_group` ∪ group-scoped `desired_settings`/`desired_operations` scope_ids so
+  an upgrade never loses a group. `created_at` for seeded rows is `strftime`-stamped
+  (seeded-at-upgrade); code-created groups store a full `datetime.now(UTC)`.
+- **DB layer:** `create_group` (idempotent), `group_exists`, `list_groups` (live member counts),
+  `delete_group` (hard cascade, one txn: ungroup members → drop group desired rows → drop registry
+  row), `rename_group` (one txn: registry + `nodes.node_group` + group-scoped `scope_id`s).
+- **Enforcement change (behaviour):** targeting a group now requires it to be *registered*, not
+  merely to have a member. `set_setting`/`show_scope` at group scope and `set_group` (node→group
+  assignment) reject an unknown group with `unknown group 'X' - create it first with
+  `mch group create X``. Clearing a node's group is always allowed. `unset` stays lenient (no
+  registry check). `_handle_import` registers every group it references (restore-from-backup
+  on-ramp) so imported group state stays targetable. Commission needs no change — a commissioned
+  node (and its group) still lands via the printed `mch config import`.
+- **CLI (new noun, not a rename):** `mch group create NAME`, `mch group delete NAME [--yes]`
+  (preview-by-default hard cascade), `mch group rename OLD NEW`. `group status`/`sync`/`issues`
+  are deferred to S5 as planned.
+- **Why the create-first gate:** the old "group is real once a node is in it" rule meant a typo'd
+  group name silently wrote desired state that never applied. Registry + create-first makes typos a
+  loud error and lets a group exist before its first member.
+
+**S2+ coordination gate (from RECOMMENDATIONS-4):** the facts-as-policy work is already merged to
+`main` (SettingPolicy.FACT + fourth-policy handling present), so the "land first or rebase?"
+question in the plan appears moot — confirm with operator before starting S2, and confirm the
+per-slice branch+PR/merge handling given `gh` is unavailable in the sandbox.
+
+## >>> Earlier resume block (updated 2026-07-03) <<<
 
 **RECOMMENDATIONS-3 (2026-07-05).** All five slices worked; slices 1–3 and 5 complete, slice 4
 partial. Each slice merged `--no-ff` to `main`. 994 tests pass, ruff + mypy clean.
