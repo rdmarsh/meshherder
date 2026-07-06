@@ -34,6 +34,13 @@ existing nouns yet. 1017 tests pass, ruff + mypy clean.
 is already merged to `main`, proceed with no rebase; land each slice `--no-ff` to `main` locally
 (gh unavailable in sandbox; operator pushes/PR-reviews after).
 
+**RECOMMENDATIONS-4 — S6 done (2026-07-06, branch `feat-r4-slice6-global-synonym`).** Hidden
+`global` synonym: `cli._RootGroup.get_command` maps `"global"` → the `fleet` group, so `mch global
+…` ≡ `mch fleet …` for every fleet verb while `global` stays out of `list_commands`/`--help`/README/
+man. Recorded in DESIGN.md (new "CLI vocabulary: the scope-as-noun grid" section, with the grid and
+the decision-1 DB non-change) as a deliberate exception to the no-hidden-commands rule; pinned by
+`test_global_is_a_hidden_synonym_for_fleet`. 1026 tests pass, ruff + mypy clean.
+
 **RECOMMENDATIONS-4 — S5 done (2026-07-06, branch `feat-r4-slice5-status-views`).** The status
 views + grid verbs; the `config` noun is gone. 1025 tests pass, ruff + mypy clean. The grid is now
 complete — fleet/group/node each carry status + set/unset + sync + issues.

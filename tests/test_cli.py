@@ -1036,6 +1036,26 @@ def test_moved_commands_available_under_new_nouns():
         assert runner.invoke(cli, [*path, "--help"]).exit_code != 0
 
 
+def test_global_is_a_hidden_synonym_for_fleet():
+    """`mch global …` ≡ `mch fleet …` (R4 S6 operator-preference synonym), but stays hidden.
+
+    It resolves via the root group's get_command, so every fleet verb aliases for free, while
+    `global` never appears in `mch --help` / `list_commands` — a deliberate, DESIGN.md-recorded
+    exception to the no-hidden-commands rule.
+    """
+    runner = CliRunner()
+    # `global status` resolves to the same command object as `fleet status`.
+    assert runner.invoke(cli, ["global", "status", "--help"]).exit_code == 0
+    fleet_status = _run(["fleet", "status"], _status_resp())
+    global_status = _run(["global", "status"], _status_resp())
+    assert global_status.exit_code == 0
+    assert global_status.output == fleet_status.output
+    # `global set` aliases `fleet set` too (the whole fleet noun, not just status).
+    assert runner.invoke(cli, ["global", "set", "--help"]).exit_code == 0
+    # Hidden: not listed in --help.
+    assert "global" not in runner.invoke(cli, ["--help"]).output
+
+
 def test_fleet_status_with_issues_still_exits_zero():
     """`fleet status` is a viewing command: it stays exit 0 even when issues are present.
 
