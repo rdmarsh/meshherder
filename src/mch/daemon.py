@@ -538,45 +538,18 @@ def _observed_for_key(
     return None, None
 
 
-async def _handle_show_scope(req: dict[str, Any], db: Database) -> dict[str, Any]:
-    """List the desired/policy rows stored *at* a group or global scope (no node resolution).
-
-    The read-side complement to `mch config set --group/--global`: a straight dump of the
-    rows at that scope, so `show` completes the grammar triangle with `set`/`unset`.
-    """
-    scope, scope_id, data, error = await _resolve_setting_scope(req, db)
-    if error or scope is None:
-        return {"ok": False, "error": error or "could not resolve scope"}
-    # Mirror `set`'s typo guard: an unregistered group would silently never apply.
-    if scope is Scope.GROUP and not await db.group_exists(scope_id):
-        return {"ok": False, "error": _unknown_group_error(scope_id)}
-    rows = [
-        {
-            "key": row.key,
-            "desired": row.desired,
-            "policy": row.policy.value if row.policy else None,
-        }
-        for row in sorted(await db.get_desired_settings(scope, scope_id), key=lambda r: r.key)
-    ]
-    data["settings"] = rows
-    return {"ok": True, "data": data}
-
-
 async def _handle_show_setting(
     req: dict[str, Any], db: Database, config: Config
 ) -> dict[str, Any]:
-    """Explain settings for one node (all keys, or one key traced through the scopes).
+    """Trace one node's settings — every resolving key, or one key through the scopes.
 
-    The read-side complement to `mch config set`/`mch config unset`. Resolution is
-    Node > Group > Global. With a ``scope`` of group/global it dumps that scope's stored
-    rows instead (see `_handle_show_scope`). With no ``key`` it lists every resolving key
-    (configured keys plus observed-only leftovers) oriented around resolution. With a
-    ``key`` it traces that one key: the per-scope desired/policy rows that feed
-    `resolve_desired`/`resolve_policy`, plus the value mch has actually observed (settings
-    or node_facts store - a key lives in exactly one). It sends no mesh traffic.
+    Backs `mch node status NODE [KEY]` (the desired-state trace absorbed from `config show`,
+    R4 S5). Resolution is Node > Group > Fleet. With no ``key`` it lists every resolving key
+    (configured keys plus observed-only leftovers) oriented around resolution. With a ``key``
+    it traces that one key: the per-scope desired/policy rows that feed
+    `resolve_desired`/`resolve_policy`, plus the value mch has actually observed (settings or
+    node_facts store - a key lives in exactly one). It sends no mesh traffic.
     """
-    if req.get("scope") in ("group", "global"):
-        return await _handle_show_scope(req, db)
 
     node = await _resolve_node(str(req.get("query") or ""), db)
     if not node:
@@ -1038,6 +1011,16 @@ async def _handle_sync(c: _Dispatch) -> dict[str, Any]:
         except ClientDisconnected as exc:
             log.info("%s", exc)
             return {"ok": False, "error": str(exc)}
+    # group filter — a filtered fleet sync over that group's members (R4 S5.4)
+    group = c.req.get("group")
+    if group:
+        if not await c.db.group_exists(str(group)):
+            return {"ok": False, "error": _unknown_group_error(str(group))}
+        try:
+            return {"ok": True, "data": await c.wq.start_cycle(group=str(group))}
+        except OperationBusyError as exc:
+            return {"ok": False, "error": str(exc)}
+
     # no prefix — full cycle in background
     try:
         return {"ok": True, "data": await c.wq.start_cycle()}
@@ -1403,6 +1386,43 @@ async def _handle_group_delete(c: _Dispatch) -> dict[str, Any]:
     return {"ok": True, "data": data}
 
 
+async def _handle_group_status(c: _Dispatch) -> dict[str, Any]:
+    """Scope-status for the group noun (R4 S5): bare lists all groups with member counts;
+    a NAME returns that group's own desired rows plus a rollup of its member nodes.
+
+    Bare-list makes typo'd/empty groups visible (decision 4). It sends no mesh traffic.
+    """
+    name = str(c.req.get("name") or "").strip()
+    if not name:
+        groups = await c.db.list_groups()
+        return {"ok": True, "data": {
+            "groups": [{"name": g.name, "member_count": g.member_count} for g in groups],
+        }}
+    if not await c.db.group_exists(name):
+        return {"ok": False, "error": (
+            f"unknown group {name!r} - run `mch group status` to list groups, "
+            f"or `mch group create {name}` to create it"
+        )}
+    settings = await c.db.get_desired_settings(Scope.GROUP, name)
+    operations = await c.db.get_desired_operations(Scope.GROUP, name)
+    members = [n for n in await c.db.get_all_nodes() if n.group == name]
+    return {"ok": True, "data": {
+        "name": name,
+        "settings": [
+            {"key": s.key, "desired": s.desired, "policy": s.policy.value if s.policy else None}
+            for s in sorted(settings, key=lambda r: r.key)
+        ],
+        "operations": [
+            {"command": o.command, "every_hours": o.every_hours}
+            for o in sorted(operations, key=lambda o: o.command)
+        ],
+        "members": [
+            {"pubkey": n.pubkey, "label": n.label, "name": n.name, "state": n.state.value}
+            for n in sorted(members, key=lambda n: n.label or n.name or n.pubkey)
+        ],
+    }}
+
+
 async def _handle_group_rename(c: _Dispatch) -> dict[str, Any]:
     """Rename a group and everything scoped to it in one transaction (R4 decision 6)."""
     old = str(c.req.get("old") or "").strip()
@@ -1453,6 +1473,7 @@ _HANDLERS: dict[str, Handler] = {
     "group_create": _handle_group_create,
     "group_delete": _handle_group_delete,
     "group_rename": _handle_group_rename,
+    "group_status": _handle_group_status,
     "logs": _handle_logs,
     "suggest": _handle_suggest,
     "commission": _handle_commission,

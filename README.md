@@ -83,8 +83,8 @@ Think Ansible for your nodes, running continuously in the background.
   reboot, then prints an importable `nodes:` doc (apply with `mch fleet import`) and the
   `secrets.yaml` snippet. No need to stop mchd.
 - **`mch` CLI** — check daemon status, list nodes, force a sync, see gateway contacts not yet managed.
-- **`--json` scripting surface** — every read command (`fleet status/issues/plan/logs`, `node show`,
-  `config show`) emits the normalized report model as JSON over the Unix socket, for cron and scripts.
+- **`--json` scripting surface** — every read command (`fleet status/issues/plan/logs`,
+  `node status`) emits the normalized report model as JSON over the Unix socket, for cron and scripts.
 
 ## Requirements
 
@@ -338,9 +338,9 @@ mch fleet set default_policy audit          # fleet-wide default (groups and nod
 mch fleet set ver --policy fact             # collect a read-only fact (no value); policy: enforce/audit/fact/skip
 mch node set <prefix> name_prefix "🌞 "      # directives: name_prefix, default_policy, via_radio
 mch node unset <prefix> txdelay             # remove a DB-set value (observed state untouched)
-mch config show <prefix>                    # list every key resolving for the node (policy, desired, from, observed)
-mch config show <prefix> txdelay            # explain one key: per-scope rows, resolved value, observed
-mch config show --global                    # list the rows set at global scope (or --group NAME)
+mch node status <prefix>                    # node detail: facts, desired settings, schedule, activity
+mch node status <prefix> txdelay            # trace one key: per-scope rows, resolved value, observed
+mch group status deployed                   # a group's desired rows + member nodes (bare lists all groups)
 mch fleet import                           # preview seeding the DB from the daemon's config (dry run)
 mch fleet import legacy.yaml --yes         # seed from an explicit file (settings + label/group inventory)
 mch fleet export > backup.yaml             # complete fleet backup (inventory + desired state)
@@ -548,7 +548,7 @@ Configure authorised sender prefixes under `messenger.allowed_prefixes` in `conf
 There is no HTTP API — the read commands emit the normalized report model as JSON with `--json`,
 which is the whole scripting/integration surface. It goes over the same Unix socket as every other
 command, so there's no open port, no loopback caveat, and no authentication to design. Available on
-`fleet status`, `fleet issues`, `fleet plan`, `fleet logs`, `node show`, and `config show`.
+`fleet status`, `fleet issues`, `fleet plan`, `fleet logs`, and `node status`.
 
 ```bash
 # Nodes not seen in the last 24 hours (labels), straight from the CLI:
@@ -606,7 +606,7 @@ mch help concepts                   Desired vs reported, policy, scope, sync, ex
 mch help states                     What each node STATE means (configured, partial, unreachable, …)
 mch fleet status                    Fleet overview: state, label, group, firmware (VER, ! = outdated), neighbours, last seen
 mch fleet status <label|prefix>     Filtered table; a single match hints `mch node status`
-                              (add --json to fleet status/issues/plan/logs, node show, config show for scripting)
+                              (add --json to fleet status/issues/plan/logs, node status for scripting)
 mch node status <label|prefix>        Full detail for one node: facts, all desired settings (config +
                               group, including pending ones not yet synced), last seen/last conn
                               and approximate next sync with timestamp + relative time, activity logs

@@ -15,7 +15,7 @@ from mch.config import (
     resolve_desired_configs,
 )
 from mch.db import Database
-from mch.models import Node, NodeState, SettingPolicy, SettingRecord
+from mch.models import Node, NodeState, Scope, SettingPolicy, SettingRecord
 from mch.queue import all_setting_keys, resolve_policy, resolved_fact_keys
 from mch.settings_compare import compare_setting
 
@@ -76,11 +76,19 @@ async def build_fleet_report(db: Database, config: Config) -> dict[str, Any]:
     fleet_issues = _issues_report(node_reports)
     firmware = _firmware_report(node_reports)
     summary = _summary(node_reports, fleet_issues, firmware)
+    # Fleet-scope desired rows (the widest scope, stored as scope_type 'global'). Surfaced so
+    # `mch fleet status` can show a compact fleet-defaults section — the read complement of
+    # `mch fleet set`, replacing the old `config show --global` (R4 S5.3).
+    fleet_defaults = [
+        {"key": r.key, "desired": r.desired, "policy": r.policy.value if r.policy else None}
+        for r in sorted(await db.get_desired_settings(Scope.GLOBAL, ""), key=lambda r: r.key)
+    ]
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
         "summary": summary,
         "nodes": node_reports,
+        "fleet_defaults": fleet_defaults,
         "issues": fleet_issues,
         "firmware": firmware,
         "plan": plan,

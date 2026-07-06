@@ -19,11 +19,11 @@ shallow:
 .B service
 (process lifecycle and config validation),
 .B fleet
-(whole-fleet status, issues, sync, plan, logs, suggest),
+(whole-fleet status, issues, sync, plan, logs, suggest, export/import),
+.B group
+(the middle scope: create/delete/rename, status, set/unset, sync, issues),
 .B node
-(per-node inventory, lifecycle, and diagnostics),
-.B config
-(desired state plus backup), and
+(per-node inventory, lifecycle, diagnostics, and set/unset), and
 .B gateway
 (operate the locally attached gateway node). Run
 .B "mch \-\-help"
@@ -154,11 +154,16 @@ Show recent activity for one node.
 .B node new
 Interactively add a fresh or replacement MeshCore node.
 .TP
-.B node status \fILABEL_OR_PREFIX\fR
+.B node status \fILABEL_OR_PREFIX\fR [\fIKEY\fR]
 Show full detail for one node: facts, all desired settings, schedule, and recent
-activity. This is the detail view (formerly reached by a single
+activity. With a
+.I KEY
+it instead traces that one key's resolution across node/group/fleet scope
+(absorbed from the former
+.BR "config show" ).
+This is the detail view formerly reached by a single
 .B "fleet status"
-match); add
+match; add
 .B \-\-json
 to emit the node report for scripting.
 .TP
@@ -316,7 +321,7 @@ run
 against the configured gateway serial device, then restart
 .B mchd
 after the admin session.
-.SS config \(em desired state and backup
+.SS desired state and backup
 .TP
 .B node set \fINODE KEY\fR [\fIVALUE\fR] [\-\-policy \fIenforce|audit|fact|skip\fR]
 Record a desired setting on one node in the database, the authoritative source
@@ -340,23 +345,11 @@ The scope-matching verbs
 and
 .B "fleet unset"
 .I KEY
-clear group and fleet defaults.
-.TP
-.B config show \fINODE\fR [\fIKEY\fR]
-Show desired state. With just
-.I NODE
-it lists every key that resolves for the node (policy, desired, which scope it
-came from, and the observed value). With a
-.I KEY
-it traces that one key: how each scope sets it, what resolves, and what is
-observed. Accepts
-.B \-\-group
+clear group and fleet defaults. Read them back with
+.B "group status"
 .I NAME
-and
-.B \-\-global
-to list the rows stored at a group's or the global scope instead (no
-.I NODE
-in that form).
+and the fleet-defaults section of
+.BR "fleet status" .
 .TP
 .B fleet import [\fIFILE\fR] [\-\-yes]
 Seed the database's desired state and node label/group inventory from
