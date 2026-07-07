@@ -6,6 +6,28 @@ Use `BACKLOG.md` for active todo items, wishlist items, deferred ideas, and expl
 
 ## >>> RESUME HERE (updated 2026-07-06) - update or clear this block when you pick up <<<
 
+**RECOMMENDATIONS-4 (scope-as-noun CLI redesign) — S1–S7 DONE, S8 STARTED. Executed 2026-07-06
+(Opus session).** All merged `--no-ff` to `main`, gates green throughout; `main` is at **1028 tests
++ ruff + `mypy src` clean**. **Not pushed** — operator pushes `main` + cuts the 0.23.0 release/tag
+from the host (`gh` unreachable here; see [[gh-api-unavailable-in-sandbox]]). Each slice on its own
+`feat-r4-sliceN-*` branch (kept for reference). The scope-as-noun grid is live end-to-end:
+`fleet`/`group`/`node` share `status` + `set`/`unset` + `sync` + `issues`; plus `service`/`gateway`/
+`help`; the `config` noun is gone; `mch global` is a hidden synonym for `fleet`. CHANGELOG has the
+full migration entry staged as **0.23.0**.
+
+- **S1** groups first-class (schema v3 registry, create/delete-cascade/rename, create-first
+  enforcement). **S2** renames (daemon→service +configtest, node show→status, config export/import→
+  fleet, node group→move with `-`/`''` ungroup). **S3** auto-validate on start/reload (coverage).
+  **S4** scope-noun set/unset (config set/unset + --group/--global deleted; fleet set re-teach line).
+  **S5** node status [KEY], group status, fleet-defaults section, group sync/issues, node sync/issues;
+  config noun deleted. **S6** hidden `global`≡`fleet`. **S7** docs/artifact sweep (README grid,
+  vocabulary across all docs, DESIGN vendored-catalogues, CHANGELOG).
+- **S8 (cli.py package split) — partial:** `mch.cli` is now a package + `help_topics.py` extracted
+  (`mch --help` byte-identical). Remaining render/wizard/service/gateway/group/node/fleet modules and
+  the `mch.cli._rpc`-patch constraint are detailed in the S8 entry below.
+
+Per-slice detail follows (newest first below the S1 entry).
+
 **RECOMMENDATIONS-4 (scope-as-noun CLI redesign) — S1 done (2026-07-06).** On branch
 `feat-r4-slice1-groups`. Groups are now first-class (DB + daemon + minimal CLI); no renames of
 existing nouns yet. 1017 tests pass, ruff + mypy clean.
