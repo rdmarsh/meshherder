@@ -34,6 +34,28 @@ existing nouns yet. 1017 tests pass, ruff + mypy clean.
 is already merged to `main`, proceed with no rebase; land each slice `--no-ff` to `main` locally
 (gh unavailable in sandbox; operator pushes/PR-reviews after).
 
+**RECOMMENDATIONS-4 — S8 STARTED, not finished (2026-07-06, branch `feat-r4-slice8-cli-split`).**
+The `cli.py` (~3.85k lines) → `src/mch/cli/` package split. Done so far (each a green commit,
+`mch --help` byte-identical to baseline, 1028 tests + ruff + mypy clean):
+1. `cli.py` → `cli/__init__.py` (pure move — `mch.cli` is now a package).
+2. Extracted `help_topics.py` (the `mch help selectors/concepts/states` strings + commands),
+   imported at the bottom of `__init__` for decorator registration.
+- Also merged separately: `node move NODE ''` ungroups (same as `-`), documented + pinned.
+**Remaining:** extract `render.py` (pure format/`_render_*` helpers), `wizard.py`, `service.py`,
+`gateway.py`, `group.py`, `node.py`, `fleet.py`.
+**KEY CONSTRAINT for the remaining extraction (this is the whole difficulty):** the test suite
+patches names on the `mch.cli` module object — `mch.cli._rpc` (**83 tests**), `mch.cli.subprocess`
+(9, service), `mch.cli._profile_radio_options` (11, wizard), `mch.cli.DEFAULT_CONFIG` (4),
+`mch.cli._ago` (2), `mch.cli.load_config`/`generate_private_key`/`os`/`pwd`/`grp` (≤2 each). A
+command moved into a submodule that calls a bare `_rpc(...)` will NOT see `patch("mch.cli._rpc")`.
+Two clean options per patched name: (a) keep it in `__init__` and have submodules call it via the
+package object (`from mch import cli as _c; _c._rpc(...)`) — ~45 `_rpc` call-site rewrites, **zero**
+test edits; or (b) move the name *with all its callers* into one submodule and retarget that name's
+few patches (good for `subprocess`→service, `_profile_radio_options`→wizard, `_ago`→render: small,
+localised test edits). Recommend (a) for `_rpc`/`DEFAULT_CONFIG` (callers everywhere) and (b) for
+the module-local ones. Import submodules at the END of `__init__` (after the group objects +
+helpers are defined) so decorators resolve. Verify each step with the `help_before.txt` diff.
+
 **RECOMMENDATIONS-4 — S7 done (2026-07-06, branch `feat-r4-slice7-docs-sweep`).** Shipped-artifact
 and docs sweep. 1027 tests pass, ruff + mypy clean.
 - README gains the scope × verb grid (the model, in a table). Command tokens + prose swept to the
