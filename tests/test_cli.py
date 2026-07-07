@@ -2349,6 +2349,19 @@ def test_node_move_dash_ungroups():
     assert "ungrouped" in result.output
 
 
+def test_node_move_empty_string_ungroups():
+    # An explicit empty GROUP ('') ungroups, same as the `-` sentinel; only *omitting* it errors.
+    resp = {"ok": True, "data": {
+        "pubkey": "aabbccdd" * 8, "label": "site-a", "name": "Tower", "group": None,
+    }}
+    rpc = MagicMock(return_value=resp)
+    with patch("mch.cli._rpc", rpc):
+        result = CliRunner().invoke(cli, ["--socket", "/fake.sock", "node", "move", "site-a", ""])
+    assert result.exit_code == 0
+    assert rpc.call_args.args[1]["value"] == ""
+    assert "ungrouped" in result.output
+
+
 def test_node_move_requires_group_argument():
     # Omitting GROUP is now a usage error — no silent-ungroup footgun.
     result = _run(["node", "move", "site-a"], {"ok": True, "data": {}})
