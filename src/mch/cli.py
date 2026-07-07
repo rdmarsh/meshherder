@@ -2336,16 +2336,17 @@ def node_status(ctx: click.Context, node: str, key: str | None, as_json: bool) -
 @click.argument("group")
 @click.pass_context
 def node_move(ctx: click.Context, node: str, group: str) -> None:
-    """Move NODE into GROUP, or ungroup it with `-`.
+    """Move NODE into GROUP, or ungroup it with `-` (or an empty string).
 
-    GROUP must be an existing group (create it first with `mch group create`). Pass `-` as the
-    GROUP to ungroup the node, after which it inherits the fleet-wide defaults directly. A node
-    belongs to at most one group, so this is a move, not add. GROUP is required — there is no
-    silent-ungroup from omitting it. This only changes membership; run `mch fleet sync NODE` to
-    apply the new group's settings.
+    GROUP must be an existing group (create it first with `mch group create`). Pass `-` — or an
+    empty string `''` — as the GROUP to ungroup the node, after which it inherits the fleet-wide
+    defaults directly. A node belongs to at most one group, so this is a move, not add. GROUP is
+    still required as an argument — there is no silent-ungroup from *omitting* it. This only
+    changes membership; run `mch fleet sync NODE` to apply the new group's settings.
     """
     # `-` is the ungroup sentinel (matches the commission wizard's "- for none"); it maps to an
-    # empty value, which the daemon treats as clearing membership.
+    # empty value, which the daemon treats as clearing membership. An explicitly-empty GROUP ('')
+    # already maps to the same empty value, so it ungroups too.
     value = "" if group == "-" else group
     data = _check(_rpc(
         ctx.obj["socket"], {"cmd": "set_group", "query": node, "value": value}
